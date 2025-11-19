@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QGridLayout, QLabel, QLineEdit, QPushButton, QCheckBox, QTextEdit,
                              QScrollArea, QTabWidget, QFileDialog, QMessageBox, QDialog,
-                             QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar)
+                             QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar, QGroupBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QTextCursor
 # Ensure matplotlib is imported (for PyInstaller)
@@ -807,8 +807,9 @@ class SurveyPlanApp(QMainWindow):
                                    "GeoTIFF and Shapefile export features will be disabled. "
                                    "Install with: pip install rasterio pyproj fiona shapely")
             self.load_geotiff_btn.setEnabled(False)
-            # Restored: Enable/disable for elevation_slope_btn
-            self.elevation_slope_btn.setEnabled(False)
+            # Restored: Enable/disable for elevation_slope_combo
+            if hasattr(self, 'elevation_slope_combo'):
+                self.elevation_slope_combo.setEnabled(False)
             self.pick_center_btn.setEnabled(False)
             self.zoom_to_geotiff_btn.setEnabled(False)  # Disable new button
 
@@ -1627,8 +1628,9 @@ class SurveyPlanApp(QMainWindow):
                                    "GeoTIFF and Shapefile export features will be disabled. "
                                    "Install with: pip install rasterio pyproj fiona shapely")
             self.load_geotiff_btn.setEnabled(False)
-            # Restored: Enable/disable for elevation_slope_btn
-            self.elevation_slope_btn.setEnabled(False)
+            # Restored: Enable/disable for elevation_slope_combo
+            if hasattr(self, 'elevation_slope_combo'):
+                self.elevation_slope_combo.setEnabled(False)
             self.pick_center_btn.setEnabled(False)
             self.zoom_to_geotiff_btn.setEnabled(False)  # Disable new button
 
@@ -2324,10 +2326,6 @@ class SurveyPlanApp(QMainWindow):
                     try:
                         if hasattr(self, 'contour_interval_entry') and self.contour_interval_entry:
                             contour_interval = float(self.contour_interval_entry.text())
-                        elif hasattr(self, 'contour_interval_entry_ref') and self.contour_interval_entry_ref:
-                            contour_interval = float(self.contour_interval_entry_ref.text())
-                        elif hasattr(self, 'contour_interval_entry_line') and self.contour_interval_entry_line:
-                            contour_interval = float(self.contour_interval_entry_line.text())
                         if contour_interval <= 0:
                             contour_interval = 200.0  # Default to 200 meters if invalid
                     except (ValueError, AttributeError):
@@ -2642,8 +2640,9 @@ class SurveyPlanApp(QMainWindow):
 
             # Restored: geotiff_display_mode reset
             self.geotiff_display_mode = "elevation"
-            if hasattr(self, 'elevation_slope_btn'):  # Only update if button exists
-                self.elevation_slope_btn.setText("Elevation Overlay / Slope Overlay")
+            # Update combo box if it exists
+            if hasattr(self, 'elevation_slope_combo'):
+                self._update_display_mode_combo()
 
             self.hillshade_vs_slope_viz_mode = "hillshade"
             # Remove all .config() calls for self.slope_viz_btn
@@ -2889,10 +2888,9 @@ class SurveyPlanApp(QMainWindow):
         self.dynamic_resolution_enabled = not self.dynamic_resolution_enabled
         status = "ON" if self.dynamic_resolution_enabled else "OFF"
         
-        # Update all dynamic resolution buttons
-        for btn_name in ['dynamic_resolution_btn', 'cal_dynamic_resolution_btn', 'line_dynamic_resolution_btn']:
-            if hasattr(self, btn_name):
-                getattr(self, btn_name).setText(f"Dynamic Resolution: {status}")
+        # Update dynamic resolution button
+        if hasattr(self, 'dynamic_resolution_btn'):
+            self.dynamic_resolution_btn.setText(f"Dynamic Resolution: {status}")
         
         # Update info text
         if hasattr(self, 'set_cal_info_text'):
@@ -3130,33 +3128,35 @@ class SurveyPlanApp(QMainWindow):
         # Draw crossline profile
         self._draw_crossline_profile()
 
-    # RESTORED: _toggle_geotiff_display_mode method
-    def _toggle_geotiff_display_mode(self):
+    def _on_geotiff_display_mode_changed(self, mode_text):
+        """Handle display mode selection from combo box."""
         if not GEOSPATIAL_LIBS_AVAILABLE:
-            self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot toggle display mode.")
+            self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot change display mode.")
+            # Reset to previous mode
+            if hasattr(self, 'elevation_slope_combo'):
+                self._update_display_mode_combo()
             return
 
         if self.geotiff_data_array is None:
-            self._show_message("warning","No GeoTIFF", "Load a GeoTIFF first to toggle display mode.")
+            self._show_message("warning","No GeoTIFF", "Load a GeoTIFF first to change display mode.")
+            # Reset to previous mode
+            if hasattr(self, 'elevation_slope_combo'):
+                self._update_display_mode_combo()
             return
 
-        # Cycle through four modes: elevation -> slope -> hillshade_only -> slope_viz -> elevation ...
-        if self.geotiff_display_mode == "elevation":
-            self.geotiff_display_mode = "slope"
-            self.hillshade_vs_slope_viz_mode = "hillshade"
-            self.elevation_slope_btn.setText("Shaded Relief / Shaded Slope / Hillshade / Slope (Shaded Slope)")
-        elif self.geotiff_display_mode == "slope":
-            self.geotiff_display_mode = "hillshade_only"
-            self.hillshade_vs_slope_viz_mode = "hillshade"
-            self.elevation_slope_btn.setText("Shaded Relief / Shaded Slope / Hillshade / Slope (Hillshade)")
-        elif self.geotiff_display_mode == "hillshade_only":
-            self.geotiff_display_mode = "slope_viz"
-            self.hillshade_vs_slope_viz_mode = "slope_viz"
-            self.elevation_slope_btn.setText("Shaded Relief / Shaded Slope / Hillshade / Slope (Slope)")
-        else:
+        # Map combo box text to internal display modes
+        if mode_text == "Shaded Relief":
             self.geotiff_display_mode = "elevation"
             self.hillshade_vs_slope_viz_mode = "hillshade"
-            self.elevation_slope_btn.setText("Shaded Relief / Shaded Slope / Hillshade / Slope (Shaded Relief)")
+        elif mode_text == "Shaded Slope":
+            self.geotiff_display_mode = "slope"
+            self.hillshade_vs_slope_viz_mode = "hillshade"
+        elif mode_text == "Hillshade":
+            self.geotiff_display_mode = "hillshade_only"
+            self.hillshade_vs_slope_viz_mode = "hillshade"
+        elif mode_text == "Slope":
+            self.geotiff_display_mode = "slope_viz"
+            self.hillshade_vs_slope_viz_mode = "slope_viz"
 
         # --- Preserve current plot area ---
         xlim = self.ax.get_xlim()
@@ -3168,20 +3168,34 @@ class SurveyPlanApp(QMainWindow):
             self.ax.set_ylim(ylim)
         self.canvas.draw_idle()
 
-        # After updating the display mode and button text, report the current layer in the info/error box
-        if self.geotiff_display_mode == "elevation":
-            shown_layer = "Shaded Relief"
-        elif self.geotiff_display_mode == "slope":
-            shown_layer = "Shaded Slope"
-        elif self.geotiff_display_mode == "hillshade_only":
-            shown_layer = "Hillshade Only"
-        else:
-            shown_layer = "Slope"
-        msg = f"Layer shown: {shown_layer}"
+        # Report the current layer in the info/error box
+        msg = f"Layer shown: {mode_text}"
         if hasattr(self, 'set_cal_info_text') and self.param_notebook.currentIndex() == 0:
             self.set_cal_info_text(msg)
         elif hasattr(self, 'set_ref_info_text') and self.param_notebook.currentIndex() == 1:
             self.set_ref_info_text(msg)
+    
+    def _update_display_mode_combo(self):
+        """Update the combo box to reflect the current display mode."""
+        if not hasattr(self, 'elevation_slope_combo'):
+            return
+        
+        # Map internal display mode to combo box text
+        if self.geotiff_display_mode == "elevation":
+            mode_text = "Shaded Relief"
+        elif self.geotiff_display_mode == "slope":
+            mode_text = "Shaded Slope"
+        elif self.geotiff_display_mode == "hillshade_only":
+            mode_text = "Hillshade"
+        elif self.geotiff_display_mode == "slope_viz":
+            mode_text = "Slope"
+        else:
+            mode_text = "Shaded Relief"  # Default
+        
+        # Block signals to prevent triggering the change handler
+        self.elevation_slope_combo.blockSignals(True)
+        self.elevation_slope_combo.setCurrentText(mode_text)
+        self.elevation_slope_combo.blockSignals(False)
 
     def _on_contour_checkbox_changed(self):
         """Handle checkbox change for showing/hiding contours."""
@@ -3192,7 +3206,9 @@ class SurveyPlanApp(QMainWindow):
 
         if self.geotiff_data_array is None:
             self._show_message("warning","No GeoTIFF", "Load a GeoTIFF first to show contours.")
-            self.show_contours_var.set(False)
+            self.show_contours_var = False
+            if hasattr(self, 'show_contours_checkbox'):
+                self.show_contours_checkbox.setChecked(False)
             return
 
         # Preserve current plot area
@@ -3219,26 +3235,7 @@ class SurveyPlanApp(QMainWindow):
                 # Try to get the value from whichever entry field exists and was changed
                 val = None
                 if hasattr(self, 'contour_interval_entry') and self.contour_interval_entry is not None:
-                    val = self.contour_interval_entry.get()
-                elif hasattr(self, 'contour_interval_entry_ref') and self.contour_interval_entry_ref is not None:
-                    val = self.contour_interval_entry_ref.text()
-                elif hasattr(self, 'contour_interval_entry_line') and self.contour_interval_entry_line is not None:
-                    val = self.contour_interval_entry_line.text()
-                
-                # Sync the value to all other entry fields
-                if val is not None:
-                    if hasattr(self, 'contour_interval_entry') and self.contour_interval_entry is not None:
-                        current_val = self.contour_interval_entry.get()
-                        if current_val != val:
-                            self.contour_interval_entry.setText(str(val))
-                    if hasattr(self, 'contour_interval_entry_ref') and self.contour_interval_entry_ref.winfo_exists():
-                        current_val = self.contour_interval_entry_ref.get()
-                        if current_val != val:
-                            self.contour_interval_entry_ref.setText(str(val))
-                    if hasattr(self, 'contour_interval_entry_line') and self.contour_interval_entry_line.winfo_exists():
-                        current_val = self.contour_interval_entry_line.get()
-                        if current_val != val:
-                            self.contour_interval_entry_line.setText(str(val))
+                    val = self.contour_interval_entry.text()
             except:
                 pass
             finally:
@@ -3281,15 +3278,16 @@ class SurveyPlanApp(QMainWindow):
 
         if self.hillshade_vs_slope_viz_mode == "hillshade":
             self.hillshade_vs_slope_viz_mode = "slope_viz"
-            # Ensure the elevation/slope overlay button text reflects that it's not active in this mode
-            self.elevation_slope_btn.setText("Elevation Overlay / Slope Overlay (Inactive)")
-            self.elevation_slope_btn.setEnabled(False)  # Disable it
+            # Disable combo box in this mode
+            if hasattr(self, 'elevation_slope_combo'):
+                self.elevation_slope_combo.setEnabled(False)
         else:
             self.hillshade_vs_slope_viz_mode = "hillshade"
-            # Re-enable and reset the text of the elevation/slope overlay button
-            self.elevation_slope_btn.config(text="Elevation Overlay / Slope Overlay (Elevation)")
-            self.elevation_slope_btn.setEnabled(True)  # Re-enable it
+            # Re-enable combo box
             self.geotiff_display_mode = "elevation"  # Reset to elevation when going back to hillshade view
+            if hasattr(self, 'elevation_slope_combo'):
+                self.elevation_slope_combo.setEnabled(True)
+                self._update_display_mode_combo()
 
         self._plot_survey_plan()
 
@@ -4228,14 +4226,14 @@ class SurveyPlanApp(QMainWindow):
         if event.inaxes != self.ax:
             return
         
-        # Convert pixel movement to data coordinates using display coordinates
-        # event.x and event.y are in display coordinates (pixels from figure bottom-left)
+        # Convert pixel movement to data coordinates
+        # Match the original Tkinter version exactly
         inv = self.ax.transData.inverted()
         try:
             x0, y0 = inv.transform((self._pan_start[0], self._pan_start[1]))
             x1, y1 = inv.transform((event.x, event.y))
-            dx_data = x0 - x1
-            dy_data = y0 - y1
+            dx_data = x0 - x1  # start - current (matches original)
+            dy_data = y0 - y1  # start - current (matches original)
         except:
             # Fallback: use data coordinates if available
             if event.xdata is not None and event.ydata is not None and hasattr(self, '_pan_start_data'):
@@ -4244,19 +4242,11 @@ class SurveyPlanApp(QMainWindow):
             else:
                 return
         
-        # Get the correct axes position - check if colorbar exists NOW
-        has_colorbar = (hasattr(self, 'elevation_colorbar') and self.elevation_colorbar is not None) or \
-                       (hasattr(self, 'slope_colorbar') and self.slope_colorbar is not None)
-        if has_colorbar and hasattr(self, '_axes_pos_with_colorbar'):
-            # Use the position that was set when colorbar was created
-            ax_pos = list(self._axes_pos_with_colorbar)  # (left, bottom, width, height)
-        else:
-            # No colorbar - use full width to fill available space
-            ax_pos = [0.05, 0.08, 0.93, 0.87]  # [left, bottom, width, height] - left=0.05, width=0.93 (0.98-0.05)
-        
         # Update limits
+        # For x: add dx_data (when dragging right, dx_data is negative, so adding it increases limits, shows right)
+        # For y: add dy_data (when dragging up, dy_data is negative, so adding it increases limits, shows up)
         self.ax.set_xlim(self._orig_xlim[0] + dx_data, self._orig_xlim[1] + dx_data)
-        self.ax.set_ylim(self._orig_ylim[0] - dy_data, self._orig_ylim[1] - dy_data)
+        self.ax.set_ylim(self._orig_ylim[0] + dy_data, self._orig_ylim[1] + dy_data)
         
         # Set aspect ratio with 'datalim' to keep axes position fixed (like original Tkinter version)
         # Don't manually set position - let matplotlib handle it automatically
@@ -7561,6 +7551,54 @@ class SurveyPlanApp(QMainWindow):
         
         param_widget = QWidget()
         param_layout = QVBoxLayout(param_widget)
+        
+        # --- GeoTIFF Control GroupBox (above tabs) ---
+        geotiff_groupbox = QGroupBox("GeoTIFF Control")
+        geotiff_layout = QVBoxLayout(geotiff_groupbox)
+        
+        # Load GeoTIFF and Zoom buttons
+        geotiff_button_frame = QWidget()
+        geotiff_button_layout = QHBoxLayout(geotiff_button_frame)
+        geotiff_button_layout.setContentsMargins(0, 0, 0, 0)
+        self.load_geotiff_btn = QPushButton("Load GeoTIFF")
+        self.load_geotiff_btn.clicked.connect(self._load_geotiff)
+        geotiff_button_layout.addWidget(self.load_geotiff_btn)
+        self.zoom_to_geotiff_btn = QPushButton("Zoom to GeoTIFF")
+        self.zoom_to_geotiff_btn.clicked.connect(self._zoom_to_geotiff)
+        geotiff_button_layout.addWidget(self.zoom_to_geotiff_btn)
+        geotiff_layout.addWidget(geotiff_button_frame)
+        
+        # Display mode dropdown
+        geotiff_layout.addWidget(QLabel("Display Mode:"))
+        self.elevation_slope_combo = QComboBox()
+        self.elevation_slope_combo.addItems(["Shaded Relief", "Shaded Slope", "Hillshade", "Slope"])
+        self.elevation_slope_combo.setCurrentText("Shaded Relief")  # Set default
+        self.elevation_slope_combo.currentTextChanged.connect(self._on_geotiff_display_mode_changed)
+        geotiff_layout.addWidget(self.elevation_slope_combo)
+        
+        # Dynamic Resolution button
+        self.dynamic_resolution_btn = QPushButton("Dynamic Resolution: ON")
+        self.dynamic_resolution_btn.clicked.connect(self._toggle_dynamic_resolution)
+        geotiff_layout.addWidget(self.dynamic_resolution_btn)
+        
+        # Show Contours checkbox and Interval on same row
+        contours_interval_frame = QWidget()
+        contours_interval_layout = QHBoxLayout(contours_interval_frame)
+        contours_interval_layout.setContentsMargins(0, 0, 0, 0)
+        self.show_contours_checkbox = QCheckBox("Contours")
+        self.show_contours_checkbox.setChecked(self.show_contours_var)
+        self.show_contours_checkbox.stateChanged.connect(self._on_contour_checkbox_changed)
+        contours_interval_layout.addWidget(self.show_contours_checkbox)
+        contours_interval_layout.addStretch()  # Add stretch to push interval to the right
+        contours_interval_layout.addWidget(QLabel("Interval (m):"))
+        self.contour_interval_entry = QLineEdit("200")
+        self.contour_interval_entry.textChanged.connect(self._on_contour_interval_changed)
+        self.contour_interval_entry.setMaximumWidth(80)  # Limit width of entry field
+        contours_interval_layout.addWidget(self.contour_interval_entry)
+        geotiff_layout.addWidget(contours_interval_frame)
+        
+        param_layout.addWidget(geotiff_groupbox)
+        
         self.param_notebook = QTabWidget()
         
         self.reference_frame = QWidget()
@@ -7681,41 +7719,7 @@ class SurveyPlanApp(QMainWindow):
         ref_layout.addWidget(slider_frame_dist, row, 1)
         row += 1
         
-        button_frame2 = QWidget()
-        button_layout2 = QVBoxLayout(button_frame2)
-        button_layout2.setContentsMargins(0, 0, 0, 0)
-        button_row2 = QWidget()
-        button_row2_layout = QHBoxLayout(button_row2)
-        button_row2_layout.setContentsMargins(0, 0, 0, 0)
-        self.load_geotiff_btn = QPushButton("Load GeoTIFF")
-        self.load_geotiff_btn.clicked.connect(self._load_geotiff)
-        button_row2_layout.addWidget(self.load_geotiff_btn)
-        self.zoom_to_geotiff_btn = QPushButton("Zoom to GeoTIFF")
-        self.zoom_to_geotiff_btn.clicked.connect(self._zoom_to_geotiff)
-        button_row2_layout.addWidget(self.zoom_to_geotiff_btn)
-        button_layout2.addWidget(button_row2)
-        self.elevation_slope_btn = QPushButton("Shaded Relief / Shaded Slope / Hillshade / Slope")
-        self.elevation_slope_btn.clicked.connect(self._toggle_geotiff_display_mode)
-        button_layout2.addWidget(self.elevation_slope_btn)
-        ref_layout.addWidget(button_frame2, row, 0, 1, 2)
-        row += 1
-        
-        self.dynamic_resolution_btn = QPushButton("Dynamic Resolution: ON")
-        self.dynamic_resolution_btn.clicked.connect(self._toggle_dynamic_resolution)
-        ref_layout.addWidget(self.dynamic_resolution_btn, row, 0, 1, 2)
-        row += 1
-        
-        self.show_contours_checkbox_ref = QCheckBox("Show Contours")
-        self.show_contours_checkbox_ref.setChecked(self.show_contours_var)
-        self.show_contours_checkbox_ref.stateChanged.connect(self._on_contour_checkbox_changed)
-        ref_layout.addWidget(self.show_contours_checkbox_ref, row, 0, 1, 2)
-        row += 1
-        
-        ref_layout.addWidget(QLabel("Contour Interval (m):"), row, 0)
-        self.contour_interval_entry_ref = QLineEdit("200")
-        self.contour_interval_entry_ref.textChanged.connect(self._on_contour_interval_changed)
-        ref_layout.addWidget(self.contour_interval_entry_ref, row, 1)
-        row += 1
+        # GeoTIFF controls moved to groupbox above tabs - removed from here
         
         self.pick_center_btn = QPushButton("Pick Center from GeoTIFF")
         self.pick_center_btn.clicked.connect(self._toggle_pick_center_mode)
@@ -7774,39 +7778,7 @@ class SurveyPlanApp(QMainWindow):
         cal_layout.setColumnStretch(1, 2)
         
         cal_row = 0
-        cal_button_frame = QWidget()
-        cal_button_layout = QHBoxLayout(cal_button_frame)
-        cal_button_layout.setContentsMargins(0, 0, 0, 0)
-        self.cal_load_geotiff_btn = QPushButton("Load GeoTIFF")
-        self.cal_load_geotiff_btn.clicked.connect(self._load_geotiff)
-        cal_button_layout.addWidget(self.cal_load_geotiff_btn)
-        self.zoom_to_geotiff_btn_cal = QPushButton("Zoom to GeoTIFF")
-        self.zoom_to_geotiff_btn_cal.clicked.connect(self._zoom_to_geotiff)
-        cal_button_layout.addWidget(self.zoom_to_geotiff_btn_cal)
-        cal_layout.addWidget(cal_button_frame, cal_row, 0, 1, 2)
-        cal_row += 1
-        
-        self.cal_elevation_slope_btn = QPushButton("Shaded Relief / Shaded Slope / Hillshade / Slope")
-        self.cal_elevation_slope_btn.clicked.connect(self._toggle_geotiff_display_mode)
-        cal_layout.addWidget(self.cal_elevation_slope_btn, cal_row, 0, 1, 2)
-        cal_row += 1
-        
-        self.cal_dynamic_resolution_btn = QPushButton("Dynamic Resolution: ON")
-        self.cal_dynamic_resolution_btn.clicked.connect(self._toggle_dynamic_resolution)
-        cal_layout.addWidget(self.cal_dynamic_resolution_btn, cal_row, 0, 1, 2)
-        cal_row += 1
-        
-        self.show_contours_checkbox = QCheckBox("Show Contours")
-        self.show_contours_checkbox.setChecked(self.show_contours_var)
-        self.show_contours_checkbox.stateChanged.connect(self._on_contour_checkbox_changed)
-        cal_layout.addWidget(self.show_contours_checkbox, cal_row, 0, 1, 2)
-        cal_row += 1
-        
-        cal_layout.addWidget(QLabel("Contour Interval (m):"), cal_row, 0)
-        self.contour_interval_entry = QLineEdit("200")
-        self.contour_interval_entry.textChanged.connect(self._on_contour_interval_changed)
-        cal_layout.addWidget(self.contour_interval_entry, cal_row, 1)
-        cal_row += 1
+        # GeoTIFF controls moved to groupbox above tabs - removed from here
         
         self.pick_pitch_line_btn = QPushButton("Draw a Pitch Line")
         self.pick_pitch_line_btn.clicked.connect(self._toggle_pick_pitch_line_mode)
@@ -7902,32 +7874,7 @@ class SurveyPlanApp(QMainWindow):
         line_layout.setColumnStretch(1, 2)
         
         line_row = 0
-        self.line_load_geotiff_btn = QPushButton("Load GeoTIFF")
-        self.line_load_geotiff_btn.clicked.connect(self._load_geotiff)
-        line_layout.addWidget(self.line_load_geotiff_btn, line_row, 0, 1, 2)
-        line_row += 1
-        
-        self.line_elevation_slope_btn = QPushButton("Shaded Relief / Shaded Slope / Hillshade / Slope")
-        self.line_elevation_slope_btn.clicked.connect(self._toggle_geotiff_display_mode)
-        line_layout.addWidget(self.line_elevation_slope_btn, line_row, 0, 1, 2)
-        line_row += 1
-        
-        self.line_dynamic_resolution_btn = QPushButton("Dynamic Resolution: ON")
-        self.line_dynamic_resolution_btn.clicked.connect(self._toggle_dynamic_resolution)
-        line_layout.addWidget(self.line_dynamic_resolution_btn, line_row, 0, 1, 2)
-        line_row += 1
-        
-        self.show_contours_checkbox_line = QCheckBox("Show Contours")
-        self.show_contours_checkbox_line.setChecked(self.show_contours_var)
-        self.show_contours_checkbox_line.stateChanged.connect(self._on_contour_checkbox_changed)
-        line_layout.addWidget(self.show_contours_checkbox_line, line_row, 0, 1, 2)
-        line_row += 1
-        
-        line_layout.addWidget(QLabel("Contour Interval (m):"), line_row, 0)
-        self.contour_interval_entry_line = QLineEdit("200")
-        self.contour_interval_entry_line.textChanged.connect(self._on_contour_interval_changed)
-        line_layout.addWidget(self.contour_interval_entry_line, line_row, 1)
-        line_row += 1
+        # GeoTIFF controls moved to groupbox above tabs - removed from here
         
         line_layout.addWidget(QLabel("Survey Speed (knots):"), line_row, 0)
         self.line_survey_speed_entry = QLineEdit("8")
