@@ -5326,6 +5326,14 @@ class SurveyPlanApp(tk.Tk):
                 except Exception as e:
                     print(f"Warning: Error populating parameter fields from metadata: {e}")
             
+            # If line offset wasn't set from params, try to calculate it from pitch line
+            if not params or params.get('line_offset') is None:
+                self._update_cal_line_offset_from_pitch_line()
+            
+            # If export name wasn't set from params, generate it from pitch line
+            if not params or not params.get('export_name'):
+                self._update_cal_export_name_from_pitch_line()
+            
             # Update UI and plot
             self._update_pitch_line_button_states()
             self._update_roll_line_button_states()
