@@ -166,6 +166,10 @@ class SurveyPlanApp(tk.Tk):
         self.dragging_line_planning_handle = None
         self.line_planning_edit_line = None
 
+        # Track previous tab for clearing on tab switch
+        self.previous_tab_index = 0
+        self.tab_switch_initialized = False  # Flag to prevent clearing on first tab change
+
         # --- Patch in line planning methods and event handler BEFORE widgets are created ---
         def _toggle_line_planning_mode(self):
             if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
@@ -532,11 +536,17 @@ class SurveyPlanApp(tk.Tk):
                     ("JSON files", "*.json"),
                     ("All files", "*.*")
                 ],
-                initialdir=self.last_used_dir
+                initialdir=self.last_line_import_dir
             )
             
             if not file_path:
                 return
+            
+            # Save the directory for next time
+            import_dir = os.path.dirname(file_path)
+            if import_dir and os.path.isdir(import_dir):
+                self.last_line_import_dir = import_dir
+                self._save_last_line_import_dir()
             
             try:
                 # Clear existing line planning points
@@ -836,10 +846,17 @@ class SurveyPlanApp(tk.Tk):
         self.last_geotiff_dir = os.path.expanduser("~")  # Default to user's home directory
         self.last_survey_params_dir = os.path.expanduser("~")  # Default to user's home directory
         self.last_export_dir = os.path.expanduser("~")  # Default to user's home directory
+        # Separate import directories for each survey type
+        self.last_cal_import_dir = os.path.expanduser("~")
+        self.last_ref_import_dir = os.path.expanduser("~")
+        self.last_line_import_dir = os.path.expanduser("~")
         self._load_last_used_dir()
         self._load_last_geotiff_dir()
         self._load_last_survey_params_dir()
         self._load_last_export_dir()
+        self._load_last_cal_import_dir()
+        self._load_last_ref_import_dir()
+        self._load_last_line_import_dir()
 
         # After self._setup_layout(), connect the motion event for line planning, pitch line, pick center, and geotiff hover
         # Note: These are now handled by the main _on_mouse_motion method
@@ -2263,9 +2280,9 @@ class SurveyPlanApp(tk.Tk):
             else:
                 success_msg = f"GeoTIFF '{filename}' loaded successfully. Dynamic resolution enabled - zoom in for higher detail."
                 
-            if hasattr(self, 'set_cal_info_text') and self.param_notebook.index(self.param_notebook.select()) == 1:
+            if hasattr(self, 'set_cal_info_text') and self.param_notebook.index(self.param_notebook.select()) == 0:
                 self.set_cal_info_text(success_msg)
-            elif hasattr(self, 'set_ref_info_text') and self.param_notebook.index(self.param_notebook.select()) == 0:
+            elif hasattr(self, 'set_ref_info_text') and self.param_notebook.index(self.param_notebook.select()) == 1:
                 self.set_ref_info_text(success_msg)
             
             
@@ -2333,9 +2350,9 @@ class SurveyPlanApp(tk.Tk):
         else:
             shown_layer = "Slope"
         msg = f"Layer shown: {shown_layer}"
-        if hasattr(self, 'set_cal_info_text') and self.param_notebook.index(self.param_notebook.select()) == 1:
+        if hasattr(self, 'set_cal_info_text') and self.param_notebook.index(self.param_notebook.select()) == 0:
             self.set_cal_info_text(msg)
-        elif hasattr(self, 'set_ref_info_text') and self.param_notebook.index(self.param_notebook.select()) == 0:
+        elif hasattr(self, 'set_ref_info_text') and self.param_notebook.index(self.param_notebook.select()) == 1:
             self.set_ref_info_text(msg)
 
     def _on_contour_checkbox_changed(self):
@@ -2467,7 +2484,7 @@ class SurveyPlanApp(tk.Tk):
             self.pick_center_btn.state(['pressed'])
             # Change cursor to cross
             self.canvas_widget.config(cursor="cross")
-            if hasattr(self, 'set_ref_info_text') and self.param_notebook.index(self.param_notebook.select()) == 0:
+            if hasattr(self, 'set_ref_info_text') and self.param_notebook.index(self.param_notebook.select()) == 1:
                 self.set_ref_info_text("Click on the Survey Plan Plot to set Central Lat/Lon, Line Length (Depth * Line Length Multiplier) and Line Spacing (Depth * Separation Multiplier).")
             # Remove info text if present
             if hasattr(self, 'pick_center_info_text') and self.pick_center_info_text is not None:
@@ -4218,11 +4235,17 @@ class SurveyPlanApp(tk.Tk):
                 ("JSON files", "*.json"),
                 ("All files", "*.*")
             ],
-            initialdir=self.last_export_dir
+            initialdir=self.last_ref_import_dir
         )
         
         if not file_path:
             return
+        
+        # Save the directory for next time
+        import_dir = os.path.dirname(file_path)
+        if import_dir and os.path.isdir(import_dir):
+            self.last_ref_import_dir = import_dir
+            self._save_last_ref_import_dir()
         
         try:
             # Clear existing lines
@@ -5155,11 +5178,17 @@ class SurveyPlanApp(tk.Tk):
                 ("JSON files", "*.json"),
                 ("All files", "*.*")
             ],
-            initialdir=self.last_export_dir
+            initialdir=self.last_cal_import_dir
         )
         
         if not file_path:
             return
+        
+        # Save the directory for next time
+        import_dir = os.path.dirname(file_path)
+        if import_dir and os.path.isdir(import_dir):
+            self.last_cal_import_dir = import_dir
+            self._save_last_cal_import_dir()
         
         try:
             # Clear existing lines
@@ -6125,6 +6154,72 @@ class SurveyPlanApp(tk.Tk):
         except Exception:
             pass
 
+    def _load_last_cal_import_dir(self):
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, 'r') as f:
+                    config = json.load(f)
+                if 'last_cal_import_dir' in config and os.path.isdir(config['last_cal_import_dir']):
+                    self.last_cal_import_dir = config['last_cal_import_dir']
+        except Exception:
+            pass
+
+    def _save_last_cal_import_dir(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, 'r') as f:
+                    config = json.load(f)
+            config['last_cal_import_dir'] = self.last_cal_import_dir
+            with open(self.CONFIG_FILENAME, 'w') as f:
+                json.dump(config, f)
+        except Exception:
+            pass
+
+    def _load_last_ref_import_dir(self):
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, 'r') as f:
+                    config = json.load(f)
+                if 'last_ref_import_dir' in config and os.path.isdir(config['last_ref_import_dir']):
+                    self.last_ref_import_dir = config['last_ref_import_dir']
+        except Exception:
+            pass
+
+    def _save_last_ref_import_dir(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, 'r') as f:
+                    config = json.load(f)
+            config['last_ref_import_dir'] = self.last_ref_import_dir
+            with open(self.CONFIG_FILENAME, 'w') as f:
+                json.dump(config, f)
+        except Exception:
+            pass
+
+    def _load_last_line_import_dir(self):
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, 'r') as f:
+                    config = json.load(f)
+                if 'last_line_import_dir' in config and os.path.isdir(config['last_line_import_dir']):
+                    self.last_line_import_dir = config['last_line_import_dir']
+        except Exception:
+            pass
+
+    def _save_last_line_import_dir(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, 'r') as f:
+                    config = json.load(f)
+            config['last_line_import_dir'] = self.last_line_import_dir
+            with open(self.CONFIG_FILENAME, 'w') as f:
+                json.dump(config, f)
+        except Exception:
+            pass
+
     def _clear_calibration_lines(self):
         """Clear all calibration lines (pitch, heading, roll) and update the plot."""
         self.pitch_line_points = []
@@ -6362,7 +6457,7 @@ class SurveyPlanApp(tk.Tk):
 
     def _draw_current_profile(self):
         # Helper to redraw the correct profile based on the current tab
-        if self.param_notebook.index(self.param_notebook.select()) == 0:
+        if self.param_notebook.index(self.param_notebook.select()) == 1:
             self._draw_crossline_profile()
         else:
             self._draw_pitch_line_profile()
@@ -6380,6 +6475,173 @@ class SurveyPlanApp(tk.Tk):
             self.ref_info_text.delete('1.0', f'{num_lines - 200 + 1}.0')
         self.ref_info_text.see(tk.END)
         self.ref_info_text.config(state="disabled")
+
+    def _reset_reference_tab(self):
+        """Reset Reference tab data and entry fields to defaults."""
+        # Clear line data
+        self.survey_lines_data = []
+        self.cross_line_data = []
+        self.central_point_coords = (None, None)
+        
+        # Reset entry fields to defaults
+        if hasattr(self, 'central_lat_entry'):
+            self.central_lat_entry.delete(0, tk.END)
+        if hasattr(self, 'central_lon_entry'):
+            self.central_lon_entry.delete(0, tk.END)
+        if hasattr(self, 'line_length_entry'):
+            self.line_length_entry.delete(0, tk.END)
+        if hasattr(self, 'heading_entry'):
+            self.heading_entry.delete(0, tk.END)
+            self.heading_entry.insert(0, "0")
+        if hasattr(self, 'dist_between_lines_entry'):
+            self.dist_between_lines_entry.delete(0, tk.END)
+        if hasattr(self, 'num_lines_entry'):
+            self.num_lines_entry.delete(0, tk.END)
+            self.num_lines_entry.insert(0, "5")
+        if hasattr(self, 'bisect_lead_entry'):
+            self.bisect_lead_entry.delete(0, tk.END)
+            self.bisect_lead_entry.insert(0, "100")
+        if hasattr(self, 'survey_speed_entry'):
+            self.survey_speed_entry.delete(0, tk.END)
+            self.survey_speed_entry.insert(0, "8")
+        if hasattr(self, 'crossline_passes_entry'):
+            self.crossline_passes_entry.delete(0, tk.END)
+            self.crossline_passes_entry.insert(0, "2")
+        if hasattr(self, 'export_name_entry'):
+            self.export_name_entry.delete(0, tk.END)
+            try:
+                dist = int(float(self.dist_between_lines_entry.get())) if self.dist_between_lines_entry.get() else 0
+                heading = int(float(self.heading_entry.get())) if self.heading_entry.get() else 0
+                export_name = f"Reference_{dist}m_{heading}deg"
+            except Exception:
+                export_name = "Reference_0m_0deg"
+            self.export_name_entry.insert(0, export_name)
+        if hasattr(self, 'offset_direction_var'):
+            self.offset_direction_var.set("North")
+            if hasattr(self, 'offset_direction_combo'):
+                self.offset_direction_combo.current(0)
+        if hasattr(self, 'line_length_multiplier'):
+            self.line_length_multiplier.set(8.0)
+        if hasattr(self, 'dist_between_lines_multiplier'):
+            self.dist_between_lines_multiplier.set(1.0)
+        
+        # Redraw plot (without clearing GeoTIFF)
+        self._plot_survey_plan(preserve_view_limits=True)
+    
+    def _reset_calibration_tab(self):
+        """Reset Calibration tab data and entry fields to defaults."""
+        # Clear line data
+        self.pitch_line_points = []
+        self.heading_lines = []
+        self.roll_line_points = []
+        
+        # Reset mode flags
+        self.pick_pitch_line_mode = False
+        self.edit_pitch_line_mode = False
+        self.pick_roll_line_mode = False
+        self.edit_roll_line_mode = False
+        
+        # Clear visual handles/annotations
+        self.pitch_line_start_handle = None
+        self.pitch_line_end_handle = None
+        self.dragging_pitch_line_handle = None
+        self.pitch_line_temp_line = None
+        self.pitch_line_annotation = None
+        self.pitch_line_tooltip = None
+        self.pitch_line_tooltip_text = None
+        self.pitch_line_edit_line = None
+        self.roll_line_start_handle = None
+        self.roll_line_end_handle = None
+        self.dragging_roll_line_handle = None
+        self.roll_line_edit_line = None
+        
+        # Reset entry fields to defaults
+        if hasattr(self, 'cal_survey_speed_entry'):
+            self.cal_survey_speed_entry.delete(0, tk.END)
+            self.cal_survey_speed_entry.insert(0, "8")
+        if hasattr(self, 'cal_line_offset_entry'):
+            self.cal_line_offset_entry.delete(0, tk.END)
+        if hasattr(self, 'cal_export_name_entry'):
+            self.cal_export_name_entry.delete(0, tk.END)
+        
+        # Update button states
+        self._update_pitch_line_button_states()
+        self._update_roll_line_button_states()
+        
+        # Redraw plot and profiles
+        self._plot_survey_plan(preserve_view_limits=True)
+        if hasattr(self, '_draw_pitch_line_profile'):
+            self._draw_pitch_line_profile()
+        if hasattr(self, '_update_cal_line_times'):
+            self._update_cal_line_times()
+    
+    def _reset_line_planning_tab(self):
+        """Reset Line Planning tab data and entry fields to defaults."""
+        # Clear line data
+        self.line_planning_points = []
+        self.line_planning_mode = False
+        self.edit_line_planning_mode = False
+        
+        # Clear visual elements
+        if hasattr(self, 'line_planning_line') and self.line_planning_line is not None:
+            self.line_planning_line.remove()
+            self.line_planning_line = None
+        if hasattr(self, 'line_planning_temp_line') and self.line_planning_temp_line is not None:
+            self.line_planning_temp_line.remove()
+            self.line_planning_temp_line = None
+        if hasattr(self, 'line_planning_edit_line') and self.line_planning_edit_line is not None:
+            self.line_planning_edit_line.remove()
+            self.line_planning_edit_line = None
+        if hasattr(self, 'line_planning_info_text') and self.line_planning_info_text is not None:
+            self.line_planning_info_text.set_visible(False)
+            self.line_planning_info_text = None
+        
+        # Clear handles
+        self.line_planning_handles = []
+        self.dragging_line_planning_handle = None
+        
+        # Reset entry fields to defaults
+        if hasattr(self, 'line_survey_speed_entry'):
+            self.line_survey_speed_entry.delete(0, tk.END)
+            self.line_survey_speed_entry.insert(0, "8")
+        
+        # Update button states
+        if hasattr(self, 'line_start_draw_btn'):
+            self.line_start_draw_btn.config(text="Start Drawing Line")
+        if hasattr(self, 'line_edit_btn'):
+            self.line_edit_btn.config(state="disabled")
+        if hasattr(self, 'canvas_widget'):
+            self.canvas_widget.config(cursor="")
+        
+        # Update button states
+        self._update_line_planning_button_states()
+        
+        # Redraw plot
+        self._plot_survey_plan(preserve_view_limits=True)
+    
+    def _on_tab_changed(self, event=None):
+        """Handle tab change event - clear previous tab's data and settings."""
+        if not hasattr(self, 'param_notebook'):
+            return
+        
+        try:
+            current_tab = self.param_notebook.index(self.param_notebook.select())
+            
+            # Only clear if this is not the first tab change (i.e., user has actually switched tabs)
+            if self.tab_switch_initialized:
+                # Clear the previous tab's data (not the current one)
+                if self.previous_tab_index == 0:  # Calibration tab
+                    self._reset_calibration_tab()
+                elif self.previous_tab_index == 1:  # Reference tab
+                    self._reset_reference_tab()
+                elif self.previous_tab_index == 2:  # Line Planning tab
+                    self._reset_line_planning_tab()
+            
+            # Mark as initialized and update previous tab index
+            self.tab_switch_initialized = True
+            self.previous_tab_index = current_tab
+        except Exception as e:
+            print(f"Error in tab change handler: {e}")
 
     def _create_widgets(self):
         # --- 1. Tabbed Parameters Section ---
@@ -6406,10 +6668,13 @@ class SurveyPlanApp(tk.Tk):
         self.reference_frame = ttk.Frame(self.param_notebook)
         self.calibration_frame = ttk.Frame(self.param_notebook)
         self.line_planning_frame = ttk.Frame(self.param_notebook)
-        self.param_notebook.add(self.reference_frame, text="Reference")
         self.param_notebook.add(self.calibration_frame, text="Calibration")
+        self.param_notebook.add(self.reference_frame, text="Reference")
         self.param_notebook.add(self.line_planning_frame, text="Line")
         self.param_notebook.pack(fill="both", expand=True)
+        
+        # Bind to tab change event to clear previous tab's data
+        self.param_notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
         
         # Pack the frame into the canvas and configure scroll region
         # Create window in canvas and bind width to canvas width
@@ -6748,9 +7013,9 @@ class SurveyPlanApp(tk.Tk):
         line_export_import_frame.grid(row=line_row, column=0, columnspan=2, sticky="ew", padx=2, pady=5)
         line_export_import_frame.grid_columnconfigure(0, weight=1)
         line_export_import_frame.grid_columnconfigure(1, weight=1)
-        self.line_import_btn = ttk.Button(line_export_import_frame, text="Import Line Plan", command=self._import_drawn_line)
+        self.line_import_btn = ttk.Button(line_export_import_frame, text="Import Survey", command=self._import_drawn_line)
         self.line_import_btn.grid(row=0, column=0, sticky="ew", padx=(0, 5))
-        self.line_export_btn = ttk.Button(line_export_import_frame, text="Export Line Plan", command=self._export_drawn_line)
+        self.line_export_btn = ttk.Button(line_export_import_frame, text="Export Survey", command=self._export_drawn_line)
         self.line_export_btn.grid(row=0, column=1, sticky="ew", padx=(5, 0))
         line_row += 1
         self.line_show_info_btn = ttk.Button(self.line_planning_frame, text="Show Line Information", command=self._show_line_information)
