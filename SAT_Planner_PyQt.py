@@ -810,7 +810,8 @@ class SurveyPlanApp(QMainWindow):
             # Restored: Enable/disable for elevation_slope_combo
             if hasattr(self, 'elevation_slope_combo'):
                 self.elevation_slope_combo.setEnabled(False)
-            self.pick_center_btn.setEnabled(False)
+            if hasattr(self, 'pick_center_btn'):
+                self.pick_center_btn.setEnabled(False)
             if hasattr(self, 'remove_geotiff_btn'):
                 self.remove_geotiff_btn.setEnabled(False)  # Disable Remove GeoTIFF button
 
@@ -1653,7 +1654,8 @@ class SurveyPlanApp(QMainWindow):
             # Restored: Enable/disable for elevation_slope_combo
             if hasattr(self, 'elevation_slope_combo'):
                 self.elevation_slope_combo.setEnabled(False)
-            self.pick_center_btn.setEnabled(False)
+            if hasattr(self, 'pick_center_btn'):
+                self.pick_center_btn.setEnabled(False)
             if hasattr(self, 'remove_geotiff_btn'):
                 self.remove_geotiff_btn.setEnabled(False)  # Disable Remove GeoTIFF button
 
@@ -2712,9 +2714,11 @@ class SurveyPlanApp(QMainWindow):
             self.geotiff_to_wgs84_transformer = None
             self.wgs84_to_geotiff_transformer = None
             
-            # Disable Remove GeoTIFF button
+            # Disable Remove GeoTIFF button and Pick Center button
             if hasattr(self, 'remove_geotiff_btn'):
                 self.remove_geotiff_btn.setEnabled(False)
+            if hasattr(self, 'pick_center_btn'):
+                self.pick_center_btn.setEnabled(False)
 
         # Reset plot elements
         if self.ax:
@@ -3162,9 +3166,11 @@ class SurveyPlanApp(QMainWindow):
             # Close progress window
             progress_window.close()
 
-            # Enable Remove GeoTIFF button
+            # Enable Remove GeoTIFF button and Pick Center button
             if hasattr(self, 'remove_geotiff_btn'):
                 self.remove_geotiff_btn.setEnabled(True)
+            if hasattr(self, 'pick_center_btn'):
+                self.pick_center_btn.setEnabled(True)
 
             # Show success message
             filename = os.path.basename(file_path)
@@ -3705,10 +3711,8 @@ class SurveyPlanApp(QMainWindow):
                 info_msg = f"Lat: {clicked_lat:.6f}, Lon: {clicked_lon:.6f}, Slope: {slope:.1f}°, Depth: {abs(elevation):.1f}m"
                 print(f"INFO: {info_msg}")
 
-        self.central_lat_entry.clear()
-        self.central_lat_entry.insert(0, f"{clicked_lat:.6f}")
-        self.central_lon_entry.clear()
-        self.central_lon_entry.insert(0, f"{clicked_lon:.6f}")
+        self.central_lat_entry.setText(f"{clicked_lat:.6f}")
+        self.central_lon_entry.setText(f"{clicked_lon:.6f}")
         print(f"DEBUG: Central Lat/Lon entries updated to: {clicked_lat:.6f}, {clicked_lon:.6f}")
 
         export_name_to_set = None
@@ -3750,14 +3754,12 @@ class SurveyPlanApp(QMainWindow):
                             f"DEBUG: Dist Multiplier: {dist_multiplier}, Calculated Dist Between Lines: {calculated_dist_between_lines:.2f}")
 
                         if calculated_dist_between_lines > 0:  # Ensure distance is positive
-                            self.dist_between_lines_entry.clear()
-                            self.dist_between_lines_entry.insert(0, f"{calculated_dist_between_lines:.2f}")
+                            self.dist_between_lines_entry.setText(f"{calculated_dist_between_lines:.2f}")
                             # Set Crossline Lead-in/out to 0.2 * Distance Between Lines
                             bisect_lead = 0.2 * calculated_dist_between_lines
-                            self.bisect_lead_entry.clear()
-                            self.bisect_lead_entry.insert(0, f"{bisect_lead:.2f}")
+                            self.bisect_lead_entry.setText(f"{bisect_lead:.2f}")
                             # Set Export Name to 'Reference_' + int(distance between lines) + 'm_' + int(heading) + 'deg'
-                            export_name_to_set = f"Reference_{int(calculated_dist_between_lines)}m_{int(float(self.heading_entry.get()))}deg"
+                            export_name_to_set = f"Reference_{int(calculated_dist_between_lines)}m_{int(float(self.heading_entry.text()))}deg"
                         else:
                             self._show_message("warning","Input Warning",
                                                    "Calculated Distance Between Lines is not positive. Not setting Distance automatically.")
@@ -3771,8 +3773,7 @@ class SurveyPlanApp(QMainWindow):
                         print(
                             f"DEBUG: Length Multiplier: {len_multiplier}, Calculated Line Length: {calculated_line_length:.2f}")
                         if calculated_line_length > 0:  # Ensure line length is positive
-                            self.line_length_entry.clear()
-                            self.line_length_entry.insert(0, f"{calculated_line_length:.2f}")
+                            self.line_length_entry.setText(f"{calculated_line_length:.2f}")
                         else:
                             self._show_message("warning","Input Warning",
                                                    "Calculated Line Length is not positive. Not setting Line Length automatically.")
@@ -3798,7 +3799,7 @@ class SurveyPlanApp(QMainWindow):
         # Set export name if calculated
         if export_name_to_set is not None:
             self.export_name_entry.clear()
-            self.export_name_entry.insert(0, export_name_to_set)
+            self.export_name_entry.setText(export_name_to_set)
 
         self._toggle_pick_center_mode()  # Turn off pick mode after click
         self._generate_and_plot(show_success_dialog=False)  # Re-generate plot with new center, suppress dialog
@@ -4222,15 +4223,15 @@ class SurveyPlanApp(QMainWindow):
         try:
             # Create parameters dictionary
             params = {
-                'central_lat': float(self.central_lat_entry.get()),
-                'central_lon': float(self.central_lon_entry.get()),
+                'central_lat': float(self.central_lat_entry.text()),
+                'central_lon': float(self.central_lon_entry.text()),
                 'line_length': float(self.line_length_entry.text()),
-                'heading': float(self.heading_entry.get()),
-                'dist_between_lines': float(self.dist_between_lines_entry.get()),
-                'num_lines': int(self.num_lines_entry.get()),
-                'bisect_lead': float(self.bisect_lead_entry.get()),
-                'survey_speed': float(self.survey_speed_entry.get()),
-                'export_name': self.export_name_entry.get().strip(),
+                'heading': float(self.heading_entry.text()),
+                'dist_between_lines': float(self.dist_between_lines_entry.text()),
+                'num_lines': int(self.num_lines_entry.text()),
+                'bisect_lead': float(self.bisect_lead_entry.text()),
+                'survey_speed': float(self.survey_speed_entry.text()),
+                'export_name': self.export_name_entry.text().strip(),
                 'offset_direction': self.offset_direction_var,
                 'line_length_multiplier': self.line_length_multiplier,
                     'dist_between_lines_multiplier': self.dist_between_lines_multiplier
@@ -4253,10 +4254,10 @@ class SurveyPlanApp(QMainWindow):
 
             # Update all input fields
             self.central_lat_entry.clear()
-            self.central_lat_entry.insert(0, str(params['central_lat']))
+            self.central_lat_entry.setText(str(params['central_lat']))
 
             self.central_lon_entry.clear()
-            self.central_lon_entry.insert(0, str(params['central_lon']))
+            self.central_lon_entry.setText(str(params['central_lon']))
 
             self.line_length_entry.setText(str(params['line_length']))
 
@@ -4271,7 +4272,7 @@ class SurveyPlanApp(QMainWindow):
             self.survey_speed_entry.setText(str(params.get('survey_speed', '')))
 
             self.export_name_entry.clear()
-            self.export_name_entry.insert(0, params['export_name'])
+            self.export_name_entry.setText(params['export_name'])
 
             self.offset_direction_var.set(params['offset_direction'])
 
@@ -4548,7 +4549,7 @@ class SurveyPlanApp(QMainWindow):
         self._profile_elevations = elevations
         self._profile_slopes = slopes
         self.profile_ax.plot(dists, elevations, color='purple', lw=1, label='Elevation')
-        if self.show_slope_profile_var.get():
+        if self.show_slope_profile_var:
             slope_ax = self.profile_ax.twinx()
             slope_ax.plot(dists, slopes, color='blue', lw=1, linestyle='--', label='Slope (deg)')
             slope_ax.set_ylabel('Slope (deg)', fontsize=8)
@@ -4901,7 +4902,7 @@ class SurveyPlanApp(QMainWindow):
                     depth2 = self._get_depth_at_point(lat2, lon2) if self.geotiff_data_array is not None else 0.0
                     # Get speed from survey speed entry
                     try:
-                        speed = float(self.survey_speed_entry.get()) if self.survey_speed_entry.get() else 8.0
+                        speed = float(self.survey_speed_entry.text()) if self.survey_speed_entry.text() else 8.0
                     except:
                         speed = 8.0
                     f.write(f"LINE{line_num:03d}_001,{lat1:.6f},{lon1:.6f},{abs(depth1):.1f},{speed:.1f},50.0,{line_num},1\n")
@@ -4913,7 +4914,7 @@ class SurveyPlanApp(QMainWindow):
                     depth1 = self._get_depth_at_point(lat1, lon1) if self.geotiff_data_array is not None else 0.0
                     depth2 = self._get_depth_at_point(lat2, lon2) if self.geotiff_data_array is not None else 0.0
                     try:
-                        speed = float(self.survey_speed_entry.get()) if self.survey_speed_entry.get() else 8.0
+                        speed = float(self.survey_speed_entry.text()) if self.survey_speed_entry.text() else 8.0
                     except:
                         speed = 8.0
                     f.write(f"CROSS_001,{lat1:.6f},{lon1:.6f},{abs(depth1):.1f},{speed:.1f},50.0,0,2\n")
@@ -4942,7 +4943,7 @@ class SurveyPlanApp(QMainWindow):
                     depth2 = self._get_depth_at_point(lat2, lon2) if self.geotiff_data_array is not None else 0.0
                     # Get speed from survey speed entry
                     try:
-                        speed = float(self.survey_speed_entry.get()) if self.survey_speed_entry.get() else 8.0
+                        speed = float(self.survey_speed_entry.text()) if self.survey_speed_entry.text() else 8.0
                     except:
                         speed = 8.0
                     f.write(f"LINE{line_num:03d}_001, {lat1:.6f}, {lon1:.6f}, {abs(depth1):.1f}, {speed:.1f}, {line_num}, {line_num}\n")
@@ -4955,7 +4956,7 @@ class SurveyPlanApp(QMainWindow):
                     depth1 = self._get_depth_at_point(lat1, lon1) if self.geotiff_data_array is not None else 0.0
                     depth2 = self._get_depth_at_point(lat2, lon2) if self.geotiff_data_array is not None else 0.0
                     try:
-                        speed = float(self.survey_speed_entry.get()) if self.survey_speed_entry.get() else 8.0
+                        speed = float(self.survey_speed_entry.text()) if self.survey_speed_entry.text() else 8.0
                     except:
                         speed = 8.0
                     crossline_num = len(self.survey_lines_data) + 1
@@ -5155,7 +5156,7 @@ class SurveyPlanApp(QMainWindow):
                 # Get current parameter values (even if not all fields are filled, use what we have)
                 params = {}
                 try:
-                    params['central_lat'] = float(self.central_lat_entry.get())
+                    params['central_lat'] = float(self.central_lat_entry.text())
                 except:
                     # Calculate from survey lines if not available
                     if self.survey_lines_data:
@@ -5165,7 +5166,7 @@ class SurveyPlanApp(QMainWindow):
                         params['central_lat'] = None
                 
                 try:
-                    params['central_lon'] = float(self.central_lon_entry.get())
+                    params['central_lon'] = float(self.central_lon_entry.text())
                 except:
                     if self.survey_lines_data:
                         all_lons = [p[1] for line in self.survey_lines_data for p in line]
@@ -5425,11 +5426,11 @@ class SurveyPlanApp(QMainWindow):
                     # Use metadata if available
                     if params.get('central_lat') is not None:
                         self.central_lat_entry.clear()
-                        self.central_lat_entry.insert(0, str(params['central_lat']))
+                        self.central_lat_entry.setText(str(params['central_lat']))
                     
                     if params.get('central_lon') is not None:
                         self.central_lon_entry.clear()
-                        self.central_lon_entry.insert(0, str(params['central_lon']))
+                        self.central_lon_entry.setText(str(params['central_lon']))
                     
                     if params.get('line_length') is not None:
                         self.line_length_entry.setText(str(params['line_length']))
@@ -5454,7 +5455,7 @@ class SurveyPlanApp(QMainWindow):
                     
                     if params.get('export_name'):
                         self.export_name_entry.clear()
-                        self.export_name_entry.insert(0, params['export_name'])
+                        self.export_name_entry.setText(params['export_name'])
                     
                     if params.get('offset_direction'):
                         self.offset_direction_var.set(params['offset_direction'])
@@ -5484,10 +5485,10 @@ class SurveyPlanApp(QMainWindow):
                         central_lon = (min(all_lons) + max(all_lons)) / 2.0
                         
                         self.central_lat_entry.clear()
-                        self.central_lat_entry.insert(0, f"{central_lat:.6f}")
+                        self.central_lat_entry.setText(f"{central_lat:.6f}")
                         
                         self.central_lon_entry.clear()
-                        self.central_lon_entry.insert(0, f"{central_lon:.6f}")
+                        self.central_lon_entry.setText(f"{central_lon:.6f}")
                     
                     # Calculate heading from first line
                     if len(self.survey_lines_data) > 0:
@@ -5500,19 +5501,19 @@ class SurveyPlanApp(QMainWindow):
                             heading = fwd_az % 360
                             
                             self.heading_entry.clear()
-                            self.heading_entry.insert(0, f"{heading:.1f}")
+                            self.heading_entry.setText(f"{heading:.1f}")
                             
                             # Calculate line length
                             line_length = dist
                             self.line_length_entry.clear()
-                            self.line_length_entry.insert(0, f"{line_length:.1f}")
+                            self.line_length_entry.setText(f"{line_length:.1f}")
                         except Exception:
                             pass
                     
                     # Count number of lines
                     if self.survey_lines_data:
                         self.num_lines_entry.clear()
-                        self.num_lines_entry.insert(0, str(len(self.survey_lines_data)))
+                        self.num_lines_entry.setText(str(len(self.survey_lines_data)))
                     
                     # Calculate distance between lines (approximate)
                     if len(self.survey_lines_data) > 1:
@@ -5525,14 +5526,14 @@ class SurveyPlanApp(QMainWindow):
                                        (self.survey_lines_data[1][0][1] + self.survey_lines_data[1][1][1]) / 2)
                             _, _, dist = geod.inv(line1_mid[1], line1_mid[0], line2_mid[1], line2_mid[0])
                             self.dist_between_lines_entry.clear()
-                            self.dist_between_lines_entry.insert(0, f"{dist:.1f}")
+                            self.dist_between_lines_entry.setText(f"{dist:.1f}")
                         except Exception:
                             pass
                     
                     # Update export name if not set
-                    if not self.export_name_entry.get().strip():
+                    if not self.export_name_entry.text().strip():
                         self.export_name_entry.clear()
-                        self.export_name_entry.insert(0, base_name)
+                        self.export_name_entry.setText(base_name)
             except Exception as e:
                 print(f"Warning: Error populating parameter fields: {e}")
             
@@ -5563,11 +5564,11 @@ class SurveyPlanApp(QMainWindow):
 
     def _update_export_name(self):
         try:
-            dist = int(float(self.dist_between_lines_entry.get()))
-            heading = int(float(self.heading_entry.get()))
+            dist = int(float(self.dist_between_lines_entry.text()))
+            heading = int(float(self.heading_entry.text()))
             export_name = f"Reference_{dist}m_{heading}deg"
             self.export_name_entry.clear()
-            self.export_name_entry.insert(0, export_name)
+            self.export_name_entry.setText(export_name)
         except Exception:
             pass
 
@@ -7587,7 +7588,7 @@ class SurveyPlanApp(QMainWindow):
                 export_name = f"Reference_{dist}m_{heading}deg"
             except Exception:
                 export_name = "Reference_0m_0deg"
-            self.export_name_entry.insert(0, export_name)
+            self.export_name_entry.setText(export_name)
         if hasattr(self, 'offset_direction_var'):
             self.offset_direction_var.set("North")
             if hasattr(self, 'offset_direction_combo'):
@@ -7674,7 +7675,7 @@ class SurveyPlanApp(QMainWindow):
         # Reset entry fields to defaults
         if hasattr(self, 'line_survey_speed_entry'):
             self.line_survey_speed_entry.clear()
-            self.line_survey_speed_entry.insert(0, "8")
+            self.line_survey_speed_entry.setText("8")
         
         # Update button states
         if hasattr(self, 'line_start_draw_btn'):
@@ -7720,10 +7721,12 @@ class SurveyPlanApp(QMainWindow):
         # Use QScrollArea for scrolling
         self.param_scroll = QScrollArea()
         self.param_scroll.setWidgetResizable(True)
-        self.param_scroll.setMaximumWidth(400)
+        self.param_scroll.setMaximumWidth(420)
         self.param_scroll.setMinimumWidth(300)  # Minimum width for visibility
+        self.param_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # Disable horizontal scrollbar
         
         param_widget = QWidget()
+        param_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         param_layout = QVBoxLayout(param_widget)
         
         # --- GeoTIFF Control GroupBox (above tabs) ---
@@ -7780,6 +7783,13 @@ class SurveyPlanApp(QMainWindow):
         
         self.param_notebook = QTabWidget()
         
+        # Make the selected tab text bold
+        self.param_notebook.setStyleSheet("""
+            QTabBar::tab:selected {
+                font-weight: bold;
+            }
+        """)
+        
         self.reference_frame = QWidget()
         self.calibration_frame = QWidget()
         self.line_planning_frame = QWidget()
@@ -7813,75 +7823,65 @@ class SurveyPlanApp(QMainWindow):
         ref_layout.setColumnStretch(1, 2)  # Entries
         
         row = 0
-        ref_layout.addWidget(QLabel("Central Latitude:"), row, 0)
+        
+        # --- Reference Line Parameters GroupBox ---
+        ref_line_params_groupbox = QGroupBox("Reference Line Parameters")
+        ref_line_params_layout = QGridLayout(ref_line_params_groupbox)
+        ref_line_params_layout.setColumnStretch(0, 1)
+        ref_line_params_layout.setColumnStretch(1, 2)
+        
+        ref_line_row = 0
+        self.pick_center_btn = QPushButton("Pick Center from GeoTIFF")
+        self.pick_center_btn.clicked.connect(self._toggle_pick_center_mode)
+        self.pick_center_btn.setEnabled(False)  # Disabled initially (no GeoTIFF loaded)
+        ref_line_params_layout.addWidget(self.pick_center_btn, ref_line_row, 0, 1, 2)
+        ref_line_row += 1
+        
+        ref_line_params_layout.addWidget(QLabel("Central Latitude:"), ref_line_row, 0)
         self.central_lat_entry = QLineEdit()
-        ref_layout.addWidget(self.central_lat_entry, row, 1)
-        row += 1
+        ref_line_params_layout.addWidget(self.central_lat_entry, ref_line_row, 1)
+        ref_line_row += 1
         
-        ref_layout.addWidget(QLabel("Central Longitude:"), row, 0)
+        ref_line_params_layout.addWidget(QLabel("Central Longitude:"), ref_line_row, 0)
         self.central_lon_entry = QLineEdit()
-        ref_layout.addWidget(self.central_lon_entry, row, 1)
-        row += 1
+        ref_line_params_layout.addWidget(self.central_lon_entry, ref_line_row, 1)
+        ref_line_row += 1
         
-        ref_layout.addWidget(QLabel("Line Length (m):"), row, 0)
-        self.line_length_entry = QLineEdit()
-        ref_layout.addWidget(self.line_length_entry, row, 1)
-        row += 1
-        
-        ref_layout.addWidget(QLabel("Heading (deg, 0-360):"), row, 0)
-        self.heading_entry = QLineEdit("0")
-        ref_layout.addWidget(self.heading_entry, row, 1)
-        row += 1
-        
-        ref_layout.addWidget(QLabel("Distance Between Lines (m):"), row, 0)
-        self.dist_between_lines_entry = QLineEdit()
-        ref_layout.addWidget(self.dist_between_lines_entry, row, 1)
-        row += 1
-        
-        ref_layout.addWidget(QLabel("Number of Lines:"), row, 0)
+        ref_line_params_layout.addWidget(QLabel("Number of Lines:"), ref_line_row, 0)
         self.num_lines_entry = QLineEdit("5")
-        ref_layout.addWidget(self.num_lines_entry, row, 1)
-        row += 1
+        ref_line_params_layout.addWidget(self.num_lines_entry, ref_line_row, 1)
+        ref_line_row += 1
         
-        ref_layout.addWidget(QLabel("Crossline Lead-in/out (m):"), row, 0)
-        self.bisect_lead_entry = QLineEdit("100")
-        ref_layout.addWidget(self.bisect_lead_entry, row, 1)
-        row += 1
-        
-        ref_layout.addWidget(QLabel("Survey Speed (knots):"), row, 0)
-        self.survey_speed_entry = QLineEdit("8")
-        ref_layout.addWidget(self.survey_speed_entry, row, 1)
-        row += 1
-        
-        ref_layout.addWidget(QLabel("Number of Crossline Passes:"), row, 0)
-        self.crossline_passes_entry = QLineEdit("2")
-        ref_layout.addWidget(self.crossline_passes_entry, row, 1)
-        row += 1
-        
-        ref_layout.addWidget(QLabel("Export Name:"), row, 0)
-        self.export_name_entry = QLineEdit()
-        try:
-            dist = int(float(self.dist_between_lines_entry.text() or "0"))
-            heading = int(float(self.heading_entry.text() or "0"))
-            export_name = f"Reference_{dist}m_{heading}deg"
-        except Exception:
-            export_name = "Reference_0m_0deg"
-        self.export_name_entry.setText(export_name)
-        ref_layout.addWidget(self.export_name_entry, row, 1)
-        row += 1
-        
-        self.dist_between_lines_entry.textChanged.connect(self._update_export_name)
-        self.heading_entry.textChanged.connect(self._update_export_name)
-        
-        ref_layout.addWidget(QLabel("Offset Direction:"), row, 0)
+        ref_line_params_layout.addWidget(QLabel("Offset Direction:"), ref_line_row, 0)
         self.offset_direction_combo = QComboBox()
         self.offset_direction_combo.addItems(["North", "South"])
         self.offset_direction_combo.setCurrentIndex(0)
         self.offset_direction_var = "North"
         self.offset_direction_combo.currentTextChanged.connect(lambda text: setattr(self, 'offset_direction_var', text))
-        ref_layout.addWidget(self.offset_direction_combo, row, 1)
-        row += 1
-        ref_layout.addWidget(QLabel("Line Length Multiplier:"), row, 0)
+        ref_line_params_layout.addWidget(self.offset_direction_combo, ref_line_row, 1)
+        ref_line_row += 1
+        
+        ref_line_params_layout.addWidget(QLabel("Line Length (m):"), ref_line_row, 0)
+        self.line_length_entry = QLineEdit()
+        ref_line_params_layout.addWidget(self.line_length_entry, ref_line_row, 1)
+        ref_line_row += 1
+        
+        ref_line_params_layout.addWidget(QLabel("Heading (deg, 0-360):"), ref_line_row, 0)
+        self.heading_entry = QLineEdit("0")
+        ref_line_params_layout.addWidget(self.heading_entry, ref_line_row, 1)
+        ref_line_row += 1
+        
+        ref_line_params_layout.addWidget(QLabel("Distance Between Lines (m):"), ref_line_row, 0)
+        self.dist_between_lines_entry = QLineEdit()
+        ref_line_params_layout.addWidget(self.dist_between_lines_entry, ref_line_row, 1)
+        ref_line_row += 1
+        
+        ref_line_params_layout.addWidget(QLabel("Crossline Lead-in/out (m):"), ref_line_row, 0)
+        self.bisect_lead_entry = QLineEdit("100")
+        ref_line_params_layout.addWidget(self.bisect_lead_entry, ref_line_row, 1)
+        ref_line_row += 1
+        
+        ref_line_params_layout.addWidget(QLabel("Line Length Multiplier:"), ref_line_row, 0)
         slider_frame_len = QWidget()
         slider_layout_len = QHBoxLayout(slider_frame_len)
         slider_layout_len.setContentsMargins(0, 0, 0, 0)
@@ -7893,10 +7893,10 @@ class SurveyPlanApp(QMainWindow):
         slider_layout_len.addWidget(self.multiplier_slider_len)
         self.multiplier_label_len = QLabel(f"{self.line_length_multiplier:.1f}")
         slider_layout_len.addWidget(self.multiplier_label_len)
-        ref_layout.addWidget(slider_frame_len, row, 1)
-        row += 1
+        ref_line_params_layout.addWidget(slider_frame_len, ref_line_row, 1)
+        ref_line_row += 1
         
-        ref_layout.addWidget(QLabel("Separation Multiplier:"), row, 0)
+        ref_line_params_layout.addWidget(QLabel("Separation Multiplier:"), ref_line_row, 0)
         slider_frame_dist = QWidget()
         slider_layout_dist = QHBoxLayout(slider_frame_dist)
         slider_layout_dist.setContentsMargins(0, 0, 0, 0)
@@ -7908,49 +7908,100 @@ class SurveyPlanApp(QMainWindow):
         slider_layout_dist.addWidget(self.multiplier_slider_dist)
         self.multiplier_label_dist = QLabel(f"{self.dist_between_lines_multiplier:.1f}")
         slider_layout_dist.addWidget(self.multiplier_label_dist)
-        ref_layout.addWidget(slider_frame_dist, row, 1)
-        row += 1
+        ref_line_params_layout.addWidget(slider_frame_dist, ref_line_row, 1)
+        ref_line_row += 1
         
-        # GeoTIFF controls moved to groupbox above tabs - removed from here
-        
-        self.pick_center_btn = QPushButton("Pick Center from GeoTIFF")
-        self.pick_center_btn.clicked.connect(self._toggle_pick_center_mode)
-        ref_layout.addWidget(self.pick_center_btn, row, 0, 1, 2)
-        row += 1
-        
-        button_frame = QWidget()
-        button_layout = QHBoxLayout(button_frame)
-        button_layout.setContentsMargins(0, 0, 0, 0)
         self.generate_plot_btn = QPushButton("Generate Survey Plan")
         self.generate_plot_btn.clicked.connect(self._generate_and_plot)
-        button_layout.addWidget(self.generate_plot_btn)
+        ref_line_params_layout.addWidget(self.generate_plot_btn, ref_line_row, 0, 1, 2)
+        
+        ref_layout.addWidget(ref_line_params_groupbox, row, 0, 1, 2)
+        row += 1
+        
+        # --- Plot Control GroupBox ---
+        ref_plot_control_groupbox = QGroupBox("Plot Control")
+        ref_plot_control_layout = QVBoxLayout(ref_plot_control_groupbox)
+        
+        self.zoom_to_geotiff_btn_ref = QPushButton("Zoom to GeoTIFF")
+        self.zoom_to_geotiff_btn_ref.clicked.connect(self._zoom_to_geotiff)
+        ref_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_ref)
+        
         self.zoom_to_plan_btn = QPushButton("Zoom to Plan")
         self.zoom_to_plan_btn.clicked.connect(self._zoom_to_plan)
-        button_layout.addWidget(self.zoom_to_plan_btn)
-        ref_layout.addWidget(button_frame, row, 0, 1, 2)
-        row += 1
-        
-        ref_export_import_frame = QWidget()
-        ref_export_import_layout = QHBoxLayout(ref_export_import_frame)
-        ref_export_import_layout.setContentsMargins(0, 0, 0, 0)
-        self.import_survey_btn = QPushButton("Import Survey")
-        self.import_survey_btn.clicked.connect(self._import_survey_files)
-        ref_export_import_layout.addWidget(self.import_survey_btn)
-        self.export_survey_btn = QPushButton("Export Survey")
-        self.export_survey_btn.clicked.connect(self._export_survey_files)
-        ref_export_import_layout.addWidget(self.export_survey_btn)
-        ref_layout.addWidget(ref_export_import_frame, row, 0, 1, 2)
-        row += 1
-        
-        self.ref_show_info_btn = QPushButton("Show Reference Planning Info")
-        self.ref_show_info_btn.clicked.connect(self._show_reference_planning_info)
-        ref_layout.addWidget(self.ref_show_info_btn, row, 0, 1, 2)
-        row += 1
+        ref_plot_control_layout.addWidget(self.zoom_to_plan_btn)
         
         self.clear_plot_btn = QPushButton("Clear Plot")
         self.clear_plot_btn.clicked.connect(self._clear_plot)
-        ref_layout.addWidget(self.clear_plot_btn, row, 0, 1, 2)
+        ref_plot_control_layout.addWidget(self.clear_plot_btn)
+        
+        ref_layout.addWidget(ref_plot_control_groupbox, row, 0, 1, 2)
         row += 1
+        
+        # --- Test Plan Info GroupBox ---
+        ref_test_plan_info_groupbox = QGroupBox("Test Plan Info")
+        ref_test_plan_info_layout = QGridLayout(ref_test_plan_info_groupbox)
+        ref_test_plan_info_layout.setColumnStretch(0, 1)
+        ref_test_plan_info_layout.setColumnStretch(1, 2)
+        
+        ref_test_plan_row = 0
+        ref_test_plan_info_layout.addWidget(QLabel("Survey Speed (knots):"), ref_test_plan_row, 0)
+        self.survey_speed_entry = QLineEdit("8")
+        ref_test_plan_info_layout.addWidget(self.survey_speed_entry, ref_test_plan_row, 1)
+        ref_test_plan_row += 1
+        
+        ref_test_plan_info_layout.addWidget(QLabel("Number of Crossline Passes:"), ref_test_plan_row, 0)
+        self.crossline_passes_entry = QLineEdit("2")
+        ref_test_plan_info_layout.addWidget(self.crossline_passes_entry, ref_test_plan_row, 1)
+        ref_test_plan_row += 1
+        
+        self.ref_show_info_btn = QPushButton("Show Reference Planning Info")
+        self.ref_show_info_btn.clicked.connect(self._show_reference_planning_info)
+        ref_test_plan_info_layout.addWidget(self.ref_show_info_btn, ref_test_plan_row, 0, 1, 2)
+        
+        ref_layout.addWidget(ref_test_plan_info_groupbox, row, 0, 1, 2)
+        row += 1
+        
+        # --- Import/Export GroupBox ---
+        ref_import_export_groupbox = QGroupBox("Import/Export")
+        ref_import_export_layout = QVBoxLayout(ref_import_export_groupbox)
+        
+        # Import/Export buttons on same row
+        ref_import_export_button_frame = QWidget()
+        ref_import_export_button_layout = QHBoxLayout(ref_import_export_button_frame)
+        ref_import_export_button_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.import_survey_btn = QPushButton("Import Survey")
+        self.import_survey_btn.clicked.connect(self._import_survey_files)
+        ref_import_export_button_layout.addWidget(self.import_survey_btn)
+        self.export_survey_btn = QPushButton("Export Survey")
+        self.export_survey_btn.clicked.connect(self._export_survey_files)
+        ref_import_export_button_layout.addWidget(self.export_survey_btn)
+        
+        ref_import_export_layout.addWidget(ref_import_export_button_frame)
+        
+        # Export Name at the bottom
+        ref_export_name_frame = QWidget()
+        ref_export_name_layout = QGridLayout(ref_export_name_frame)
+        ref_export_name_layout.setContentsMargins(0, 0, 0, 0)
+        ref_export_name_layout.setColumnStretch(0, 1)
+        ref_export_name_layout.setColumnStretch(1, 2)
+        ref_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
+        self.export_name_entry = QLineEdit()
+        try:
+            dist = int(float(self.dist_between_lines_entry.text() or "0"))
+            heading = int(float(self.heading_entry.text() or "0"))
+            export_name = f"Reference_{dist}m_{heading}deg"
+        except Exception:
+            export_name = "Reference_0m_0deg"
+        self.export_name_entry.setText(export_name)
+        ref_export_name_layout.addWidget(self.export_name_entry, 0, 1)
+        ref_import_export_layout.addWidget(ref_export_name_frame)
+        
+        ref_layout.addWidget(ref_import_export_groupbox, row, 0, 1, 2)
+        row += 1
+        
+        self.dist_between_lines_entry.textChanged.connect(self._update_export_name)
+        self.heading_entry.textChanged.connect(self._update_export_name)
 
         # --- Calibration Planning Tab ---
         cal_layout = QGridLayout(self.calibration_frame)
@@ -8373,7 +8424,7 @@ class SurveyPlanApp(QMainWindow):
         """Calculate total survey time including travel between lines and crossline."""
         try:
             geod = pyproj.Geod(ellps="WGS84")
-            speed_knots = float(self.survey_speed_entry.get()) if self.survey_speed_entry.get() else 8.0
+            speed_knots = float(self.survey_speed_entry.text()) if self.survey_speed_entry.text() else 8.0
             speed_m_per_h = speed_knots * 1852
             
             # Initialize distance calculations
@@ -8461,7 +8512,7 @@ class SurveyPlanApp(QMainWindow):
                 
                 # Multiply by number of crossline passes
                 try:
-                    num_passes = int(self.crossline_passes_entry.get()) if self.crossline_passes_entry.get() else 2
+                    num_passes = int(self.crossline_passes_entry.text()) if self.crossline_passes_entry.text() else 2
                     crossline_survey_minutes *= num_passes
                 except (ValueError, AttributeError):
                     # If the entry doesn't exist or has invalid value, default to 2 passes
@@ -9074,7 +9125,7 @@ class SurveyPlanApp(QMainWindow):
         
         # Survey parameters
         try:
-            speed_knots = float(self.survey_speed_entry.get()) if self.survey_speed_entry.get() else 8.0
+            speed_knots = float(self.survey_speed_entry.text()) if self.survey_speed_entry.text() else 8.0
             stats_text += f"Survey Speed: {speed_knots} knots\n\n"
         except:
             stats_text += "Survey Speed: 8.0 knots (default)\n\n"
