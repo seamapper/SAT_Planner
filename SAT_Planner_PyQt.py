@@ -3895,7 +3895,7 @@ class SurveyPlanApp(QMainWindow):
             self.canvas.draw_idle()
 
     def _zoom_to_geotiff(self):
-        """Zooms the plot to the consistent extent that maintains window size."""
+        """Zooms the plot to the consistent extent that maintains window size and aspect ratio."""
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot zoom to GeoTIFF.")
             return
@@ -3904,10 +3904,39 @@ class SurveyPlanApp(QMainWindow):
             self._show_message("warning","No GeoTIFF", "No GeoTIFF underlay is loaded to zoom to.")
             return
 
-        # Use the consistent plot limits instead of fitting to GeoTIFF extent
+        # Recalculate consistent plot limits
+        self.current_xlim, self.current_ylim = self._calculate_consistent_plot_limits()
+        
+        # Store these as the user's intended view limits
+        self._last_user_xlim = self.current_xlim
+        self._last_user_ylim = self.current_ylim
+        
+        # Set the axis limits first so _load_geotiff_at_resolution can see them
         self.ax.set_xlim(self.current_xlim)
         self.ax.set_ylim(self.current_ylim)
-        self.canvas.draw_idle()
+        
+        # Update zoom level if dynamic resolution is enabled
+        if self.dynamic_resolution_enabled and hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None:
+            full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
+            full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+            current_width = self.current_xlim[1] - self.current_xlim[0]
+            current_height = self.current_ylim[1] - self.current_ylim[0]
+            
+            width_ratio = current_width / full_width if full_width > 0 else 1.0
+            height_ratio = current_height / full_height if full_height > 0 else 1.0
+            new_zoom_level = min(width_ratio, height_ratio)
+            new_zoom_level = max(0.01, min(10.0, new_zoom_level))
+            self.geotiff_zoom_level = new_zoom_level
+        
+        # Reload GeoTIFF data to cover the new extent
+        if self.geotiff_dataset_original is not None:
+            success = self._load_geotiff_at_resolution()
+            if not success:
+                self._show_message("warning","GeoTIFF Reload", "Could not reload GeoTIFF data for the new view.")
+        
+        # Re-plot with the new limits - this will properly set the aspect ratio and fill the window
+        # preserve_view_limits=False allows the aspect ratio adjustment to fill the window
+        self._plot_survey_plan(preserve_view_limits=False)
 
     def _reset_to_consistent_view(self):
         """Reset the plot view to the consistent limits that maintain window size."""
@@ -4245,13 +4274,18 @@ class SurveyPlanApp(QMainWindow):
         # Update limits
         # For x: add dx_data (when dragging right, dx_data is negative, so adding it increases limits, shows right)
         # For y: add dy_data (when dragging up, dy_data is negative, so adding it increases limits, shows up)
-        self.ax.set_xlim(self._orig_xlim[0] + dx_data, self._orig_xlim[1] + dx_data)
-        self.ax.set_ylim(self._orig_ylim[0] + dy_data, self._orig_ylim[1] + dy_data)
+        new_xlim = (self._orig_xlim[0] + dx_data, self._orig_xlim[1] + dx_data)
+        new_ylim = (self._orig_ylim[0] + dy_data, self._orig_ylim[1] + dy_data)
+        self.ax.set_xlim(new_xlim)
+        self.ax.set_ylim(new_ylim)
+        
+        # Update stored user limits so reload uses correct position
+        self._last_user_xlim = new_xlim
+        self._last_user_ylim = new_ylim
         
         # Set aspect ratio with 'datalim' to keep axes position fixed (like original Tkinter version)
         # Don't manually set position - let matplotlib handle it automatically
         try:
-            new_ylim = self.ax.get_ylim()
             center_lat = (new_ylim[0] + new_ylim[1]) / 2.0
             center_lat_rad = np.radians(center_lat)
             aspect_ratio = 1.0 / np.cos(center_lat_rad)
@@ -4285,13 +4319,28 @@ class SurveyPlanApp(QMainWindow):
                 self._panning_timeout.stop()
                 del self._panning_timeout
             
-            # Update GeoTIFF resolution after panning (only if dynamic resolution is enabled)
-            if (self.geotiff_dataset_original is not None and 
-                self.dynamic_resolution_enabled):
-                # Calculate new zoom level
+            # Always reload GeoTIFF after panning to ensure data is loaded for the new view area
+            # This is especially important when dynamic resolution is enabled, as the loaded data
+            # might only cover the previous view area
+            if self.geotiff_dataset_original is not None:
+                # Get current view limits
                 xlim = self.ax.get_xlim()
                 ylim = self.ax.get_ylim()
+                
+                # Check if current view is outside the loaded GeoTIFF extent
+                # If so, we definitely need to reload
+                needs_reload = False
                 if hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None:
+                    # Check if view extends beyond loaded extent (with small tolerance)
+                    tolerance = 0.01  # degrees
+                    if (xlim[0] < self.geotiff_extent[0] - tolerance or
+                        xlim[1] > self.geotiff_extent[1] + tolerance or
+                        ylim[0] < self.geotiff_extent[2] - tolerance or
+                        ylim[1] > self.geotiff_extent[3] + tolerance):
+                        needs_reload = True
+                
+                # Also reload if dynamic resolution is enabled and zoom level changed
+                if self.dynamic_resolution_enabled and hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None:
                     full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
                     full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
                     current_width = xlim[1] - xlim[0]
@@ -4301,19 +4350,41 @@ class SurveyPlanApp(QMainWindow):
                     height_ratio = current_height / full_height if full_height > 0 else 1.0
                     new_zoom_level = min(width_ratio, height_ratio)
                     
-                    # Only update if zoom level changed significantly
+                    # Update zoom level if it changed significantly
                     if abs(new_zoom_level - self.geotiff_zoom_level) > 0.2:
-                        print(f"DEBUG: Panning triggered resolution update. Old zoom: {self.geotiff_zoom_level:.3f}, New zoom: {new_zoom_level:.3f}")
                         self.geotiff_zoom_level = new_zoom_level
-                        # Use a timer to avoid reloading too frequently
-                        if hasattr(self, '_pan_timer'):
-                            self._pan_timer.stop()
-                        self._pan_timer = QTimer()
-                        self._pan_timer.setSingleShot(True)
-                        self._pan_timer.timeout.connect(self._reload_geotiff_at_current_zoom)
-                        self._pan_timer.start(500)
-                    else:
-                        print(f"DEBUG: Panning did not trigger resolution update. Zoom change: {abs(new_zoom_level - self.geotiff_zoom_level):.3f}")
+                        needs_reload = True
+                
+                # Reload if needed
+                if needs_reload:
+                    # Use a timer to avoid reloading too frequently
+                    if hasattr(self, '_pan_timer'):
+                        self._pan_timer.stop()
+                    self._pan_timer = QTimer()
+                    self._pan_timer.setSingleShot(True)
+                    self._pan_timer.timeout.connect(self._reload_geotiff_at_current_zoom)
+                    self._pan_timer.start(300)  # Short delay to batch rapid panning
+                else:
+                    # Even if zoom level didn't change, we might need to reload if view moved
+                    # outside the currently loaded data extent. Check if we have loaded data array.
+                    if hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None:
+                        # Check if the current view center is significantly outside the loaded extent
+                        view_center_x = (xlim[0] + xlim[1]) / 2
+                        view_center_y = (ylim[0] + ylim[1]) / 2
+                        if hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None:
+                            loaded_center_x = (self.geotiff_extent[0] + self.geotiff_extent[1]) / 2
+                            loaded_center_y = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
+                            # If view center moved significantly (more than 50% of view width/height), reload
+                            view_width = xlim[1] - xlim[0]
+                            view_height = ylim[1] - ylim[0]
+                            if (abs(view_center_x - loaded_center_x) > view_width * 0.5 or
+                                abs(view_center_y - loaded_center_y) > view_height * 0.5):
+                                if hasattr(self, '_pan_timer'):
+                                    self._pan_timer.stop()
+                                self._pan_timer = QTimer()
+                                self._pan_timer.setSingleShot(True)
+                                self._pan_timer.timeout.connect(self._reload_geotiff_at_current_zoom)
+                                self._pan_timer.start(300)
 
     def _on_line_length_or_speed_change(self, *args):
         pass
@@ -8087,17 +8158,65 @@ class SurveyPlanApp(QMainWindow):
         geotiff_width = max_lon - min_lon
         geotiff_height = max_lat - min_lat
         
-        # Determine the maximum dimension to use for scaling
-        max_dimension = max(geotiff_width, geotiff_height)
+        # Calculate geographic aspect ratio at center latitude
+        # Longitude degrees get shorter as you move away from equator
+        center_lat_rad = np.radians(center_lat)
+        geographic_aspect = 1.0 / np.cos(center_lat_rad)
+        geographic_aspect = np.clip(geographic_aspect, 0.1, 10.0)
         
-        # Set a minimum size to ensure the plot window doesn't get too small
+        # Get figure dimensions to calculate figure aspect ratio
+        fig_width, fig_height = self.figure.get_size_inches()
+        plot_width = fig_width * (0.95 - 0.08)  # right - left margins
+        plot_height = fig_height * (0.95 - 0.08)  # top - bottom margins
+        figure_aspect = plot_width / plot_height
+        
+        # Calculate the GeoTIFF's display aspect ratio (accounting for geographic aspect)
+        # When displayed, longitude is stretched by geographic_aspect
+        geotiff_display_width = geotiff_width * geographic_aspect
+        geotiff_display_height = geotiff_height
+        geotiff_display_aspect = geotiff_display_width / geotiff_display_height if geotiff_display_height > 0 else 1.0
+        
+        # Use GeoTIFF dimensions directly with minimal buffer (1% to avoid edge clipping)
+        buffer_factor = 1.01
+        
+        # Calculate limits that will fill the figure while maintaining GeoTIFF aspect ratio
+        # We want the display aspect of our limits to match the figure aspect
+        # Display aspect = (width * geographic_aspect) / height
+        # We want: (width * geographic_aspect) / height = figure_aspect
+        # So: width / height = figure_aspect / geographic_aspect
+        
+        # Start with GeoTIFF dimensions with minimal buffer
+        base_width = geotiff_width * buffer_factor
+        base_height = geotiff_height * buffer_factor
+        
+        # Calculate what the display aspect would be with these dimensions
+        base_display_aspect = (base_width * geographic_aspect) / base_height if base_height > 0 else 1.0
+        
+        # Adjust to match figure aspect while maintaining GeoTIFF's aspect ratio
+        # Only expand in one dimension to fill the figure, keeping the other at the GeoTIFF size
+        if base_display_aspect > figure_aspect:
+            # Display would be wider than figure - expand height to fill, keep width at GeoTIFF size
+            # We want: (width * geographic_aspect) / new_height = figure_aspect
+            # So: new_height = (width * geographic_aspect) / figure_aspect
+            new_height = (base_width * geographic_aspect) / figure_aspect
+            new_width = base_width  # Keep width at GeoTIFF size
+        else:
+            # Display would be taller than figure - expand width to fill, keep height at GeoTIFF size
+            # We want: (new_width * geographic_aspect) / height = figure_aspect
+            # So: new_width = (height * figure_aspect) / geographic_aspect
+            new_width = (base_height * figure_aspect) / geographic_aspect
+            new_height = base_height  # Keep height at GeoTIFF size
+        
+        # Set minimum size
         min_plot_size = 0.1  # degrees
-        plot_size = max(max_dimension * 1.2, min_plot_size)  # 20% buffer around GeoTIFF
+        new_width = max(new_width, min_plot_size)
+        new_height = max(new_height, min_plot_size)
         
         # Calculate new limits centered on the GeoTIFF
-        half_size = plot_size / 2
-        new_xlim = (center_lon - half_size, center_lon + half_size)
-        new_ylim = (center_lat - half_size, center_lat + half_size)
+        half_width = new_width / 2
+        half_height = new_height / 2
+        new_xlim = (center_lon - half_width, center_lon + half_width)
+        new_ylim = (center_lat - half_height, center_lat + half_height)
         
         # Ensure limits don't exceed global bounds
         new_xlim = (max(-180, new_xlim[0]), min(180, new_xlim[1]))
