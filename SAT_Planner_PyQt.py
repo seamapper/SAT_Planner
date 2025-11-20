@@ -67,6 +67,11 @@ class SurveyPlanApp(QMainWindow):
         # Set minimum window size
         self.setMinimumSize(1600, 1150)
         
+        # Auto-regenerate timer: wait 800ms after last parameter change before regenerating
+        self.auto_regenerate_timer = QTimer()
+        self.auto_regenerate_timer.setSingleShot(True)
+        self.auto_regenerate_timer.timeout.connect(self._auto_regenerate_survey_plan)
+        
         # Central widget for main layout
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
@@ -1974,6 +1979,25 @@ class SurveyPlanApp(QMainWindow):
             return False, {}
 
         return True, values
+
+    def _on_parameter_changed(self):
+        """Handle parameter changes by restarting the auto-regenerate timer."""
+        # Stop any existing timer and start a new one
+        self.auto_regenerate_timer.stop()
+        self.auto_regenerate_timer.start(800)  # 800ms debounce delay
+    
+    def _auto_regenerate_survey_plan(self):
+        """Auto-regenerate survey plan when timer expires, if survey plan already exists."""
+        # Only regenerate if a survey plan already exists (has survey lines)
+        if hasattr(self, 'survey_lines_data') and len(self.survey_lines_data) > 0:
+            try:
+                # Validate inputs before regenerating
+                is_valid, values = self._validate_inputs()
+                if is_valid:
+                    self._generate_and_plot(show_success_dialog=False)
+            except Exception as e:
+                # Silently fail - don't show error dialog for auto-regeneration
+                print(f"Auto-regenerate failed: {e}")
 
     def _generate_and_plot(self, show_success_dialog=True):
         # Clear the elevation profile immediately when generating a new plan
@@ -4745,6 +4769,10 @@ class SurveyPlanApp(QMainWindow):
             self.set_cal_info_text("Using Median Depth for Line Offset", append=False)
 
     def _draw_pitch_line_profile(self):
+        # Clear any existing twin axes (slope axes)
+        for ax in self.profile_fig.get_axes():
+            if ax != self.profile_ax:
+                ax.remove()
         self.profile_ax.clear()
         self.profile_ax.set_title("Pitch Line Elevation Profile", fontsize=8)
         self.profile_ax.set_xlabel("Distance (m)", fontsize=8)
@@ -8015,8 +8043,8 @@ class SurveyPlanApp(QMainWindow):
         
         self.activity_log_text = QTextEdit()
         self.activity_log_text.setReadOnly(True)
-        # Set light yellow background
-        self.activity_log_text.setStyleSheet("background-color: #ffffe0;")
+        # Set light yellow background and black text color for visibility
+        self.activity_log_text.setStyleSheet("background-color: #ffffe0; color: black;")
         # Let it expand to fill the groupbox - no height constraint
         activity_log_layout.addWidget(self.activity_log_text, 1)  # Stretch factor 1 to fill available space
         
@@ -8104,7 +8132,7 @@ class SurveyPlanApp(QMainWindow):
         self.multiplier_slider_len.setMinimum(10)  # 1.0 * 10
         self.multiplier_slider_len.setMaximum(100)  # 10.0 * 10
         self.multiplier_slider_len.setValue(int(self.line_length_multiplier * 10))
-        self.multiplier_slider_len.valueChanged.connect(lambda val: [setattr(self, 'line_length_multiplier', val/10.0), self._update_multiplier_label_len(val/10.0)])
+        self.multiplier_slider_len.valueChanged.connect(lambda val: [setattr(self, 'line_length_multiplier', val/10.0), self._update_multiplier_label_len(val/10.0), self._on_parameter_changed()])
         slider_layout_len.addWidget(self.multiplier_slider_len)
         self.multiplier_label_len = QLabel(f"{self.line_length_multiplier:.1f}")
         slider_layout_len.addWidget(self.multiplier_label_len)
@@ -8119,7 +8147,7 @@ class SurveyPlanApp(QMainWindow):
         self.multiplier_slider_dist.setMinimum(0)  # 0.0 * 10
         self.multiplier_slider_dist.setMaximum(20)  # 2.0 * 10
         self.multiplier_slider_dist.setValue(int(self.dist_between_lines_multiplier * 10))
-        self.multiplier_slider_dist.valueChanged.connect(lambda val: [setattr(self, 'dist_between_lines_multiplier', val/10.0), self._update_multiplier_label_dist(val/10.0)])
+        self.multiplier_slider_dist.valueChanged.connect(lambda val: [setattr(self, 'dist_between_lines_multiplier', val/10.0), self._update_multiplier_label_dist(val/10.0), self._on_parameter_changed()])
         slider_layout_dist.addWidget(self.multiplier_slider_dist)
         self.multiplier_label_dist = QLabel(f"{self.dist_between_lines_multiplier:.1f}")
         slider_layout_dist.addWidget(self.multiplier_label_dist)
@@ -8129,6 +8157,16 @@ class SurveyPlanApp(QMainWindow):
         self.generate_plot_btn = QPushButton("Generate Survey Plan")
         self.generate_plot_btn.clicked.connect(self._generate_and_plot)
         ref_line_params_layout.addWidget(self.generate_plot_btn, ref_line_row, 0, 1, 2)
+        
+        # Connect parameter changes to auto-regenerate (after all widgets are created)
+        self.central_lat_entry.textChanged.connect(self._on_parameter_changed)
+        self.central_lon_entry.textChanged.connect(self._on_parameter_changed)
+        self.line_length_entry.textChanged.connect(self._on_parameter_changed)
+        self.heading_entry.textChanged.connect(self._on_parameter_changed)
+        self.dist_between_lines_entry.textChanged.connect(self._on_parameter_changed)
+        self.num_lines_entry.textChanged.connect(self._on_parameter_changed)
+        self.bisect_lead_entry.textChanged.connect(self._on_parameter_changed)
+        self.offset_direction_combo.currentTextChanged.connect(self._on_parameter_changed)
         
         ref_layout.addWidget(ref_line_params_groupbox, row, 0, 1, 2)
         ref_layout.setRowStretch(row, 0)
