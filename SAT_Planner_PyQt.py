@@ -893,20 +893,41 @@ class SurveyPlanApp(QMainWindow):
         return reply == QMessageBox.StandardButton.Ok
 
     def set_cal_info_text(self, message, append=False):
-        """Prepend a message to the Calibration Planning info/error area. Maintains up to 200 lines of history, newest at the top."""
-        # Get current contents
-        current_text = self.cal_info_text.toPlainText().rstrip('\n')
-        # Prepend new message
-        new_text = message + "\n" + current_text if current_text else message + "\n"
-        # Split into lines and limit to 200
-        lines = new_text.splitlines()
-        if len(lines) > 200:
-            lines = lines[:200]
-        self.cal_info_text.setPlainText("\n".join(lines) + "\n")
-        # Move cursor to top
-        cursor = self.cal_info_text.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.Start)
-        self.cal_info_text.setTextCursor(cursor)
+        """Add a message to the Activity Log with [Calibration] prefix. Maintains up to 200 lines of history."""
+        if not hasattr(self, 'activity_log_text'):
+            return
+        prefixed_message = f"[Calibration] {message}"
+        self.activity_log_text.setReadOnly(False)
+        if not append:
+            # Prepend new message (newest at top)
+            current_text = self.activity_log_text.toPlainText().rstrip('\n')
+            new_text = prefixed_message + "\n" + current_text if current_text else prefixed_message + "\n"
+            # Split into lines and limit to 200
+            lines = new_text.splitlines()
+            if len(lines) > 200:
+                lines = lines[:200]
+            self.activity_log_text.setPlainText("\n".join(lines) + "\n")
+            # Move cursor to top
+            cursor = self.activity_log_text.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            self.activity_log_text.setTextCursor(cursor)
+        else:
+            # Append to end
+            self.activity_log_text.append(prefixed_message)
+            # Maintain up to 200 lines
+            num_lines = self.activity_log_text.document().blockCount()
+            if num_lines > 200:
+                cursor = self.activity_log_text.textCursor()
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+                cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, num_lines - 200)
+                cursor.movePosition(QTextCursor.MoveOperation.Start, QTextCursor.MoveMode.KeepAnchor)
+                cursor.removeSelectedText()
+            # Move cursor to end
+            cursor = self.activity_log_text.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self.activity_log_text.setTextCursor(cursor)
+        self.activity_log_text.ensureCursorVisible()
+        self.activity_log_text.setReadOnly(True)
 
         self.survey_lines_data = []  # Stores [(lat1, lon1), (lat2, lon2)] for each line
         self.cross_line_data = []  # Stores [(lat1, lon1), (lat2, lon2)] for the crossline
@@ -1685,20 +1706,41 @@ class SurveyPlanApp(QMainWindow):
         print("Initialization complete, window should be visible")
 
     def set_cal_info_text(self, message, append=False):
-        """Prepend a message to the Calibration Planning info/error area. Maintains up to 200 lines of history, newest at the top."""
-        # Get current contents
-        current_text = self.cal_info_text.toPlainText().rstrip('\n')
-        # Prepend new message
-        new_text = message + "\n" + current_text if current_text else message + "\n"
-        # Split into lines and limit to 200
-        lines = new_text.splitlines()
-        if len(lines) > 200:
-            lines = lines[:200]
-        self.cal_info_text.setPlainText("\n".join(lines) + "\n")
-        # Move cursor to top
-        cursor = self.cal_info_text.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.Start)
-        self.cal_info_text.setTextCursor(cursor)
+        """Add a message to the Activity Log with [Calibration] prefix. Maintains up to 200 lines of history."""
+        if not hasattr(self, 'activity_log_text'):
+            return
+        prefixed_message = f"[Calibration] {message}"
+        self.activity_log_text.setReadOnly(False)
+        if not append:
+            # Prepend new message (newest at top)
+            current_text = self.activity_log_text.toPlainText().rstrip('\n')
+            new_text = prefixed_message + "\n" + current_text if current_text else prefixed_message + "\n"
+            # Split into lines and limit to 200
+            lines = new_text.splitlines()
+            if len(lines) > 200:
+                lines = lines[:200]
+            self.activity_log_text.setPlainText("\n".join(lines) + "\n")
+            # Move cursor to top
+            cursor = self.activity_log_text.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            self.activity_log_text.setTextCursor(cursor)
+        else:
+            # Append to end
+            self.activity_log_text.append(prefixed_message)
+            # Maintain up to 200 lines
+            num_lines = self.activity_log_text.document().blockCount()
+            if num_lines > 200:
+                cursor = self.activity_log_text.textCursor()
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+                cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, num_lines - 200)
+                cursor.movePosition(QTextCursor.MoveOperation.Start, QTextCursor.MoveMode.KeepAnchor)
+                cursor.removeSelectedText()
+            # Move cursor to end
+            cursor = self.activity_log_text.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self.activity_log_text.setTextCursor(cursor)
+        self.activity_log_text.ensureCursorVisible()
+        self.activity_log_text.setReadOnly(True)
 
     def _update_multiplier_label_len(self, val):
         """Updates the label next to the line length multiplier slider."""
@@ -7428,25 +7470,41 @@ class SurveyPlanApp(QMainWindow):
 
 
     def set_ref_info_text(self, message, append=False):
-        """Set or append a message to the Reference Planning info/error area. Maintains up to 200 lines of history."""
-        self.ref_info_text.setReadOnly(False)
+        """Add a message to the Activity Log with [Reference] prefix. Maintains up to 200 lines of history."""
+        if not hasattr(self, 'activity_log_text'):
+            return
+        prefixed_message = f"[Reference] {message}"
+        self.activity_log_text.setReadOnly(False)
         if not append:
-            self.ref_info_text.clear()
-        self.ref_info_text.append(message)
-        # Maintain up to 200 lines
-        num_lines = self.ref_info_text.document().blockCount()
-        if num_lines > 200:
-            cursor = self.ref_info_text.textCursor()
+            # Prepend new message (newest at top)
+            current_text = self.activity_log_text.toPlainText().rstrip('\n')
+            new_text = prefixed_message + "\n" + current_text if current_text else prefixed_message + "\n"
+            # Split into lines and limit to 200
+            lines = new_text.splitlines()
+            if len(lines) > 200:
+                lines = lines[:200]
+            self.activity_log_text.setPlainText("\n".join(lines) + "\n")
+            # Move cursor to top
+            cursor = self.activity_log_text.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.Start)
-            cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, num_lines - 200)
-            cursor.movePosition(QTextCursor.MoveOperation.Start, QTextCursor.MoveMode.KeepAnchor)
-            cursor.removeSelectedText()
-        # Move cursor to end and ensure visible
-        cursor = self.ref_info_text.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        self.ref_info_text.setTextCursor(cursor)
-        self.ref_info_text.ensureCursorVisible()
-        self.ref_info_text.setReadOnly(True)
+            self.activity_log_text.setTextCursor(cursor)
+        else:
+            # Append to end
+            self.activity_log_text.append(prefixed_message)
+            # Maintain up to 200 lines
+            num_lines = self.activity_log_text.document().blockCount()
+            if num_lines > 200:
+                cursor = self.activity_log_text.textCursor()
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+                cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, num_lines - 200)
+                cursor.movePosition(QTextCursor.MoveOperation.Start, QTextCursor.MoveMode.KeepAnchor)
+                cursor.removeSelectedText()
+            # Move cursor to end
+            cursor = self.activity_log_text.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self.activity_log_text.setTextCursor(cursor)
+        self.activity_log_text.ensureCursorVisible()
+        self.activity_log_text.setReadOnly(True)
 
     def _reset_reference_tab(self):
         """Reset Reference tab data and entry fields to defaults."""
@@ -7668,6 +7726,10 @@ class SurveyPlanApp(QMainWindow):
         
         param_layout.addWidget(geotiff_groupbox)
         
+        # --- Test Planning GroupBox (contains tabs) ---
+        test_planning_groupbox = QGroupBox("Test Planning")
+        test_planning_layout = QVBoxLayout(test_planning_groupbox)
+        
         self.param_notebook = QTabWidget()
         
         self.reference_frame = QWidget()
@@ -7677,7 +7739,20 @@ class SurveyPlanApp(QMainWindow):
         self.param_notebook.addTab(self.reference_frame, "Reference")
         self.param_notebook.addTab(self.line_planning_frame, "Line")
         
-        param_layout.addWidget(self.param_notebook)
+        test_planning_layout.addWidget(self.param_notebook)
+        param_layout.addWidget(test_planning_groupbox)
+        
+        # --- Activity Log GroupBox ---
+        activity_log_groupbox = QGroupBox("Activity Log")
+        activity_log_layout = QVBoxLayout(activity_log_groupbox)
+        
+        self.activity_log_text = QTextEdit()
+        self.activity_log_text.setReadOnly(True)
+        self.activity_log_text.setMaximumHeight(200)
+        activity_log_layout.addWidget(self.activity_log_text)
+        
+        param_layout.addWidget(activity_log_groupbox)
+        
         self.param_scroll.setWidget(param_widget)
         
         # Connect tab change signal
@@ -7824,22 +7899,10 @@ class SurveyPlanApp(QMainWindow):
         ref_layout.addWidget(self.ref_show_info_btn, row, 0, 1, 2)
         row += 1
         
-        clear_quit_frame = QWidget()
-        clear_quit_layout = QHBoxLayout(clear_quit_frame)
-        clear_quit_layout.setContentsMargins(0, 0, 0, 0)
         self.clear_plot_btn = QPushButton("Clear Plot")
         self.clear_plot_btn.clicked.connect(self._clear_plot)
-        clear_quit_layout.addWidget(self.clear_plot_btn)
-        self.quit_btn = QPushButton("Quit")
-        self.quit_btn.clicked.connect(self._quit_app)
-        clear_quit_layout.addWidget(self.quit_btn)
-        ref_layout.addWidget(clear_quit_frame, row, 0, 1, 2)
+        ref_layout.addWidget(self.clear_plot_btn, row, 0, 1, 2)
         row += 1
-        
-        self.ref_info_text = QTextEdit()
-        self.ref_info_text.setReadOnly(True)
-        self.ref_info_text.setMaximumHeight(200)
-        ref_layout.addWidget(self.ref_info_text, row, 0, 1, 2)
 
         # --- Calibration Planning Tab ---
         cal_layout = QGridLayout(self.calibration_frame)
@@ -7926,16 +7989,6 @@ class SurveyPlanApp(QMainWindow):
         self.cal_show_stats_btn.clicked.connect(self._show_calibration_statistics)
         cal_layout.addWidget(self.cal_show_stats_btn, cal_row, 0, 1, 2)
         cal_row += 1
-        
-        self.cal_quit_btn = QPushButton("Quit")
-        self.cal_quit_btn.clicked.connect(self._quit_app)
-        cal_layout.addWidget(self.cal_quit_btn, cal_row, 0, 1, 2)
-        cal_row += 1
-        
-        self.cal_info_text = QTextEdit()
-        self.cal_info_text.setReadOnly(True)
-        self.cal_info_text.setMaximumHeight(200)
-        cal_layout.addWidget(self.cal_info_text, cal_row, 0, 1, 2)
 
         # --- Line Planning Tab ---
         line_layout = QGridLayout(self.line_planning_frame)
@@ -7981,16 +8034,6 @@ class SurveyPlanApp(QMainWindow):
         self.line_show_info_btn.clicked.connect(self._show_line_information)
         line_layout.addWidget(self.line_show_info_btn, line_row, 0, 1, 2)
         line_row += 1
-        
-        self.line_quit_btn = QPushButton("Quit")
-        self.line_quit_btn.clicked.connect(self._quit_app)
-        line_layout.addWidget(self.line_quit_btn, line_row, 0, 1, 2)
-        line_row += 1
-        
-        self.line_info_text = QTextEdit()
-        self.line_info_text.setReadOnly(True)
-        self.line_info_text.setMaximumHeight(200)
-        line_layout.addWidget(self.line_info_text, line_row, 0, 1, 2)
 
         # --- 2. Main Plot Area (right side) ---
         self.plot_frame = QWidget()
@@ -8119,25 +8162,41 @@ class SurveyPlanApp(QMainWindow):
         self.profile_canvas.draw_idle()
 
     def set_line_info_text(self, message, append=False):
-        """Set or append a message to the Line Planning info/error area. Maintains up to 200 lines of history."""
-        self.line_info_text.setReadOnly(False)
+        """Add a message to the Activity Log with [Line] prefix. Maintains up to 200 lines of history."""
+        if not hasattr(self, 'activity_log_text'):
+            return
+        prefixed_message = f"[Line] {message}"
+        self.activity_log_text.setReadOnly(False)
         if not append:
-            self.line_info_text.clear()
-        self.line_info_text.append(message)
-        # Maintain up to 200 lines
-        num_lines = self.line_info_text.document().blockCount()
-        if num_lines > 200:
-            cursor = self.line_info_text.textCursor()
+            # Prepend new message (newest at top)
+            current_text = self.activity_log_text.toPlainText().rstrip('\n')
+            new_text = prefixed_message + "\n" + current_text if current_text else prefixed_message + "\n"
+            # Split into lines and limit to 200
+            lines = new_text.splitlines()
+            if len(lines) > 200:
+                lines = lines[:200]
+            self.activity_log_text.setPlainText("\n".join(lines) + "\n")
+            # Move cursor to top
+            cursor = self.activity_log_text.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.Start)
-            cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, num_lines - 200)
-            cursor.movePosition(QTextCursor.MoveOperation.Start, QTextCursor.MoveMode.KeepAnchor)
-            cursor.removeSelectedText()
-        # Move cursor to end and ensure visible
-        cursor = self.line_info_text.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.End)
-        self.line_info_text.setTextCursor(cursor)
-        self.line_info_text.ensureCursorVisible()
-        self.line_info_text.setReadOnly(True)
+            self.activity_log_text.setTextCursor(cursor)
+        else:
+            # Append to end
+            self.activity_log_text.append(prefixed_message)
+            # Maintain up to 200 lines
+            num_lines = self.activity_log_text.document().blockCount()
+            if num_lines > 200:
+                cursor = self.activity_log_text.textCursor()
+                cursor.movePosition(QTextCursor.MoveOperation.Start)
+                cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, num_lines - 200)
+                cursor.movePosition(QTextCursor.MoveOperation.Start, QTextCursor.MoveMode.KeepAnchor)
+                cursor.removeSelectedText()
+            # Move cursor to end
+            cursor = self.activity_log_text.textCursor()
+            cursor.movePosition(QTextCursor.MoveOperation.End)
+            self.activity_log_text.setTextCursor(cursor)
+        self.activity_log_text.ensureCursorVisible()
+        self.activity_log_text.setReadOnly(True)
 
     def _calculate_consistent_plot_limits(self):
         """Calculate plot limits that maintain consistent window size regardless of GeoTIFF dimensions."""
