@@ -811,7 +811,8 @@ class SurveyPlanApp(QMainWindow):
             if hasattr(self, 'elevation_slope_combo'):
                 self.elevation_slope_combo.setEnabled(False)
             self.pick_center_btn.setEnabled(False)
-            self.zoom_to_geotiff_btn.setEnabled(False)  # Disable new button
+            if hasattr(self, 'remove_geotiff_btn'):
+                self.remove_geotiff_btn.setEnabled(False)  # Disable Remove GeoTIFF button
 
         # Bind parameter changes to update the plot
         self._updating_from_code = False  # Flag to prevent recursion
@@ -1653,7 +1654,8 @@ class SurveyPlanApp(QMainWindow):
             if hasattr(self, 'elevation_slope_combo'):
                 self.elevation_slope_combo.setEnabled(False)
             self.pick_center_btn.setEnabled(False)
-            self.zoom_to_geotiff_btn.setEnabled(False)  # Disable new button
+            if hasattr(self, 'remove_geotiff_btn'):
+                self.remove_geotiff_btn.setEnabled(False)  # Disable Remove GeoTIFF button
 
         # Bind parameter changes to update the plot
         self._updating_from_code = False  # Flag to prevent recursion
@@ -1752,18 +1754,18 @@ class SurveyPlanApp(QMainWindow):
 
     def _setup_layout(self):
         try:
-            # Add horizontal layout for params and plot to main vertical layout
-            if hasattr(self, 'param_scroll') and hasattr(self, 'plot_frame'):
-                self.content_layout.addWidget(self.param_scroll)
-                self.content_layout.addWidget(self.plot_frame, 1)  # Stretch factor 1
+            # Create vertical layout for right side (map + profile)
+            right_side_layout = QVBoxLayout()
+            right_side_layout.setContentsMargins(0, 0, 0, 0)
+            
+            # Add map plot to right side layout
+            if hasattr(self, 'plot_frame'):
+                right_side_layout.addWidget(self.plot_frame, 1)  # Stretch factor 1
             else:
-                print(f"ERROR: Missing widgets - param_scroll: {hasattr(self, 'param_scroll')}, plot_frame: {hasattr(self, 'plot_frame')}")
+                print(f"ERROR: Missing widget - plot_frame: {hasattr(self, 'plot_frame')}")
                 return
             
-            # Add content layout to main layout
-            self.main_layout.addLayout(self.content_layout, 1)  # stretch factor 1
-            
-            # Profile plot at bottom
+            # Add profile plot at bottom of right side
             if hasattr(self, 'profile_widget') and hasattr(self, 'slope_profile_checkbox'):
                 profile_layout = QVBoxLayout()
                 profile_layout.setContentsMargins(0, 0, 0, 0)
@@ -1772,9 +1774,24 @@ class SurveyPlanApp(QMainWindow):
                 profile_widget = QWidget()
                 profile_widget.setLayout(profile_layout)
                 profile_widget.setMaximumHeight(250)  # Limit profile height
-                self.main_layout.addWidget(profile_widget)
+                right_side_layout.addWidget(profile_widget)
             else:
                 print(f"WARNING: Missing profile widgets - profile_widget: {hasattr(self, 'profile_widget')}, slope_profile_checkbox: {hasattr(self, 'slope_profile_checkbox')}")
+            
+            # Create widget to hold right side layout
+            right_side_widget = QWidget()
+            right_side_widget.setLayout(right_side_layout)
+            
+            # Add horizontal layout for params (left, full height) and right side (map + profile)
+            if hasattr(self, 'param_scroll'):
+                self.content_layout.addWidget(self.param_scroll)
+                self.content_layout.addWidget(right_side_widget, 1)  # Stretch factor 1
+            else:
+                print(f"ERROR: Missing widget - param_scroll: {hasattr(self, 'param_scroll')}")
+                return
+            
+            # Add content layout to main layout
+            self.main_layout.addLayout(self.content_layout, 1)  # stretch factor 1
             
             # Connect signals for line_length_entry and survey_speed_entry
             if hasattr(self, 'line_length_entry') and hasattr(self, 'survey_speed_entry'):
@@ -2694,6 +2711,10 @@ class SurveyPlanApp(QMainWindow):
             # Reset transformers
             self.geotiff_to_wgs84_transformer = None
             self.wgs84_to_geotiff_transformer = None
+            
+            # Disable Remove GeoTIFF button
+            if hasattr(self, 'remove_geotiff_btn'):
+                self.remove_geotiff_btn.setEnabled(False)
 
         # Reset plot elements
         if self.ax:
@@ -3140,6 +3161,10 @@ class SurveyPlanApp(QMainWindow):
 
             # Close progress window
             progress_window.close()
+
+            # Enable Remove GeoTIFF button
+            if hasattr(self, 'remove_geotiff_btn'):
+                self.remove_geotiff_btn.setEnabled(True)
 
             # Show success message
             filename = os.path.basename(file_path)
@@ -3933,6 +3958,28 @@ class SurveyPlanApp(QMainWindow):
             # If nothing to zoom to, just reset view
             self.ax.autoscale_view()
             self.canvas.draw_idle()
+
+    def _remove_geotiff(self):
+        """Remove the loaded GeoTIFF and clear it from the plot."""
+        if not GEOSPATIAL_LIBS_AVAILABLE:
+            self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded.")
+            return
+
+        if self.geotiff_dataset_original is None:
+            self._show_message("warning","No GeoTIFF", "No GeoTIFF is currently loaded.")
+            return
+
+        # Clear the GeoTIFF using the existing clear plot method with full_clear=True
+        self._clear_plot(full_clear=True)
+        
+        # Re-plot without GeoTIFF
+        self._plot_survey_plan(preserve_view_limits=False)
+        
+        # Show message in activity log
+        if hasattr(self, 'set_cal_info_text'):
+            self.set_cal_info_text("GeoTIFF removed.")
+        elif hasattr(self, 'set_ref_info_text'):
+            self.set_ref_info_text("GeoTIFF removed.")
 
     def _zoom_to_geotiff(self):
         """Zooms the plot to the consistent extent that maintains window size and aspect ratio."""
@@ -7683,16 +7730,17 @@ class SurveyPlanApp(QMainWindow):
         geotiff_groupbox = QGroupBox("GeoTIFF Control")
         geotiff_layout = QVBoxLayout(geotiff_groupbox)
         
-        # Load GeoTIFF and Zoom buttons
+        # Load GeoTIFF and Remove GeoTIFF buttons
         geotiff_button_frame = QWidget()
         geotiff_button_layout = QHBoxLayout(geotiff_button_frame)
         geotiff_button_layout.setContentsMargins(0, 0, 0, 0)
         self.load_geotiff_btn = QPushButton("Load GeoTIFF")
         self.load_geotiff_btn.clicked.connect(self._load_geotiff)
         geotiff_button_layout.addWidget(self.load_geotiff_btn)
-        self.zoom_to_geotiff_btn = QPushButton("Zoom to GeoTIFF")
-        self.zoom_to_geotiff_btn.clicked.connect(self._zoom_to_geotiff)
-        geotiff_button_layout.addWidget(self.zoom_to_geotiff_btn)
+        self.remove_geotiff_btn = QPushButton("Remove GeoTIFF")
+        self.remove_geotiff_btn.clicked.connect(self._remove_geotiff)
+        self.remove_geotiff_btn.setEnabled(False)  # Disabled initially (no GeoTIFF loaded)
+        geotiff_button_layout.addWidget(self.remove_geotiff_btn)
         geotiff_layout.addWidget(geotiff_button_frame)
         
         # Display mode dropdown
@@ -7748,8 +7796,8 @@ class SurveyPlanApp(QMainWindow):
         
         self.activity_log_text = QTextEdit()
         self.activity_log_text.setReadOnly(True)
-        self.activity_log_text.setMaximumHeight(200)
-        activity_log_layout.addWidget(self.activity_log_text)
+        # Let it expand to fill the groupbox - no height constraint
+        activity_log_layout.addWidget(self.activity_log_text, 1)  # Stretch factor 1 to fill available space
         
         param_layout.addWidget(activity_log_groupbox)
         
@@ -7912,82 +7960,122 @@ class SurveyPlanApp(QMainWindow):
         cal_row = 0
         # GeoTIFF controls moved to groupbox above tabs - removed from here
         
+        # --- Calibration Line Parameters GroupBox ---
+        cal_line_params_groupbox = QGroupBox("Calibration Line Parameters")
+        cal_line_params_layout = QGridLayout(cal_line_params_groupbox)
+        cal_line_params_layout.setColumnStretch(0, 1)
+        cal_line_params_layout.setColumnStretch(1, 2)
+        
+        cal_line_row = 0
         self.pick_pitch_line_btn = QPushButton("Draw a Pitch Line")
         self.pick_pitch_line_btn.clicked.connect(self._toggle_pick_pitch_line_mode)
-        cal_layout.addWidget(self.pick_pitch_line_btn, cal_row, 0, 1, 2)
-        cal_row += 1
+        cal_line_params_layout.addWidget(self.pick_pitch_line_btn, cal_line_row, 0, 1, 2)
+        cal_line_row += 1
         
         self.edit_pitch_line_btn = QPushButton("Edit Pitch Line")
         self.edit_pitch_line_btn.setEnabled(False)
         self.edit_pitch_line_btn.clicked.connect(self._toggle_edit_pitch_line_mode)
-        cal_layout.addWidget(self.edit_pitch_line_btn, cal_row, 0, 1, 2)
-        cal_row += 1
+        cal_line_params_layout.addWidget(self.edit_pitch_line_btn, cal_line_row, 0, 1, 2)
+        cal_line_row += 1
         
-        cal_layout.addWidget(QLabel("Survey Speed (knots):"), cal_row, 0)
-        self.cal_survey_speed_entry = QLineEdit("8")
-        cal_layout.addWidget(self.cal_survey_speed_entry, cal_row, 1)
-        cal_row += 1
-        
-        cal_layout.addWidget(QLabel("Line Offset (meters):"), cal_row, 0)
+        cal_line_params_layout.addWidget(QLabel("Heading Line Offset (m):"), cal_line_row, 0)
         self.cal_line_offset_entry = QLineEdit()
         self.cal_line_offset_entry.textChanged.connect(self._update_cal_export_name_from_pitch_line)
-        cal_layout.addWidget(self.cal_line_offset_entry, cal_row, 1)
-        cal_row += 1
-        
-        cal_layout.addWidget(QLabel("Export Name:"), cal_row, 0)
-        self.cal_export_name_entry = QLineEdit()
-        cal_layout.addWidget(self.cal_export_name_entry, cal_row, 1)
-        cal_row += 1
+        cal_line_params_layout.addWidget(self.cal_line_offset_entry, cal_line_row, 1)
+        cal_line_row += 1
         
         self.add_heading_lines_btn = QPushButton("Add Heading Lines")
         self.add_heading_lines_btn.setEnabled(False)
         self.add_heading_lines_btn.clicked.connect(self._add_heading_lines_from_pitch_line)
-        cal_layout.addWidget(self.add_heading_lines_btn, cal_row, 0, 1, 2)
-        cal_row += 1
+        cal_line_params_layout.addWidget(self.add_heading_lines_btn, cal_line_row, 0, 1, 2)
+        cal_line_row += 1
         
         self.pick_roll_line_btn = QPushButton("Draw a Roll Line")
         self.pick_roll_line_btn.clicked.connect(self._toggle_pick_roll_line_mode)
-        cal_layout.addWidget(self.pick_roll_line_btn, cal_row, 0, 1, 2)
-        cal_row += 1
+        cal_line_params_layout.addWidget(self.pick_roll_line_btn, cal_line_row, 0, 1, 2)
+        cal_line_row += 1
         
         self.edit_roll_line_btn = QPushButton("Edit Roll Line")
         self.edit_roll_line_btn.setEnabled(False)
         self.edit_roll_line_btn.clicked.connect(self._toggle_edit_roll_line_mode)
-        cal_layout.addWidget(self.edit_roll_line_btn, cal_row, 0, 1, 2)
+        cal_line_params_layout.addWidget(self.edit_roll_line_btn, cal_line_row, 0, 1, 2)
+        cal_line_row += 1
+        
+        self.clear_cal_lines_btn = QPushButton("Clear Lines")
+        self.clear_cal_lines_btn.clicked.connect(self._clear_calibration_lines)
+        cal_line_params_layout.addWidget(self.clear_cal_lines_btn, cal_line_row, 0, 1, 2)
+        
+        cal_layout.addWidget(cal_line_params_groupbox, cal_row, 0, 1, 2)
         cal_row += 1
+        
+        # --- Plot Control GroupBox ---
+        cal_plot_control_groupbox = QGroupBox("Plot Control")
+        cal_plot_control_layout = QVBoxLayout(cal_plot_control_groupbox)
+        
+        self.zoom_to_geotiff_btn_cal = QPushButton("Zoom to GeoTIFF")
+        self.zoom_to_geotiff_btn_cal.clicked.connect(self._zoom_to_geotiff)
+        cal_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_cal)
         
         self.zoom_to_all_lines_btn = QPushButton("Zoom to Calibration Lines")
         self.zoom_to_all_lines_btn.clicked.connect(self._zoom_to_any_lines)
-        cal_layout.addWidget(self.zoom_to_all_lines_btn, cal_row, 0, 1, 2)
-        cal_row += 1
+        cal_plot_control_layout.addWidget(self.zoom_to_all_lines_btn)
         
-        cal_clear_button_frame = QWidget()
-        cal_clear_button_layout = QHBoxLayout(cal_clear_button_frame)
-        cal_clear_button_layout.setContentsMargins(0, 0, 0, 0)
-        self.clear_cal_lines_btn = QPushButton("Clear Lines")
-        self.clear_cal_lines_btn.clicked.connect(self._clear_calibration_lines)
-        cal_clear_button_layout.addWidget(self.clear_cal_lines_btn)
         self.clear_plot_btn_cal = QPushButton("Clear Plot")
         self.clear_plot_btn_cal.clicked.connect(self._clear_plot)
-        cal_clear_button_layout.addWidget(self.clear_plot_btn_cal)
-        cal_layout.addWidget(cal_clear_button_frame, cal_row, 0, 1, 2)
+        cal_plot_control_layout.addWidget(self.clear_plot_btn_cal)
+        
+        cal_layout.addWidget(cal_plot_control_groupbox, cal_row, 0, 1, 2)
         cal_row += 1
         
-        cal_export_import_frame = QWidget()
-        cal_export_import_layout = QHBoxLayout(cal_export_import_frame)
-        cal_export_import_layout.setContentsMargins(0, 0, 0, 0)
-        self.cal_import_survey_btn = QPushButton("Import Survey")
-        self.cal_import_survey_btn.clicked.connect(self._import_cal_survey_files)
-        cal_export_import_layout.addWidget(self.cal_import_survey_btn)
-        self.cal_export_survey_btn = QPushButton("Export Survey")
-        self.cal_export_survey_btn.clicked.connect(self._export_cal_survey_files)
-        cal_export_import_layout.addWidget(self.cal_export_survey_btn)
-        cal_layout.addWidget(cal_export_import_frame, cal_row, 0, 1, 2)
-        cal_row += 1
+        # --- Test Plan Info GroupBox ---
+        cal_test_plan_info_groupbox = QGroupBox("Test Plan Info")
+        cal_test_plan_info_layout = QGridLayout(cal_test_plan_info_groupbox)
+        cal_test_plan_info_layout.setColumnStretch(0, 1)
+        cal_test_plan_info_layout.setColumnStretch(1, 2)
+        
+        cal_test_plan_row = 0
+        cal_test_plan_info_layout.addWidget(QLabel("Survey Speed (knots):"), cal_test_plan_row, 0)
+        self.cal_survey_speed_entry = QLineEdit("8")
+        cal_test_plan_info_layout.addWidget(self.cal_survey_speed_entry, cal_test_plan_row, 1)
+        cal_test_plan_row += 1
         
         self.cal_show_stats_btn = QPushButton("Show Calibration Planning Info")
         self.cal_show_stats_btn.clicked.connect(self._show_calibration_statistics)
-        cal_layout.addWidget(self.cal_show_stats_btn, cal_row, 0, 1, 2)
+        cal_test_plan_info_layout.addWidget(self.cal_show_stats_btn, cal_test_plan_row, 0, 1, 2)
+        
+        cal_layout.addWidget(cal_test_plan_info_groupbox, cal_row, 0, 1, 2)
+        cal_row += 1
+        
+        # --- Import/Export GroupBox ---
+        cal_import_export_groupbox = QGroupBox("Import/Export")
+        cal_import_export_layout = QVBoxLayout(cal_import_export_groupbox)
+        
+        # Import/Export buttons on same row
+        import_export_button_frame = QWidget()
+        import_export_button_layout = QHBoxLayout(import_export_button_frame)
+        import_export_button_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.cal_import_survey_btn = QPushButton("Import Survey")
+        self.cal_import_survey_btn.clicked.connect(self._import_cal_survey_files)
+        import_export_button_layout.addWidget(self.cal_import_survey_btn)
+        self.cal_export_survey_btn = QPushButton("Export Survey")
+        self.cal_export_survey_btn.clicked.connect(self._export_cal_survey_files)
+        import_export_button_layout.addWidget(self.cal_export_survey_btn)
+        
+        cal_import_export_layout.addWidget(import_export_button_frame)
+        
+        # Export Name at the bottom
+        export_name_frame = QWidget()
+        export_name_layout = QGridLayout(export_name_frame)
+        export_name_layout.setContentsMargins(0, 0, 0, 0)
+        export_name_layout.setColumnStretch(0, 1)
+        export_name_layout.setColumnStretch(1, 2)
+        export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
+        self.cal_export_name_entry = QLineEdit()
+        export_name_layout.addWidget(self.cal_export_name_entry, 0, 1)
+        cal_import_export_layout.addWidget(export_name_frame)
+        
+        cal_layout.addWidget(cal_import_export_groupbox, cal_row, 0, 1, 2)
         cal_row += 1
 
         # --- Line Planning Tab ---
