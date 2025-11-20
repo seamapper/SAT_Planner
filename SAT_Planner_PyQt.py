@@ -30,7 +30,8 @@ except ImportError:
 
 # __version__ = "2025.01"  # 1st version of the app
 #__version__ = "2025.02"  # Added metadata file saving/loading, contour interval synchronization
-__version__ = "2025.03"  # Added line planning, import/export of lines, and other improvements
+# __version__ = "2025.03"  # Added line planning, import/export of lines, and other improvements
+__version__ = "2025.04"  # Converted to PyQt6
 
 # --- Conditional Imports for Geospatial Libraries ---
 GEOSPATIAL_LIBS_AVAILABLE = True  # Assume true until an import fails
@@ -255,10 +256,17 @@ class SurveyPlanApp(QMainWindow):
                         self.line_planning_temp_line = None
                     self.canvas.draw_idle()
                 elif event.button == 3:  # Right click: finish
+                    # Disable line planning mode first to prevent further clicks
+                    self.line_planning_mode = False
+                    self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+                    
                     if len(self.line_planning_points) >= 2:
                         self.line_start_draw_btn.setText("Line Finished. Start Drawing Line")
                         # Draw the elevation profile for the drawn line
-                        self._draw_line_planning_profile()
+                        try:
+                            self._draw_line_planning_profile()
+                        except Exception as e:
+                            print(f"Error drawing line planning profile: {e}")
                         # Report line summary to info/error box
                         try:
                             import pyproj
@@ -269,7 +277,8 @@ class SurveyPlanApp(QMainWindow):
                                 lat1, lon1 = self.line_planning_points[i-1]
                                 lat2, lon2 = self.line_planning_points[i]
                                 _, _, d = geod.inv(lon1, lat1, lon2, lat2)
-                                total_length_m += d
+                                if not np.isnan(d) and not np.isinf(d):
+                                    total_length_m += d
                             total_length_km = total_length_m / 1000.0
                             total_length_nm = total_length_m / 1852.0
                             try:
@@ -293,8 +302,13 @@ class SurveyPlanApp(QMainWindow):
                             self.set_line_info_text(f"Error calculating line summary: {e}")
                     else:
                         self.line_start_draw_btn.setText("Start Drawing Line")
-                    self.line_planning_mode = False
-                    self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+                        if len(self.line_planning_points) > 0:
+                            # Clear points if less than 2
+                            self.line_planning_points = []
+                            if hasattr(self, 'line_planning_line') and self.line_planning_line is not None:
+                                self.line_planning_line.remove()
+                                self.line_planning_line = None
+                    
                     # Remove temp dashed line if present
                     if hasattr(self, 'line_planning_temp_line') and self.line_planning_temp_line is not None:
                         self.line_planning_temp_line.remove()
@@ -306,6 +320,7 @@ class SurveyPlanApp(QMainWindow):
                     self.canvas.draw_idle()
                     # Update button states
                     self._update_line_planning_button_states()
+                    return  # Do not process as other modes
                 return  # Do not process as other modes
             # Otherwise, call the original handler if it exists
             if orig_on_plot_click:
@@ -326,12 +341,15 @@ class SurveyPlanApp(QMainWindow):
                 return
             self.last_used_dir = export_dir
             self._save_last_used_dir()
-            # Ask for export name
-            from PyQt6.QtWidgets import QInputDialog
-            default_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            export_name, ok = QInputDialog.getText(self, "Export Name", "Enter export name for the line:", text=default_name)
-            if not ok or not export_name:
-                return
+            # Get export name from the field
+            if hasattr(self, 'line_export_name_entry'):
+                export_name = self.line_export_name_entry.text().strip()
+                if not export_name:
+                    export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    self.line_export_name_entry.setText(export_name)
+            else:
+                # Fallback if field doesn't exist
+                export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
             try:
                 import json
                 import fiona
@@ -596,6 +614,15 @@ class SurveyPlanApp(QMainWindow):
                     self._show_message("warning","Import Warning", "Line plan must have at least 2 points. Found fewer points in the file.")
                     self.line_planning_points = []
                     return
+                
+                # Extract basename from the imported file and set it in the export name field
+                if hasattr(self, 'line_export_name_entry'):
+                    file_basename = os.path.splitext(os.path.basename(file_path))[0]
+                    # Remove common suffixes that might be added during export
+                    for suffix in ['_DD', '_DM', '.geojson', '.shp', '.lnw']:
+                        if file_basename.endswith(suffix):
+                            file_basename = file_basename[:-len(suffix)]
+                    self.line_export_name_entry.setText(file_basename)
                 
                 # Update UI and plot
                 self._update_line_planning_button_states()
@@ -1099,10 +1126,17 @@ class SurveyPlanApp(QMainWindow):
                         self.line_planning_temp_line = None
                     self.canvas.draw_idle()
                 elif event.button == 3:  # Right click: finish
+                    # Disable line planning mode first to prevent further clicks
+                    self.line_planning_mode = False
+                    self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+                    
                     if len(self.line_planning_points) >= 2:
                         self.line_start_draw_btn.setText("Line Finished. Start Drawing Line")
                         # Draw the elevation profile for the drawn line
-                        self._draw_line_planning_profile()
+                        try:
+                            self._draw_line_planning_profile()
+                        except Exception as e:
+                            print(f"Error drawing line planning profile: {e}")
                         # Report line summary to info/error box
                         try:
                             import pyproj
@@ -1113,7 +1147,8 @@ class SurveyPlanApp(QMainWindow):
                                 lat1, lon1 = self.line_planning_points[i-1]
                                 lat2, lon2 = self.line_planning_points[i]
                                 _, _, d = geod.inv(lon1, lat1, lon2, lat2)
-                                total_length_m += d
+                                if not np.isnan(d) and not np.isinf(d):
+                                    total_length_m += d
                             total_length_km = total_length_m / 1000.0
                             total_length_nm = total_length_m / 1852.0
                             try:
@@ -1137,8 +1172,13 @@ class SurveyPlanApp(QMainWindow):
                             self.set_line_info_text(f"Error calculating line summary: {e}")
                     else:
                         self.line_start_draw_btn.setText("Start Drawing Line")
-                    self.line_planning_mode = False
-                    self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+                        if len(self.line_planning_points) > 0:
+                            # Clear points if less than 2
+                            self.line_planning_points = []
+                            if hasattr(self, 'line_planning_line') and self.line_planning_line is not None:
+                                self.line_planning_line.remove()
+                                self.line_planning_line = None
+                    
                     # Remove temp dashed line if present
                     if hasattr(self, 'line_planning_temp_line') and self.line_planning_temp_line is not None:
                         self.line_planning_temp_line.remove()
@@ -1150,6 +1190,7 @@ class SurveyPlanApp(QMainWindow):
                     self.canvas.draw_idle()
                     # Update button states
                     self._update_line_planning_button_states()
+                    return  # Do not process as other modes
                 return  # Do not process as other modes
             # Otherwise, call the original handler if it exists
             if orig_on_plot_click:
@@ -1170,12 +1211,15 @@ class SurveyPlanApp(QMainWindow):
                 return
             self.last_used_dir = export_dir
             self._save_last_used_dir()
-            # Ask for export name
-            from PyQt6.QtWidgets import QInputDialog
-            default_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            export_name, ok = QInputDialog.getText(self, "Export Name", "Enter export name for the line:", text=default_name)
-            if not ok or not export_name:
-                return
+            # Get export name from the field
+            if hasattr(self, 'line_export_name_entry'):
+                export_name = self.line_export_name_entry.text().strip()
+                if not export_name:
+                    export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    self.line_export_name_entry.setText(export_name)
+            else:
+                # Fallback if field doesn't exist
+                export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
             try:
                 import json
                 import fiona
@@ -1440,6 +1484,15 @@ class SurveyPlanApp(QMainWindow):
                     self._show_message("warning","Import Warning", "Line plan must have at least 2 points. Found fewer points in the file.")
                     self.line_planning_points = []
                     return
+                
+                # Extract basename from the imported file and set it in the export name field
+                if hasattr(self, 'line_export_name_entry'):
+                    file_basename = os.path.splitext(os.path.basename(file_path))[0]
+                    # Remove common suffixes that might be added during export
+                    for suffix in ['_DD', '_DM', '.geojson', '.shp', '.lnw']:
+                        if file_basename.endswith(suffix):
+                            file_basename = file_basename[:-len(suffix)]
+                    self.line_export_name_entry.setText(file_basename)
                 
                 # Update UI and plot
                 self._update_line_planning_button_states()
@@ -5650,6 +5703,25 @@ class SurveyPlanApp(QMainWindow):
             self.ax.set_ylim(min_lat - buffer_lat, max_lat + buffer_lat)
             self.canvas.draw_idle()
 
+    def _zoom_to_line(self):
+        """Zoom to the line planning points."""
+        if not hasattr(self, 'line_planning_points') or len(self.line_planning_points) < 2:
+            self._show_message("info","Zoom to Line", "No line planning points to zoom to.")
+            return
+        
+        lats = [p[0] for p in self.line_planning_points]
+        lons = [p[1] for p in self.line_planning_points]
+        min_lat, max_lat = min(lats), max(lats)
+        min_lon, max_lon = min(lons), max(lons)
+        
+        # Add a small buffer (5% of range or 0.01 if range is 0)
+        buffer_lat = (max_lat - min_lat) * 0.05 if (max_lat - min_lat) != 0 else 0.01
+        buffer_lon = (max_lon - min_lon) * 0.05 if (max_lon - min_lon) != 0 else 0.01
+        
+        self.ax.set_xlim(min_lon - buffer_lon, max_lon + buffer_lon)
+        self.ax.set_ylim(min_lat - buffer_lat, max_lat + buffer_lat)
+        self.canvas.draw_idle()
+
     def _zoom_to_any_lines(self):
         # Collect all points from pitch line and heading lines
         points = []
@@ -7821,12 +7893,16 @@ class SurveyPlanApp(QMainWindow):
         ref_layout = QGridLayout(self.input_frame)
         ref_layout.setColumnStretch(0, 1)  # Labels
         ref_layout.setColumnStretch(1, 2)  # Entries
+        ref_layout.setSpacing(3)  # Reduce spacing between groupboxes
         
         row = 0
         
         # --- Reference Line Parameters GroupBox ---
         ref_line_params_groupbox = QGroupBox("Reference Line Parameters")
+        ref_line_params_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ref_line_params_layout = QGridLayout(ref_line_params_groupbox)
+        ref_line_params_layout.setSpacing(3)
+        ref_line_params_layout.setContentsMargins(9, 9, 9, 9)
         ref_line_params_layout.setColumnStretch(0, 1)
         ref_line_params_layout.setColumnStretch(1, 2)
         
@@ -7916,30 +7992,40 @@ class SurveyPlanApp(QMainWindow):
         ref_line_params_layout.addWidget(self.generate_plot_btn, ref_line_row, 0, 1, 2)
         
         ref_layout.addWidget(ref_line_params_groupbox, row, 0, 1, 2)
+        ref_layout.setRowStretch(row, 0)
         row += 1
         
         # --- Plot Control GroupBox ---
         ref_plot_control_groupbox = QGroupBox("Plot Control")
+        ref_plot_control_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ref_plot_control_layout = QVBoxLayout(ref_plot_control_groupbox)
+        ref_plot_control_layout.setSpacing(0)
+        ref_plot_control_layout.setContentsMargins(9, 9, 9, 9)
         
         self.zoom_to_geotiff_btn_ref = QPushButton("Zoom to GeoTIFF")
         self.zoom_to_geotiff_btn_ref.clicked.connect(self._zoom_to_geotiff)
         ref_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_ref)
+        ref_plot_control_layout.addSpacing(3)
         
         self.zoom_to_plan_btn = QPushButton("Zoom to Plan")
         self.zoom_to_plan_btn.clicked.connect(self._zoom_to_plan)
         ref_plot_control_layout.addWidget(self.zoom_to_plan_btn)
+        ref_plot_control_layout.addSpacing(3)
         
         self.clear_plot_btn = QPushButton("Clear Plot")
         self.clear_plot_btn.clicked.connect(self._clear_plot)
         ref_plot_control_layout.addWidget(self.clear_plot_btn)
         
         ref_layout.addWidget(ref_plot_control_groupbox, row, 0, 1, 2)
+        ref_layout.setRowStretch(row, 0)
         row += 1
         
         # --- Test Plan Info GroupBox ---
         ref_test_plan_info_groupbox = QGroupBox("Test Plan Info")
+        ref_test_plan_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ref_test_plan_info_layout = QGridLayout(ref_test_plan_info_groupbox)
+        ref_test_plan_info_layout.setSpacing(3)
+        ref_test_plan_info_layout.setContentsMargins(9, 9, 9, 9)
         ref_test_plan_info_layout.setColumnStretch(0, 1)
         ref_test_plan_info_layout.setColumnStretch(1, 2)
         
@@ -7959,15 +8045,20 @@ class SurveyPlanApp(QMainWindow):
         ref_test_plan_info_layout.addWidget(self.ref_show_info_btn, ref_test_plan_row, 0, 1, 2)
         
         ref_layout.addWidget(ref_test_plan_info_groupbox, row, 0, 1, 2)
+        ref_layout.setRowStretch(row, 0)
         row += 1
         
         # --- Import/Export GroupBox ---
         ref_import_export_groupbox = QGroupBox("Import/Export")
+        ref_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ref_import_export_layout = QVBoxLayout(ref_import_export_groupbox)
+        ref_import_export_layout.setSpacing(0)
+        ref_import_export_layout.setContentsMargins(9, 9, 9, 9)
         
         # Import/Export buttons on same row
         ref_import_export_button_frame = QWidget()
         ref_import_export_button_layout = QHBoxLayout(ref_import_export_button_frame)
+        ref_import_export_button_layout.setSpacing(3)
         ref_import_export_button_layout.setContentsMargins(0, 0, 0, 0)
         
         self.import_survey_btn = QPushButton("Import Survey")
@@ -7978,10 +8069,12 @@ class SurveyPlanApp(QMainWindow):
         ref_import_export_button_layout.addWidget(self.export_survey_btn)
         
         ref_import_export_layout.addWidget(ref_import_export_button_frame)
+        ref_import_export_layout.addSpacing(3)
         
         # Export Name at the bottom
         ref_export_name_frame = QWidget()
         ref_export_name_layout = QGridLayout(ref_export_name_frame)
+        ref_export_name_layout.setSpacing(0)
         ref_export_name_layout.setContentsMargins(0, 0, 0, 0)
         ref_export_name_layout.setColumnStretch(0, 1)
         ref_export_name_layout.setColumnStretch(1, 2)
@@ -7998,7 +8091,11 @@ class SurveyPlanApp(QMainWindow):
         ref_import_export_layout.addWidget(ref_export_name_frame)
         
         ref_layout.addWidget(ref_import_export_groupbox, row, 0, 1, 2)
+        ref_layout.setRowStretch(row, 0)
         row += 1
+        
+        # Add stretch at the bottom to push all groupboxes to the top
+        ref_layout.setRowStretch(row, 1)
         
         self.dist_between_lines_entry.textChanged.connect(self._update_export_name)
         self.heading_entry.textChanged.connect(self._update_export_name)
@@ -8007,13 +8104,17 @@ class SurveyPlanApp(QMainWindow):
         cal_layout = QGridLayout(self.calibration_frame)
         cal_layout.setColumnStretch(0, 1)
         cal_layout.setColumnStretch(1, 2)
+        cal_layout.setSpacing(3)  # Reduce spacing between groupboxes
         
         cal_row = 0
         # GeoTIFF controls moved to groupbox above tabs - removed from here
         
         # --- Calibration Line Parameters GroupBox ---
         cal_line_params_groupbox = QGroupBox("Calibration Line Parameters")
+        cal_line_params_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         cal_line_params_layout = QGridLayout(cal_line_params_groupbox)
+        cal_line_params_layout.setSpacing(3)
+        cal_line_params_layout.setContentsMargins(9, 9, 9, 9)
         cal_line_params_layout.setColumnStretch(0, 1)
         cal_line_params_layout.setColumnStretch(1, 2)
         
@@ -8057,30 +8158,40 @@ class SurveyPlanApp(QMainWindow):
         cal_line_params_layout.addWidget(self.clear_cal_lines_btn, cal_line_row, 0, 1, 2)
         
         cal_layout.addWidget(cal_line_params_groupbox, cal_row, 0, 1, 2)
+        cal_layout.setRowStretch(cal_row, 0)
         cal_row += 1
         
         # --- Plot Control GroupBox ---
         cal_plot_control_groupbox = QGroupBox("Plot Control")
+        cal_plot_control_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         cal_plot_control_layout = QVBoxLayout(cal_plot_control_groupbox)
+        cal_plot_control_layout.setSpacing(0)
+        cal_plot_control_layout.setContentsMargins(9, 9, 9, 9)
         
         self.zoom_to_geotiff_btn_cal = QPushButton("Zoom to GeoTIFF")
         self.zoom_to_geotiff_btn_cal.clicked.connect(self._zoom_to_geotiff)
         cal_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_cal)
+        cal_plot_control_layout.addSpacing(3)
         
         self.zoom_to_all_lines_btn = QPushButton("Zoom to Calibration Lines")
         self.zoom_to_all_lines_btn.clicked.connect(self._zoom_to_any_lines)
         cal_plot_control_layout.addWidget(self.zoom_to_all_lines_btn)
+        cal_plot_control_layout.addSpacing(3)
         
         self.clear_plot_btn_cal = QPushButton("Clear Plot")
         self.clear_plot_btn_cal.clicked.connect(self._clear_plot)
         cal_plot_control_layout.addWidget(self.clear_plot_btn_cal)
         
         cal_layout.addWidget(cal_plot_control_groupbox, cal_row, 0, 1, 2)
+        cal_layout.setRowStretch(cal_row, 0)
         cal_row += 1
         
         # --- Test Plan Info GroupBox ---
         cal_test_plan_info_groupbox = QGroupBox("Test Plan Info")
+        cal_test_plan_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         cal_test_plan_info_layout = QGridLayout(cal_test_plan_info_groupbox)
+        cal_test_plan_info_layout.setSpacing(3)
+        cal_test_plan_info_layout.setContentsMargins(9, 9, 9, 9)
         cal_test_plan_info_layout.setColumnStretch(0, 1)
         cal_test_plan_info_layout.setColumnStretch(1, 2)
         
@@ -8095,15 +8206,20 @@ class SurveyPlanApp(QMainWindow):
         cal_test_plan_info_layout.addWidget(self.cal_show_stats_btn, cal_test_plan_row, 0, 1, 2)
         
         cal_layout.addWidget(cal_test_plan_info_groupbox, cal_row, 0, 1, 2)
+        cal_layout.setRowStretch(cal_row, 0)
         cal_row += 1
         
         # --- Import/Export GroupBox ---
         cal_import_export_groupbox = QGroupBox("Import/Export")
+        cal_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         cal_import_export_layout = QVBoxLayout(cal_import_export_groupbox)
+        cal_import_export_layout.setSpacing(0)
+        cal_import_export_layout.setContentsMargins(9, 9, 9, 9)
         
         # Import/Export buttons on same row
         import_export_button_frame = QWidget()
         import_export_button_layout = QHBoxLayout(import_export_button_frame)
+        import_export_button_layout.setSpacing(3)
         import_export_button_layout.setContentsMargins(0, 0, 0, 0)
         
         self.cal_import_survey_btn = QPushButton("Import Survey")
@@ -8114,10 +8230,12 @@ class SurveyPlanApp(QMainWindow):
         import_export_button_layout.addWidget(self.cal_export_survey_btn)
         
         cal_import_export_layout.addWidget(import_export_button_frame)
+        cal_import_export_layout.addSpacing(3)
         
         # Export Name at the bottom
         export_name_frame = QWidget()
         export_name_layout = QGridLayout(export_name_frame)
+        export_name_layout.setSpacing(0)
         export_name_layout.setContentsMargins(0, 0, 0, 0)
         export_name_layout.setColumnStretch(0, 1)
         export_name_layout.setColumnStretch(1, 2)
@@ -8127,7 +8245,11 @@ class SurveyPlanApp(QMainWindow):
         cal_import_export_layout.addWidget(export_name_frame)
         
         cal_layout.addWidget(cal_import_export_groupbox, cal_row, 0, 1, 2)
+        cal_layout.setRowStretch(cal_row, 0)
         cal_row += 1
+        
+        # Add stretch at the bottom to push all groupboxes to the top
+        cal_layout.setRowStretch(cal_row, 1)
 
         # --- Line Planning Tab ---
         line_layout = QGridLayout(self.line_planning_frame)
@@ -8137,42 +8259,114 @@ class SurveyPlanApp(QMainWindow):
         line_row = 0
         # GeoTIFF controls moved to groupbox above tabs - removed from here
         
-        line_layout.addWidget(QLabel("Survey Speed (knots):"), line_row, 0)
-        self.line_survey_speed_entry = QLineEdit("8")
-        line_layout.addWidget(self.line_survey_speed_entry, line_row, 1)
-        line_row += 1
+        # --- Line Planning GroupBox ---
+        line_planning_groupbox = QGroupBox("Line Planning")
+        line_planning_groupbox_layout = QVBoxLayout(line_planning_groupbox)
         
         self.line_start_draw_btn = QPushButton("Start Drawing Line")
         self.line_start_draw_btn.clicked.connect(self._toggle_line_planning_mode)
-        line_layout.addWidget(self.line_start_draw_btn, line_row, 0, 1, 2)
-        line_row += 1
-        
-        self.line_clear_btn = QPushButton("Clear Line")
-        self.line_clear_btn.clicked.connect(self._clear_line_planning)
-        line_layout.addWidget(self.line_clear_btn, line_row, 0, 1, 2)
-        line_row += 1
+        line_planning_groupbox_layout.addWidget(self.line_start_draw_btn)
+        line_planning_groupbox_layout.addSpacing(3)
         
         self.line_edit_btn = QPushButton("Edit Line Planning")
         self.line_edit_btn.clicked.connect(self._toggle_edit_line_planning_mode)
-        line_layout.addWidget(self.line_edit_btn, line_row, 0, 1, 2)
+        line_planning_groupbox_layout.addWidget(self.line_edit_btn)
+        line_planning_groupbox_layout.addSpacing(3)
+        
+        self.line_clear_btn = QPushButton("Clear Line")
+        self.line_clear_btn.clicked.connect(self._clear_line_planning)
+        line_planning_groupbox_layout.addWidget(self.line_clear_btn)
+        
+        line_layout.addWidget(line_planning_groupbox, line_row, 0, 1, 2)
+        line_layout.setRowStretch(line_row, 0)
         line_row += 1
         
-        line_export_import_frame = QWidget()
-        line_export_import_layout = QHBoxLayout(line_export_import_frame)
-        line_export_import_layout.setContentsMargins(0, 0, 0, 0)
-        self.line_import_btn = QPushButton("Import Survey")
-        self.line_import_btn.clicked.connect(self._import_drawn_line)
-        line_export_import_layout.addWidget(self.line_import_btn)
-        self.line_export_btn = QPushButton("Export Survey")
-        self.line_export_btn.clicked.connect(self._export_drawn_line)
-        line_export_import_layout.addWidget(self.line_export_btn)
-        line_layout.addWidget(line_export_import_frame, line_row, 0, 1, 2)
+        # --- Plot Control GroupBox ---
+        line_plot_control_groupbox = QGroupBox("Plot Control")
+        line_plot_control_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        line_plot_control_layout = QVBoxLayout(line_plot_control_groupbox)
+        line_plot_control_layout.setSpacing(0)
+        line_plot_control_layout.setContentsMargins(9, 9, 9, 9)
+        
+        self.zoom_to_geotiff_btn_line = QPushButton("Zoom to GeoTIFF")
+        self.zoom_to_geotiff_btn_line.clicked.connect(self._zoom_to_geotiff)
+        line_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_line)
+        line_plot_control_layout.addSpacing(3)
+        
+        self.zoom_to_line_btn = QPushButton("Zoom to Line")
+        self.zoom_to_line_btn.clicked.connect(self._zoom_to_line)
+        line_plot_control_layout.addWidget(self.zoom_to_line_btn)
+        
+        line_layout.addWidget(line_plot_control_groupbox, line_row, 0, 1, 2)
+        line_layout.setRowStretch(line_row, 0)
         line_row += 1
+        
+        # --- Test Plan Info GroupBox ---
+        line_test_plan_info_groupbox = QGroupBox("Test Plan Info")
+        line_test_plan_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        line_test_plan_info_layout = QGridLayout(line_test_plan_info_groupbox)
+        line_test_plan_info_layout.setSpacing(3)
+        line_test_plan_info_layout.setContentsMargins(9, 9, 9, 9)
+        line_test_plan_info_layout.setColumnStretch(0, 1)
+        line_test_plan_info_layout.setColumnStretch(1, 2)
+        
+        line_test_plan_row = 0
+        line_test_plan_info_layout.addWidget(QLabel("Survey Speed (knots):"), line_test_plan_row, 0)
+        self.line_survey_speed_entry = QLineEdit("8")
+        line_test_plan_info_layout.addWidget(self.line_survey_speed_entry, line_test_plan_row, 1)
+        line_test_plan_row += 1
         
         self.line_show_info_btn = QPushButton("Show Line Information")
         self.line_show_info_btn.clicked.connect(self._show_line_information)
-        line_layout.addWidget(self.line_show_info_btn, line_row, 0, 1, 2)
+        line_test_plan_info_layout.addWidget(self.line_show_info_btn, line_test_plan_row, 0, 1, 2)
+        
+        line_layout.addWidget(line_test_plan_info_groupbox, line_row, 0, 1, 2)
+        line_layout.setRowStretch(line_row, 0)
         line_row += 1
+        
+        # --- Import/Export GroupBox ---
+        line_import_export_groupbox = QGroupBox("Import/Export")
+        line_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        line_import_export_layout = QVBoxLayout(line_import_export_groupbox)
+        line_import_export_layout.setSpacing(0)
+        line_import_export_layout.setContentsMargins(9, 9, 9, 9)
+        
+        # Import/Export buttons on same row
+        line_import_export_button_frame = QWidget()
+        line_import_export_button_layout = QHBoxLayout(line_import_export_button_frame)
+        line_import_export_button_layout.setSpacing(3)
+        line_import_export_button_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.line_import_btn = QPushButton("Import Survey")
+        self.line_import_btn.clicked.connect(self._import_drawn_line)
+        line_import_export_button_layout.addWidget(self.line_import_btn)
+        self.line_export_btn = QPushButton("Export Survey")
+        self.line_export_btn.clicked.connect(self._export_drawn_line)
+        line_import_export_button_layout.addWidget(self.line_export_btn)
+        
+        line_import_export_layout.addWidget(line_import_export_button_frame)
+        line_import_export_layout.addSpacing(3)
+        
+        # Export Name at the bottom
+        line_export_name_frame = QWidget()
+        line_export_name_layout = QGridLayout(line_export_name_frame)
+        line_export_name_layout.setSpacing(0)
+        line_export_name_layout.setContentsMargins(0, 0, 0, 0)
+        line_export_name_layout.setColumnStretch(0, 1)
+        line_export_name_layout.setColumnStretch(1, 2)
+        line_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
+        self.line_export_name_entry = QLineEdit()
+        default_export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.line_export_name_entry.setText(default_export_name)
+        line_export_name_layout.addWidget(self.line_export_name_entry, 0, 1)
+        line_import_export_layout.addWidget(line_export_name_frame)
+        
+        line_layout.addWidget(line_import_export_groupbox, line_row, 0, 1, 2)
+        line_layout.setRowStretch(line_row, 0)
+        line_row += 1
+        
+        # Add stretch at the bottom to push all groupboxes to the top
+        line_layout.setRowStretch(line_row, 1)
 
         # --- 2. Main Plot Area (right side) ---
         self.plot_frame = QWidget()
@@ -8232,8 +8426,9 @@ class SurveyPlanApp(QMainWindow):
                     lons.extend(seg_lons[1:])
                 # Compute cumulative distance
                 for j in range(1, 50):
-                    _, _, d = geod.inv(seg_lons[j-1], seg_lats[j-1], seg_lons[j], seg_lons[j])
-                    total_dist += d
+                    _, _, d = geod.inv(seg_lons[j-1], seg_lats[j-1], seg_lons[j], seg_lats[j])
+                    if not np.isnan(d) and not np.isinf(d):
+                        total_dist += d
                     dists.append(total_dist)
                 waypoint_distances.append(total_dist)
             lats = np.array(lats)
@@ -8282,7 +8477,9 @@ class SurveyPlanApp(QMainWindow):
                 slope_ax.set_ylabel('Slope (deg)', fontsize=8)
                 slope_ax.tick_params(axis='y', labelsize=7)
                 slope_ax.grid(False)
-            self.profile_ax.set_xlim(dists[0], dists[-1])
+            # Check for valid limits before setting
+            if len(dists) > 0 and not (np.isnan(dists[0]) or np.isinf(dists[0]) or np.isnan(dists[-1]) or np.isinf(dists[-1])):
+                self.profile_ax.set_xlim(dists[0], dists[-1])
             if np.any(~np.isnan(elevations)):
                 self.profile_ax.set_ylim(np.nanmin(elevations), np.nanmax(elevations))
             if slope_ax and np.any(~np.isnan(slopes)):
