@@ -2489,17 +2489,17 @@ class SurveyPlanApp(QMainWindow):
                     latitudes = [p[0] for p in line]
                     longitudes = [p[1] for p in line]
                     label = 'Heading1' if i == 0 else 'Heading2'
-                    self.ax.plot(longitudes, latitudes, color='green', linewidth=2, linestyle='--', marker='x', label=label)
+                    self.ax.plot(longitudes, latitudes, color='orange', linewidth=2, linestyle='--', marker='x', label=label)
                     
                     # Add labels for heading line points
                     prefix = 'H1' if i == 0 else 'H2'
                     self.ax.annotate(f'{prefix}S', (longitudes[0], latitudes[0]), 
                                     xytext=(5, 5), textcoords='offset points', 
-                                    fontsize=8, color='green', weight='bold',
+                                    fontsize=8, color='orange', weight='bold',
                                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
                     self.ax.annotate(f'{prefix}E', (longitudes[1], latitudes[1]), 
                                     xytext=(5, 5), textcoords='offset points', 
-                                    fontsize=8, color='green', weight='bold',
+                                    fontsize=8, color='orange', weight='bold',
                                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
             # --- Plot the drawn line in Line Planning tab if it exists ---
@@ -3302,11 +3302,9 @@ class SurveyPlanApp(QMainWindow):
 
         self.pick_center_mode = not self.pick_center_mode
         if self.pick_center_mode:
-            self.pick_center_btn.config(text="Picking Enabled (Click Plot)")
-            # Change button style to indicate active state
-            self.pick_center_btn.state(['pressed'])
+            self.pick_center_btn.setText("Picking Enabled (Click Plot)")
             # Change cursor to cross
-            self.canvas_widget.config(cursor="cross")
+            self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
             if hasattr(self, 'set_ref_info_text') and self.param_notebook.currentIndex() == 1:
                 self.set_ref_info_text("Click on the Survey Plan Plot to set Central Lat/Lon, Line Length (Depth * Line Length Multiplier) and Line Spacing (Depth * Separation Multiplier).")
             # Remove info text if present
@@ -3315,11 +3313,9 @@ class SurveyPlanApp(QMainWindow):
                 self.pick_center_info_text = None
                 self.canvas.draw_idle()
         else:
-            self.pick_center_btn.config(text="Pick Center from GeoTIFF")
-            # Reset button style
-            self.pick_center_btn.state(['!pressed'])
+            self.pick_center_btn.setText("Pick Center from GeoTIFF")
             # Restore cursor to default
-            self.canvas_widget.config(cursor="")
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             # Remove info text if present
             if hasattr(self, 'pick_center_info_text') and self.pick_center_info_text is not None:
                 self.pick_center_info_text.set_visible(False)
@@ -3336,9 +3332,10 @@ class SurveyPlanApp(QMainWindow):
         self.pick_pitch_line_mode = not self.pick_pitch_line_mode
         if self.pick_pitch_line_mode:
             self.pitch_line_points = []
-            self.pick_pitch_line_btn.config(text="Drawing Pitch Line: Click Start Point")
-            self.calibration_frame.focus_set()
-            self.canvas_widget.config(cursor="cross")
+            self.pick_pitch_line_btn.setText("Drawing Pitch Line: Click Start Point")
+            if hasattr(self, 'calibration_frame'):
+                self.calibration_frame.setFocus()
+            self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
             self.set_cal_info_text("Click the start point, and then the end point of the pitch line on the plot.")
             # Remove info text if present
             if hasattr(self, 'pitch_line_info_text') and self.pitch_line_info_text is not None:
@@ -3346,8 +3343,8 @@ class SurveyPlanApp(QMainWindow):
                 self.pitch_line_info_text = None
                 self.canvas.draw_idle()
         else:
-            self.pick_pitch_line_btn.config(text="Draw a Pitch Line")
-            self.canvas_widget.config(cursor="")
+            self.pick_pitch_line_btn.setText("Draw a Pitch Line")
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             # Remove info text if present
             if hasattr(self, 'pitch_line_info_text') and self.pitch_line_info_text is not None:
                 self.pitch_line_info_text.set_visible(False)
@@ -3391,8 +3388,8 @@ class SurveyPlanApp(QMainWindow):
             self.pitch_line_motion_cid = self.canvas.mpl_connect('motion_notify_event', self._on_pitch_line_handle_motion)
             self.pitch_line_release_cid = self.canvas.mpl_connect('button_release_event', self._on_pitch_line_handle_release)
             
-            self.edit_pitch_line_btn.config(text="Click to Stop Editing Pitch Line")
-            self.canvas_widget.config(cursor="fleur")
+            self.edit_pitch_line_btn.setText("Click to Stop Editing Pitch Line")
+            self.canvas_widget.setCursor(Qt.CursorShape.SizeAllCursor)
             self.set_cal_info_text("You can drag the red (start) and blue (end) points to edit the pitch line. Heading lines have been cleared.")
         else:
             # Remove handles by clearing the axes and redrawing
@@ -3410,8 +3407,8 @@ class SurveyPlanApp(QMainWindow):
             if hasattr(self, 'pitch_line_release_cid'):
                 self.canvas.mpl_disconnect(self.pitch_line_release_cid)
             
-            self.edit_pitch_line_btn.config(text="Edit Pitch Line")
-            self.canvas_widget.config(cursor="")
+            self.edit_pitch_line_btn.setText("Edit Pitch Line")
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             self.dragging_pitch_line_handle = None
             
             # Redraw to update the pitch line
@@ -3433,14 +3430,15 @@ class SurveyPlanApp(QMainWindow):
         self.pick_roll_line_mode = not self.pick_roll_line_mode
         if self.pick_roll_line_mode:
             self.roll_line_points = []
-            self.pick_roll_line_btn.config(text="Drawing Roll Line: Click Start Point")
-            self.calibration_frame.focus_set()
-            self.canvas_widget.config(cursor="cross")
+            self.pick_roll_line_btn.setText("Drawing Roll Line: Click Start Point")
+            if hasattr(self, 'calibration_frame'):
+                self.calibration_frame.setFocus()
+            self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
             self.set_cal_info_text("Click the start point, and then the end point of the roll line on the plot.")
             # self._show_message("info","Draw a Roll Line", "Click the start point, then the end point of the roll line on the plot.")
         else:
-            self.pick_roll_line_btn.config(text="Draw a Roll Line")
-            self.canvas_widget.config(cursor="")
+            self.pick_roll_line_btn.setText("Draw a Roll Line")
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
         self._update_cal_line_times()
 
     def _toggle_edit_roll_line_mode(self):
@@ -3466,8 +3464,8 @@ class SurveyPlanApp(QMainWindow):
             self.roll_line_motion_cid = self.canvas.mpl_connect('motion_notify_event', self._on_roll_line_handle_motion)
             self.roll_line_release_cid = self.canvas.mpl_connect('button_release_event', self._on_roll_line_handle_release)
             
-            self.edit_roll_line_btn.config(text="Click to Stop Editing Roll Line")
-            self.canvas_widget.config(cursor="fleur")
+            self.edit_roll_line_btn.setText("Click to Stop Editing Roll Line")
+            self.canvas_widget.setCursor(Qt.CursorShape.SizeAllCursor)
             self.set_cal_info_text("You can drag the red (start) and blue (end) points to edit the roll line.")
         else:
             # Remove handles by clearing the axes and redrawing
@@ -3485,8 +3483,8 @@ class SurveyPlanApp(QMainWindow):
             if hasattr(self, 'roll_line_release_cid'):
                 self.canvas.mpl_disconnect(self.roll_line_release_cid)
             
-            self.edit_roll_line_btn.config(text="Edit Roll Line")
-            self.canvas_widget.config(cursor="")
+            self.edit_roll_line_btn.setText("Edit Roll Line")
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             self.dragging_roll_line_handle = None
             
             self._update_cal_line_times()
@@ -3509,7 +3507,7 @@ class SurveyPlanApp(QMainWindow):
                 return
             self.pitch_line_points.append((clicked_lat, clicked_lon))
             if len(self.pitch_line_points) == 1:
-                self.pick_pitch_line_btn.config(text="Drawing Pitch Line: Click End Point")
+                self.pick_pitch_line_btn.setText("Drawing Pitch Line: Click End Point")
                 # Start drawing temporary line
                 self._temp_line = self.ax.plot([clicked_lon, clicked_lon], [clicked_lat, clicked_lat], color='orange', linestyle='--', linewidth=2)[0]
                 self._temp_line_start = (clicked_lat, clicked_lon)
@@ -3521,9 +3519,9 @@ class SurveyPlanApp(QMainWindow):
                     self.pitch_line_info_text = None
                     self.canvas.draw_idle()
             elif len(self.pitch_line_points) == 2:
-                self.pick_pitch_line_btn.config(text="Draw a Pitch Line")
+                self.pick_pitch_line_btn.setText("Draw a Pitch Line")
                 self.pick_pitch_line_mode = False
-                self.canvas_widget.config(cursor="")
+                self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
                 # Remove temporary line
                 if hasattr(self, '_temp_line') and self._temp_line in self.ax.lines:
                     self._temp_line.remove()
@@ -3542,7 +3540,7 @@ class SurveyPlanApp(QMainWindow):
                     (lat1, lon1), (lat2, lon2) = self.pitch_line_points
                     az12, az21, dist_m = geod.inv(lon1, lat1, lon2, lat2)
                     dist_nm = dist_m / 1852.0
-                    speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.get() else 8.0
+                    speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
                     speed_m_per_h = speed_knots * 1852
                     time_hours = dist_m / speed_m_per_h if speed_m_per_h > 0 else 0
                     time_minutes = time_hours * 60
@@ -3574,16 +3572,16 @@ class SurveyPlanApp(QMainWindow):
                 return
             self.roll_line_points.append((clicked_lat, clicked_lon))
             if len(self.roll_line_points) == 1:
-                self.pick_roll_line_btn.config(text="Drawing Roll Line: Click End Point")
+                self.pick_roll_line_btn.setText("Drawing Roll Line: Click End Point")
                 # Start drawing temporary line
                 self._temp_line = self.ax.plot([clicked_lon, clicked_lon], [clicked_lat, clicked_lat], color='purple', linestyle='--', linewidth=2)[0]
                 self._temp_line_start = (clicked_lat, clicked_lon)
                 self._temp_line_motion_cid = self.canvas.mpl_connect('motion_notify_event', self._on_temp_line_motion)
                 self.canvas.draw_idle()
             elif len(self.roll_line_points) == 2:
-                self.pick_roll_line_btn.config(text="Draw a Roll Line")
+                self.pick_roll_line_btn.setText("Draw a Roll Line")
                 self.pick_roll_line_mode = False
-                self.canvas_widget.config(cursor="")
+                self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
                 # Remove temporary line
                 if hasattr(self, '_temp_line') and self._temp_line in self.ax.lines:
                     self._temp_line.remove()
@@ -3597,7 +3595,7 @@ class SurveyPlanApp(QMainWindow):
                     (lat1, lon1), (lat2, lon2) = self.roll_line_points
                     az12, az21, dist_m = geod.inv(lon1, lat1, lon2, lat2)
                     dist_nm = dist_m / 1852.0
-                    speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.get() else 8.0
+                    speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
                     speed_m_per_h = speed_knots * 1852
                     time_hours = dist_m / speed_m_per_h if speed_m_per_h > 0 else 0
                     time_minutes = time_hours * 60
@@ -5772,7 +5770,7 @@ class SurveyPlanApp(QMainWindow):
                 for num, name, pts in lines:
                     # Get speed from cal_survey_speed_entry if available, else default to 8 knots
                     try:
-                        speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.get() else 8.0
+                        speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
                     except:
                         speed_knots = 8.0
                     
@@ -5802,7 +5800,7 @@ class SurveyPlanApp(QMainWindow):
                 for num, name, pts in lines:
                     # Get speed from cal_survey_speed_entry if available, else default to 8 knots
                     try:
-                        speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.get() else 8.0
+                        speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
                     except:
                         speed_knots = 8.0
                     
@@ -5858,7 +5856,7 @@ class SurveyPlanApp(QMainWindow):
                     
                     # Survey parameters
                     try:
-                        speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.get() else 8.0
+                        speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
                         f.write(f"Survey Speed: {speed_knots} knots\n\n")
                     except:
                         f.write("Survey Speed: 8.0 knots (default)\n\n")
@@ -7253,8 +7251,8 @@ class SurveyPlanApp(QMainWindow):
             self.line_planning_motion_cid = self.canvas.mpl_connect('motion_notify_event', self._on_line_planning_handle_motion)
             self.line_planning_release_cid = self.canvas.mpl_connect('button_release_event', self._on_line_planning_handle_release)
             
-            self.line_edit_btn.config(text="Click to Stop Editing Line Planning")
-            self.canvas_widget.config(cursor="fleur")
+            self.line_edit_btn.setText("Click to Stop Editing Line Planning")
+            self.canvas_widget.setCursor(Qt.CursorShape.SizeAllCursor)
             self.set_line_info_text("You can drag the red (start), green (waypoints), and blue (end) points to edit the line planning route.")
         else:
             # Remove handles by clearing the axes and redrawing
@@ -7271,8 +7269,8 @@ class SurveyPlanApp(QMainWindow):
             if hasattr(self, 'line_planning_release_cid'):
                 self.canvas.mpl_disconnect(self.line_planning_release_cid)
             
-            self.line_edit_btn.config(text="Edit Line Planning")
-            self.canvas_widget.config(cursor="")
+            self.line_edit_btn.setText("Edit Line Planning")
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             self.dragging_line_planning_handle = None
             
             # Redraw to update the line planning
@@ -7575,11 +7573,11 @@ class SurveyPlanApp(QMainWindow):
         
         # Update button states
         if hasattr(self, 'line_start_draw_btn'):
-            self.line_start_draw_btn.config(text="Start Drawing Line")
+            self.line_start_draw_btn.setText("Start Drawing Line")
         if hasattr(self, 'line_edit_btn'):
             self.line_edit_btn.setEnabled(False)
         if hasattr(self, 'canvas_widget'):
-            self.canvas_widget.config(cursor="")
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
         
         # Update button states
         self._update_line_planning_button_states()
