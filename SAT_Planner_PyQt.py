@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QScrollArea, QTabWidget, QFileDialog, QMessageBox, QDialog,
                              QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar, QGroupBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat
 # Ensure matplotlib is imported (for PyInstaller)
 import matplotlib
 matplotlib.use('QtAgg')
@@ -63,6 +63,9 @@ class SurveyPlanApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"UNH/CCOM-JHC - SAT/QAT Planner - v{__version__} - pjohnson@ccom.unh.edu")
+        
+        # Set minimum window size
+        self.setMinimumSize(1600, 1150)
         
         # Central widget for main layout
         self.central_widget = QWidget()
@@ -345,7 +348,7 @@ class SurveyPlanApp(QMainWindow):
             if hasattr(self, 'line_export_name_entry'):
                 export_name = self.line_export_name_entry.text().strip()
                 if not export_name:
-                    export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    export_name = f"Line_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
                     self.line_export_name_entry.setText(export_name)
             else:
                 # Fallback if field doesn't exist
@@ -419,7 +422,7 @@ class SurveyPlanApp(QMainWindow):
                     f"- {os.path.basename(csv_file_path)}\n"
                     f"- {os.path.basename(shapefile_path)} (and associated files)\n"
                     f"- {os.path.basename(geojson_file_path)}\n"
-                    f"in directory: {export_dir}", append=True)
+                    f"in directory: {export_dir}", append=False)
 
                 # --- Export to Hypack LNW format ---
                 lnw_file_path = os.path.join(export_dir, f"{export_name}.lnw")
@@ -442,7 +445,7 @@ class SurveyPlanApp(QMainWindow):
                     f"- {os.path.basename(shapefile_path)} (and associated files)\n"
                     f"- {os.path.basename(geojson_file_path)}\n"
                     f"- {os.path.basename(lnw_file_path)}\n"
-                    f"in directory: {export_dir}", append=True)
+                    f"in directory: {export_dir}", append=False)
 
                 # --- Export to SIS ASCII Plan format ---
                 sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
@@ -528,7 +531,7 @@ class SurveyPlanApp(QMainWindow):
                     success_msg += f"- {os.path.basename(stats_file_path)}\n"
                 success_msg += f"in directory: {export_dir}"
                 
-                self.set_line_info_text(success_msg, append=True)
+                self.set_line_info_text(success_msg, append=False)
             except Exception as e:
                 self.set_line_info_text(f"Failed to export drawn line: {e}")
 
@@ -878,6 +881,8 @@ class SurveyPlanApp(QMainWindow):
 
         # Bind parameter changes to update the Export Name
         self.central_lat_entry.textChanged.connect(self._update_export_name)
+        # Reset "Pick Center from GeoTIFF" button to normal style when Central Latitude is entered
+        self.central_lat_entry.textChanged.connect(lambda: self.pick_center_btn.setStyleSheet("") if hasattr(self, 'pick_center_btn') and self.central_lat_entry.text().strip() else None)
         self.central_lon_entry.textChanged.connect(self._update_export_name)
         self.line_length_entry.textChanged.connect(self._update_export_name)
         self.heading_entry.textChanged.connect(self._update_export_name)
@@ -889,7 +894,8 @@ class SurveyPlanApp(QMainWindow):
         # Slider connections already set up in widget creation
         
         # Show window maximized after everything is set up
-        self.showMaximized()
+        # Set window to minimum size on startup
+        self.resize(1600, 1150)
         print("Initialization complete, window should be visible")
         
     # Helper methods for dialog conversions
@@ -927,8 +933,8 @@ class SurveyPlanApp(QMainWindow):
             return
         prefixed_message = f"[Calibration] {message}"
         self.activity_log_text.setReadOnly(False)
-        if not append:
-            # Prepend new message (newest at top)
+        if append:
+            # Prepend new message (newest at top) - only when explicitly requested
             current_text = self.activity_log_text.toPlainText().rstrip('\n')
             new_text = prefixed_message + "\n" + current_text if current_text else prefixed_message + "\n"
             # Split into lines and limit to 200
@@ -941,9 +947,9 @@ class SurveyPlanApp(QMainWindow):
             cursor.movePosition(QTextCursor.MoveOperation.Start)
             self.activity_log_text.setTextCursor(cursor)
         else:
-            # Append to end
+            # Append to end (default behavior - newest at bottom)
             self.activity_log_text.append(prefixed_message)
-            # Maintain up to 200 lines
+            # Maintain up to 200 lines by removing oldest from top
             num_lines = self.activity_log_text.document().blockCount()
             if num_lines > 200:
                 cursor = self.activity_log_text.textCursor()
@@ -951,7 +957,7 @@ class SurveyPlanApp(QMainWindow):
                 cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, num_lines - 200)
                 cursor.movePosition(QTextCursor.MoveOperation.Start, QTextCursor.MoveMode.KeepAnchor)
                 cursor.removeSelectedText()
-            # Move cursor to end
+            # Move cursor to end and scroll to show newest message
             cursor = self.activity_log_text.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.End)
             self.activity_log_text.setTextCursor(cursor)
@@ -1215,7 +1221,7 @@ class SurveyPlanApp(QMainWindow):
             if hasattr(self, 'line_export_name_entry'):
                 export_name = self.line_export_name_entry.text().strip()
                 if not export_name:
-                    export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    export_name = f"Line_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
                     self.line_export_name_entry.setText(export_name)
             else:
                 # Fallback if field doesn't exist
@@ -1289,7 +1295,7 @@ class SurveyPlanApp(QMainWindow):
                     f"- {os.path.basename(csv_file_path)}\n"
                     f"- {os.path.basename(shapefile_path)} (and associated files)\n"
                     f"- {os.path.basename(geojson_file_path)}\n"
-                    f"in directory: {export_dir}", append=True)
+                    f"in directory: {export_dir}", append=False)
 
                 # --- Export to Hypack LNW format ---
                 lnw_file_path = os.path.join(export_dir, f"{export_name}.lnw")
@@ -1312,7 +1318,7 @@ class SurveyPlanApp(QMainWindow):
                     f"- {os.path.basename(shapefile_path)} (and associated files)\n"
                     f"- {os.path.basename(geojson_file_path)}\n"
                     f"- {os.path.basename(lnw_file_path)}\n"
-                    f"in directory: {export_dir}", append=True)
+                    f"in directory: {export_dir}", append=False)
 
                 # --- Export to SIS ASCII Plan format ---
                 sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
@@ -1398,7 +1404,7 @@ class SurveyPlanApp(QMainWindow):
                     success_msg += f"- {os.path.basename(stats_file_path)}\n"
                 success_msg += f"in directory: {export_dir}"
                 
-                self.set_line_info_text(success_msg, append=True)
+                self.set_line_info_text(success_msg, append=False)
             except Exception as e:
                 self.set_line_info_text(f"Failed to export drawn line: {e}")
 
@@ -1748,6 +1754,8 @@ class SurveyPlanApp(QMainWindow):
 
         # Bind parameter changes to update the Export Name
         self.central_lat_entry.textChanged.connect(self._update_export_name)
+        # Reset "Pick Center from GeoTIFF" button to normal style when Central Latitude is entered
+        self.central_lat_entry.textChanged.connect(lambda: self.pick_center_btn.setStyleSheet("") if hasattr(self, 'pick_center_btn') and self.central_lat_entry.text().strip() else None)
         self.central_lon_entry.textChanged.connect(self._update_export_name)
         self.line_length_entry.textChanged.connect(self._update_export_name)
         self.heading_entry.textChanged.connect(self._update_export_name)
@@ -1759,7 +1767,8 @@ class SurveyPlanApp(QMainWindow):
         # Slider connections already set up in widget creation
         
         # Show window maximized after everything is set up
-        self.showMaximized()
+        # Set window to minimum size on startup
+        self.resize(1600, 1150)
         print("Initialization complete, window should be visible")
 
     def set_cal_info_text(self, message, append=False):
@@ -1768,8 +1777,8 @@ class SurveyPlanApp(QMainWindow):
             return
         prefixed_message = f"[Calibration] {message}"
         self.activity_log_text.setReadOnly(False)
-        if not append:
-            # Prepend new message (newest at top)
+        if append:
+            # Prepend new message (newest at top) - only when explicitly requested
             current_text = self.activity_log_text.toPlainText().rstrip('\n')
             new_text = prefixed_message + "\n" + current_text if current_text else prefixed_message + "\n"
             # Split into lines and limit to 200
@@ -1782,9 +1791,9 @@ class SurveyPlanApp(QMainWindow):
             cursor.movePosition(QTextCursor.MoveOperation.Start)
             self.activity_log_text.setTextCursor(cursor)
         else:
-            # Append to end
+            # Append to end (default behavior - newest at bottom)
             self.activity_log_text.append(prefixed_message)
-            # Maintain up to 200 lines
+            # Maintain up to 200 lines by removing oldest from top
             num_lines = self.activity_log_text.document().blockCount()
             if num_lines > 200:
                 cursor = self.activity_log_text.textCursor()
@@ -1792,7 +1801,7 @@ class SurveyPlanApp(QMainWindow):
                 cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, num_lines - 200)
                 cursor.movePosition(QTextCursor.MoveOperation.Start, QTextCursor.MoveMode.KeepAnchor)
                 cursor.removeSelectedText()
-            # Move cursor to end
+            # Move cursor to end and scroll to show newest message
             cursor = self.activity_log_text.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.End)
             self.activity_log_text.setTextCursor(cursor)
@@ -2772,6 +2781,10 @@ class SurveyPlanApp(QMainWindow):
                 self.remove_geotiff_btn.setEnabled(False)
             if hasattr(self, 'pick_center_btn'):
                 self.pick_center_btn.setEnabled(False)
+                self.pick_center_btn.setStyleSheet("")  # Reset to normal style when GeoTIFF is removed
+            # Reset Load GeoTIFF button to orange and bold when GeoTIFF is removed
+            if hasattr(self, 'load_geotiff_btn'):
+                self.load_geotiff_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
 
         # Reset plot elements
         if self.ax:
@@ -3224,6 +3237,14 @@ class SurveyPlanApp(QMainWindow):
                 self.remove_geotiff_btn.setEnabled(True)
             if hasattr(self, 'pick_center_btn'):
                 self.pick_center_btn.setEnabled(True)
+                # Make "Pick Center from GeoTIFF" button bold and orange after loading GeoTIFF
+                self.pick_center_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+            # Reset Load GeoTIFF button to normal style after successful loading
+            if hasattr(self, 'load_geotiff_btn'):
+                self.load_geotiff_btn.setStyleSheet("")  # Reset to default style
+            # Make "Draw a Pitch Line" button bold and orange after loading GeoTIFF
+            if hasattr(self, 'pick_pitch_line_btn'):
+                self.pick_pitch_line_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
 
             # Show success message
             filename = os.path.basename(file_path)
@@ -3232,10 +3253,22 @@ class SurveyPlanApp(QMainWindow):
             else:
                 success_msg = f"GeoTIFF '{filename}' loaded successfully. Dynamic resolution enabled - zoom in for higher detail."
                 
-            if hasattr(self, 'set_cal_info_text') and self.param_notebook.currentIndex() == 0:
+            # Show message in activity log based on current tab
+            current_tab = self.param_notebook.currentIndex() if hasattr(self, 'param_notebook') else 0
+            if current_tab == 0 and hasattr(self, 'set_cal_info_text'):
                 self.set_cal_info_text(success_msg)
-            elif hasattr(self, 'set_ref_info_text') and self.param_notebook.currentIndex() == 1:
+            elif current_tab == 1 and hasattr(self, 'set_ref_info_text'):
                 self.set_ref_info_text(success_msg)
+            elif current_tab == 2 and hasattr(self, 'set_line_info_text'):
+                self.set_line_info_text(success_msg)
+            else:
+                # Fallback: try to use any available method
+                if hasattr(self, 'set_cal_info_text'):
+                    self.set_cal_info_text(success_msg)
+                elif hasattr(self, 'set_ref_info_text'):
+                    self.set_ref_info_text(success_msg)
+                elif hasattr(self, 'set_line_info_text'):
+                    self.set_line_info_text(success_msg)
             
             
             # Update the plot and zoom after loading
@@ -3325,9 +3358,17 @@ class SurveyPlanApp(QMainWindow):
 
     def _on_contour_checkbox_changed(self):
         """Handle checkbox change for showing/hiding contours."""
+        # Get the checkbox state
+        if hasattr(self, 'show_contours_checkbox'):
+            is_checked = self.show_contours_checkbox.isChecked()
+        else:
+            is_checked = False
+        
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot show contours.")
-            self.show_contours_var.set(False)
+            self.show_contours_var = False
+            if hasattr(self, 'show_contours_checkbox'):
+                self.show_contours_checkbox.setChecked(False)
             return
 
         if self.geotiff_data_array is None:
@@ -3336,6 +3377,9 @@ class SurveyPlanApp(QMainWindow):
             if hasattr(self, 'show_contours_checkbox'):
                 self.show_contours_checkbox.setChecked(False)
             return
+
+        # Update the variable based on checkbox state
+        self.show_contours_var = is_checked
 
         # Preserve current plot area
         try:
@@ -3463,6 +3507,21 @@ class SurveyPlanApp(QMainWindow):
                 self.calibration_frame.setFocus()
             self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
             self.set_cal_info_text("Click the start point, and then the end point of the pitch line on the plot.")
+            # Add orange message to Activity Log
+            if hasattr(self, 'activity_log_text'):
+                self.activity_log_text.setReadOnly(False)
+                cursor = self.activity_log_text.textCursor()
+                cursor.movePosition(QTextCursor.MoveOperation.End)
+                # Set orange color
+                char_format = QTextCharFormat()
+                char_format.setForeground(QColor(255, 165, 0))  # Orange color
+                cursor.setCharFormat(char_format)
+                cursor.insertText("[Calibration] Left click the starting and ending points of the pitch line on the plot.\n")
+                # Reset to default color
+                char_format.setForeground(QColor(0, 0, 0))  # Black color
+                cursor.setCharFormat(char_format)
+                self.activity_log_text.setTextCursor(cursor)
+                self.activity_log_text.setReadOnly(True)
             # Remove info text if present
             if hasattr(self, 'pitch_line_info_text') and self.pitch_line_info_text is not None:
                 self.pitch_line_info_text.set_visible(False)
@@ -3561,6 +3620,21 @@ class SurveyPlanApp(QMainWindow):
                 self.calibration_frame.setFocus()
             self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
             self.set_cal_info_text("Click the start point, and then the end point of the roll line on the plot.")
+            # Add orange message to Activity Log
+            if hasattr(self, 'activity_log_text'):
+                self.activity_log_text.setReadOnly(False)
+                cursor = self.activity_log_text.textCursor()
+                cursor.movePosition(QTextCursor.MoveOperation.End)
+                # Set orange color
+                char_format = QTextCharFormat()
+                char_format.setForeground(QColor(255, 165, 0))  # Orange color
+                cursor.setCharFormat(char_format)
+                cursor.insertText("[Calibration] Left click the starting and ending points of the roll line on the plot.\n")
+                # Reset to default color
+                char_format.setForeground(QColor(0, 0, 0))  # Black color
+                cursor.setCharFormat(char_format)
+                self.activity_log_text.setTextCursor(cursor)
+                self.activity_log_text.setReadOnly(True)
             # self._show_message("info","Draw a Roll Line", "Click the start point, then the end point of the roll line on the plot.")
         else:
             self.pick_roll_line_btn.setText("Draw a Roll Line")
@@ -3654,6 +3728,13 @@ class SurveyPlanApp(QMainWindow):
                     del self._temp_line
                 self.canvas.mpl_disconnect(self._temp_line_motion_cid)
                 self._plot_survey_plan(preserve_view_limits=True)  # Redraw to show pitch line
+                # Make "Draw a Pitch Line" normal, "Add Heading Lines" and "Draw a Roll Line" bold and orange
+                if hasattr(self, 'pick_pitch_line_btn'):
+                    self.pick_pitch_line_btn.setStyleSheet("")  # Reset to normal
+                if hasattr(self, 'add_heading_lines_btn'):
+                    self.add_heading_lines_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+                if hasattr(self, 'pick_roll_line_btn'):
+                    self.pick_roll_line_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
                 # Remove info text if present
                 if hasattr(self, 'pitch_line_info_text') and self.pitch_line_info_text is not None:
                     self.pitch_line_info_text.set_visible(False)
@@ -3714,6 +3795,9 @@ class SurveyPlanApp(QMainWindow):
                     del self._temp_line
                 self.canvas.mpl_disconnect(self._temp_line_motion_cid)
                 self._plot_survey_plan(preserve_view_limits=True)  # Redraw to show roll line
+                # Make "Draw a Roll Line" button normal after drawing
+                if hasattr(self, 'pick_roll_line_btn'):
+                    self.pick_roll_line_btn.setStyleSheet("")  # Reset to normal
                 # Report roll line summary in info/error box
                 try:
                     import pyproj
@@ -3854,6 +3938,10 @@ class SurveyPlanApp(QMainWindow):
             self.export_name_entry.clear()
             self.export_name_entry.setText(export_name_to_set)
 
+        # Reset "Pick Center from GeoTIFF" button to normal style after center is selected
+        if hasattr(self, 'pick_center_btn'):
+            self.pick_center_btn.setStyleSheet("")
+        
         self._toggle_pick_center_mode()  # Turn off pick mode after click
         self._generate_and_plot(show_success_dialog=False)  # Re-generate plot with new center, suppress dialog
 
@@ -4231,7 +4319,7 @@ class SurveyPlanApp(QMainWindow):
                 f"- {os.path.basename(csv_file_path)}\n"
                 f"- {os.path.basename(params_file_path)}\n"
                 f"- {os.path.basename(shapefile_path)} (and associated files)\n"
-                f"in directory: {export_dir}", append=True)
+                f"in directory: {export_dir}", append=False)
 
         except Exception as e:
             self._show_message("error","Export Error", f"Failed to export data: {e}")
@@ -4294,7 +4382,7 @@ class SurveyPlanApp(QMainWindow):
             with open(file_path, 'w') as f:
                 json.dump(params, f, indent=4)
 
-            self.set_ref_info_text(f"Survey parameters saved successfully to:\n{file_path}", append=True)
+            self.set_ref_info_text(f"Survey parameters saved successfully to:\n{file_path}", append=False)
 
         except Exception as e:
             self._show_message("error","Save Error", f"Failed to save survey parameters: {e}")
@@ -4338,7 +4426,7 @@ class SurveyPlanApp(QMainWindow):
             # Regenerate the plot with loaded parameters
             self._generate_and_plot()
 
-            self.set_ref_info_text(f"Survey parameters loaded from: {file_path}", append=True)
+            self.set_ref_info_text(f"Survey parameters loaded from: {file_path}", append=False)
 
         except Exception as e:
             self._show_message("error","Load Error", f"Failed to load survey parameters: {e}")
@@ -4654,7 +4742,7 @@ class SurveyPlanApp(QMainWindow):
                 msg = f"Error calculating pitch line stats: {e}"
             self.set_cal_info_text(msg)
             # Append median depth usage note
-            self.set_cal_info_text("Using Median Depth for Line Offset", append=True)
+            self.set_cal_info_text("Using Median Depth for Line Offset", append=False)
 
     def _draw_pitch_line_profile(self):
         self.profile_ax.clear()
@@ -4763,7 +4851,7 @@ class SurveyPlanApp(QMainWindow):
                 msg = f"Error calculating pitch line stats: {e}"
             self.set_cal_info_text(msg)
             # Append median depth usage note
-            self.set_cal_info_text("Using Median Depth for Line Offset", append=True)
+            self.set_cal_info_text("Using Median Depth for Line Offset", append=False)
 
     def _export_survey_files(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -4938,7 +5026,7 @@ class SurveyPlanApp(QMainWindow):
                 f"- {os.path.basename(csv_file_path)}\n"
                 f"- {os.path.basename(shapefile_path)} (and associated files)\n"
                 f"- {os.path.basename(geojson_file_path)}\n"
-                f"in directory: {export_dir}", append=True)
+                f"in directory: {export_dir}", append=False)
 
             # --- Export to Hypack LNW format ---
             lnw_file_path = os.path.join(export_dir, f"{export_name}.lnw")
@@ -4979,7 +5067,7 @@ class SurveyPlanApp(QMainWindow):
                 f"- {os.path.basename(shapefile_path)} (and associated files)\n"
                 f"- {os.path.basename(geojson_file_path)}\n"
                 f"- {os.path.basename(lnw_file_path)}\n"
-                f"in directory: {export_dir}", append=True)
+                f"in directory: {export_dir}", append=False)
 
             # --- Export to SIS ASCII Plan format ---
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
@@ -5024,7 +5112,7 @@ class SurveyPlanApp(QMainWindow):
                 f"- {os.path.basename(geojson_file_path)}\n"
                 f"- {os.path.basename(lnw_file_path)}\n"
                 f"- {os.path.basename(sis_file_path)}\n"
-                f"in directory: {export_dir}", append=True)
+                f"in directory: {export_dir}", append=False)
 
             # --- Export Comprehensive Survey Statistics ---
             stats_file_path = os.path.join(export_dir, f"{export_name}_stats.txt")
@@ -5316,7 +5404,7 @@ class SurveyPlanApp(QMainWindow):
             
             self.set_ref_info_text(
                 f"Survey exported successfully to:\n" + "\n".join(success_files) + 
-                f"\nin directory: {export_dir}", append=True)
+                f"\nin directory: {export_dir}", append=False)
 
         except Exception as e:
             self._show_message("error","Export Error", f"Failed to export survey files: {e}")
@@ -5480,6 +5568,9 @@ class SurveyPlanApp(QMainWindow):
                     if params.get('central_lat') is not None:
                         self.central_lat_entry.clear()
                         self.central_lat_entry.setText(str(params['central_lat']))
+                        # Reset "Pick Center from GeoTIFF" button to normal style after importing survey
+                        if hasattr(self, 'pick_center_btn'):
+                            self.pick_center_btn.setStyleSheet("")
                     
                     if params.get('central_lon') is not None:
                         self.central_lon_entry.clear()
@@ -5539,6 +5630,9 @@ class SurveyPlanApp(QMainWindow):
                         
                         self.central_lat_entry.clear()
                         self.central_lat_entry.setText(f"{central_lat:.6f}")
+                        # Reset "Pick Center from GeoTIFF" button to normal style after calculating from imported lines
+                        if hasattr(self, 'pick_center_btn'):
+                            self.pick_center_btn.setStyleSheet("")
                         
                         self.central_lon_entry.clear()
                         self.central_lon_entry.setText(f"{central_lon:.6f}")
@@ -5646,9 +5740,27 @@ class SurveyPlanApp(QMainWindow):
         # Set to the median value below the pitch line (in absolute value)
         if np.any(~np.isnan(elevations)):
             median_val = np.nanmedian(elevations)
-            self.cal_line_offset_entry.setText(f"{abs(median_val):.2f}")
+            mean_val = np.nanmean(elevations)
+            min_val = np.nanmin(elevations)
+            max_val = np.nanmax(elevations)
+            valid_count = np.sum(~np.isnan(elevations))
+            offset_value = abs(median_val)
+            self.cal_line_offset_entry.setText(f"{offset_value:.2f}")
+            # Log calculation details to activity log
+            if hasattr(self, 'set_cal_info_text'):
+                self.set_cal_info_text(
+                    f"Heading Line Offset calculated: {offset_value:.2f} m (median of {valid_count} points along pitch line). "
+                    f"Depth range: {abs(max_val):.2f} m (shallowest) to {abs(min_val):.2f} m (deepest). "
+                    f"Mean depth: {abs(mean_val):.2f} m, Median depth: {abs(median_val):.2f} m.",
+                    append=False
+                )
         else:
             self.cal_line_offset_entry.setText("-")
+            if hasattr(self, 'set_cal_info_text'):
+                self.set_cal_info_text(
+                    "Heading Line Offset: Could not calculate (no valid elevation data along pitch line).",
+                    append=False
+                )
 
     def _add_heading_lines_from_pitch_line(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -5687,6 +5799,9 @@ class SurveyPlanApp(QMainWindow):
             [(s1_lat, s1_lon), (s2_lat, s2_lon)]
         ]
         self._plot_survey_plan(preserve_view_limits=True)
+        # Make "Add Heading Lines" button normal after clicking
+        if hasattr(self, 'add_heading_lines_btn'):
+            self.add_heading_lines_btn.setStyleSheet("")  # Reset to normal
         # Show info in the info/error box instead of a dialog
         if hasattr(self, 'set_cal_info_text'):
             self.set_cal_info_text("Heading lines have been added north and south of the pitch line.")
@@ -5917,12 +6032,7 @@ class SurveyPlanApp(QMainWindow):
             }
             with open(geojson_file_path, 'w', encoding='utf-8') as f:
                 json.dump(geojson_collection, f, indent=2)
-            self.set_cal_info_text(
-                f"Survey exported successfully to:\n"
-                f"- {os.path.basename(csv_file_path)}\n"
-                f"- {os.path.basename(shapefile_path)} (and associated files)\n"
-                f"- {os.path.basename(geojson_file_path)}\n"
-                f"in directory: {export_dir}", append=True)
+            # Will be updated below with all files
 
             # --- Export to Hypack LNW format ---
             lnw_file_path = os.path.join(export_dir, f"{export_name}.lnw")
@@ -5945,14 +6055,7 @@ class SurveyPlanApp(QMainWindow):
                     # End point
                     f.write(f"{name}_002, {pts[1][0]:.6f}, {pts[1][1]:.6f}, {depth2:.1f}, {speed_knots:.1f}, 50.0, {num}, {num}\n")
 
-            # Update success message to include LNW
-            self.set_cal_info_text(
-                f"Survey exported successfully to:\n"
-                f"- {os.path.basename(csv_file_path)}\n"
-                f"- {os.path.basename(shapefile_path)} (and associated files)\n"
-                f"- {os.path.basename(geojson_file_path)}\n"
-                f"- {os.path.basename(lnw_file_path)}\n"
-                f"in directory: {export_dir}", append=True)
+            # Will be updated below with all files
 
             # --- Export to SIS ASCII Plan format ---
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
@@ -6004,10 +6107,11 @@ class SurveyPlanApp(QMainWindow):
                 f"- {os.path.basename(lnw_file_path)}\n"
                 f"- {os.path.basename(sis_file_path)}\n"
                 f"- {os.path.basename(txt_file_path)}\n"
-                f"in directory: {export_dir}", append=True)
+                f"in directory: {export_dir}", append=False)
             
             # --- Export comprehensive statistics file ---
             stats = self._calculate_calibration_survey_statistics()
+            stats_file_path = None
             if stats:
                 stats_file_path = os.path.join(export_dir, f"{export_name}_stats.txt")
                 with open(stats_file_path, 'w', encoding='utf-8') as f:
@@ -6222,16 +6326,7 @@ class SurveyPlanApp(QMainWindow):
                         f.write(f"Heading 2 Start: {heading2_start_lat_ddm}, {heading2_start_lon_ddm} ({heading2_start[0]:.6f}, {heading2_start[1]:.6f})\n")
                         f.write(f"Heading 2 End: {heading2_end_lat_ddm}, {heading2_end_lon_ddm} ({heading2_end[0]:.6f}, {heading2_end[1]:.6f})\n")
                 
-                # Update success message to include stats file
-                self.set_cal_info_text(
-                    f"Survey exported successfully to:\n"
-                    f"- {os.path.basename(csv_file_path)}\n"
-                    f"- {os.path.basename(shapefile_path)} (and associated files)\n"
-                    f"- {os.path.basename(geojson_file_path)}\n"
-                    f"- {os.path.basename(lnw_file_path)}\n"
-                    f"- {os.path.basename(sis_file_path)}\n"
-                    f"- {os.path.basename(stats_file_path)}\n"
-                    f"in directory: {export_dir}", append=True)
+                # Will build complete message at end with all files
             
             # --- Export parameters metadata as JSON ---
             json_metadata_path = os.path.join(export_dir, f"{export_name}_params.json")
@@ -6256,11 +6351,10 @@ class SurveyPlanApp(QMainWindow):
                 # Save metadata
                 with open(json_metadata_path, 'w', encoding='utf-8') as f:
                     json.dump(params, f, indent=2)
-                
-                self.set_cal_info_text(f"- {os.path.basename(json_metadata_path)}", append=True)
             except Exception as e:
                 # If metadata export fails, continue without it
                 print(f"Warning: Could not export metadata: {e}")
+                json_metadata_path = None
             
             # --- Export PNG images ---
             # Export main map
@@ -6273,11 +6367,22 @@ class SurveyPlanApp(QMainWindow):
                 profile_png_path = os.path.join(export_dir, f"{export_name}_profile.png")
                 self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
             
-            # Update success message to include PNG files
-            png_message = f"\n- {os.path.basename(map_png_path)}"
+            # Build complete success message with all exported files
+            success_msg = f"Survey exported successfully to:\n"
+            success_msg += f"- {os.path.basename(csv_file_path)}\n"
+            success_msg += f"- {os.path.basename(shapefile_path)} (and associated files)\n"
+            success_msg += f"- {os.path.basename(geojson_file_path)}\n"
+            success_msg += f"- {os.path.basename(lnw_file_path)}\n"
+            success_msg += f"- {os.path.basename(sis_file_path)}\n"
+            if stats_file_path:
+                success_msg += f"- {os.path.basename(stats_file_path)}\n"
+            if json_metadata_path:
+                success_msg += f"- {os.path.basename(json_metadata_path)}\n"
+            success_msg += f"- {os.path.basename(map_png_path)}\n"
             if profile_png_path:
-                png_message += f"\n- {os.path.basename(profile_png_path)}"
-            self.set_cal_info_text(png_message, append=True)
+                success_msg += f"- {os.path.basename(profile_png_path)}\n"
+            success_msg += f"in directory: {export_dir}"
+            self.set_cal_info_text(success_msg, append=False)
         except Exception as e:
             self._show_message("error","Export Error", f"Failed to export calibration survey files: {e}")
 
@@ -6494,6 +6599,13 @@ class SurveyPlanApp(QMainWindow):
             if hasattr(self, 'add_heading_lines_btn'):
                 has_heading_lines = any(len(line) == 2 for line in self.heading_lines)
                 self.add_heading_lines_btn.setEnabled(has_heading_lines)
+            # Reset button styles to normal
+            if hasattr(self, 'pick_pitch_line_btn'):
+                self.pick_pitch_line_btn.setStyleSheet("")
+            if hasattr(self, 'add_heading_lines_btn'):
+                self.add_heading_lines_btn.setStyleSheet("")
+            if hasattr(self, 'pick_roll_line_btn'):
+                self.pick_roll_line_btn.setStyleSheet("")
             self._update_cal_line_times()
             self._plot_survey_plan(preserve_view_limits=True)
             # Update profile window
@@ -7358,6 +7470,17 @@ class SurveyPlanApp(QMainWindow):
         self._update_pitch_line_button_states()
         self._update_roll_line_button_states()
         self._update_line_planning_button_states()
+        # Reset button styles - if GeoTIFF is loaded, make "Draw a Pitch Line" bold and orange
+        if hasattr(self, 'geotiff_dataset_original') and self.geotiff_dataset_original is not None:
+            if hasattr(self, 'pick_pitch_line_btn'):
+                self.pick_pitch_line_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+        else:
+            if hasattr(self, 'pick_pitch_line_btn'):
+                self.pick_pitch_line_btn.setStyleSheet("")
+        if hasattr(self, 'add_heading_lines_btn'):
+            self.add_heading_lines_btn.setStyleSheet("")
+        if hasattr(self, 'pick_roll_line_btn'):
+            self.pick_roll_line_btn.setStyleSheet("")
 
     def _update_pitch_line_button_states(self):
         """Update the state of buttons that depend on having a pitch line."""
@@ -7595,8 +7718,8 @@ class SurveyPlanApp(QMainWindow):
             return
         prefixed_message = f"[Reference] {message}"
         self.activity_log_text.setReadOnly(False)
-        if not append:
-            # Prepend new message (newest at top)
+        if append:
+            # Prepend new message (newest at top) - only when explicitly requested
             current_text = self.activity_log_text.toPlainText().rstrip('\n')
             new_text = prefixed_message + "\n" + current_text if current_text else prefixed_message + "\n"
             # Split into lines and limit to 200
@@ -7609,9 +7732,9 @@ class SurveyPlanApp(QMainWindow):
             cursor.movePosition(QTextCursor.MoveOperation.Start)
             self.activity_log_text.setTextCursor(cursor)
         else:
-            # Append to end
+            # Append to end (default behavior - newest at bottom)
             self.activity_log_text.append(prefixed_message)
-            # Maintain up to 200 lines
+            # Maintain up to 200 lines by removing oldest from top
             num_lines = self.activity_log_text.document().blockCount()
             if num_lines > 200:
                 cursor = self.activity_log_text.textCursor()
@@ -7619,7 +7742,7 @@ class SurveyPlanApp(QMainWindow):
                 cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, num_lines - 200)
                 cursor.movePosition(QTextCursor.MoveOperation.Start, QTextCursor.MoveMode.KeepAnchor)
                 cursor.removeSelectedText()
-            # Move cursor to end
+            # Move cursor to end and scroll to show newest message
             cursor = self.activity_log_text.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.End)
             self.activity_log_text.setTextCursor(cursor)
@@ -7711,6 +7834,18 @@ class SurveyPlanApp(QMainWindow):
         # Update button states
         self._update_pitch_line_button_states()
         self._update_roll_line_button_states()
+        
+        # Reset button styles - if GeoTIFF is loaded, make "Draw a Pitch Line" bold and orange
+        if hasattr(self, 'geotiff_dataset_original') and self.geotiff_dataset_original is not None:
+            if hasattr(self, 'pick_pitch_line_btn'):
+                self.pick_pitch_line_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+        else:
+            if hasattr(self, 'pick_pitch_line_btn'):
+                self.pick_pitch_line_btn.setStyleSheet("")
+        if hasattr(self, 'add_heading_lines_btn'):
+            self.add_heading_lines_btn.setStyleSheet("")
+        if hasattr(self, 'pick_roll_line_btn'):
+            self.pick_roll_line_btn.setStyleSheet("")
         
         # Redraw plot and profiles
         self._plot_survey_plan(preserve_view_limits=True)
@@ -7811,6 +7946,8 @@ class SurveyPlanApp(QMainWindow):
         geotiff_button_layout.setContentsMargins(0, 0, 0, 0)
         self.load_geotiff_btn = QPushButton("Load GeoTIFF")
         self.load_geotiff_btn.clicked.connect(self._load_geotiff)
+        # Set button to orange and bold initially
+        self.load_geotiff_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
         geotiff_button_layout.addWidget(self.load_geotiff_btn)
         self.remove_geotiff_btn = QPushButton("Remove GeoTIFF")
         self.remove_geotiff_btn.clicked.connect(self._remove_geotiff)
@@ -7878,6 +8015,8 @@ class SurveyPlanApp(QMainWindow):
         
         self.activity_log_text = QTextEdit()
         self.activity_log_text.setReadOnly(True)
+        # Set light yellow background
+        self.activity_log_text.setStyleSheet("background-color: #ffffe0;")
         # Let it expand to fill the groupbox - no height constraint
         activity_log_layout.addWidget(self.activity_log_text, 1)  # Stretch factor 1 to fill available space
         
@@ -8002,14 +8141,14 @@ class SurveyPlanApp(QMainWindow):
         ref_plot_control_layout.setSpacing(0)
         ref_plot_control_layout.setContentsMargins(9, 9, 9, 9)
         
-        self.zoom_to_geotiff_btn_ref = QPushButton("Zoom to GeoTIFF")
-        self.zoom_to_geotiff_btn_ref.clicked.connect(self._zoom_to_geotiff)
-        ref_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_ref)
-        ref_plot_control_layout.addSpacing(3)
-        
         self.zoom_to_plan_btn = QPushButton("Zoom to Plan")
         self.zoom_to_plan_btn.clicked.connect(self._zoom_to_plan)
         ref_plot_control_layout.addWidget(self.zoom_to_plan_btn)
+        ref_plot_control_layout.addSpacing(3)
+        
+        self.zoom_to_geotiff_btn_ref = QPushButton("Zoom to GeoTIFF")
+        self.zoom_to_geotiff_btn_ref.clicked.connect(self._zoom_to_geotiff)
+        ref_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_ref)
         ref_plot_control_layout.addSpacing(3)
         
         self.clear_plot_btn = QPushButton("Clear Plot")
@@ -8040,7 +8179,7 @@ class SurveyPlanApp(QMainWindow):
         ref_test_plan_info_layout.addWidget(self.crossline_passes_entry, ref_test_plan_row, 1)
         ref_test_plan_row += 1
         
-        self.ref_show_info_btn = QPushButton("Show Reference Planning Info")
+        self.ref_show_info_btn = QPushButton("Show Reference Test Info")
         self.ref_show_info_btn.clicked.connect(self._show_reference_planning_info)
         ref_test_plan_info_layout.addWidget(self.ref_show_info_btn, ref_test_plan_row, 0, 1, 2)
         
@@ -8168,14 +8307,14 @@ class SurveyPlanApp(QMainWindow):
         cal_plot_control_layout.setSpacing(0)
         cal_plot_control_layout.setContentsMargins(9, 9, 9, 9)
         
-        self.zoom_to_geotiff_btn_cal = QPushButton("Zoom to GeoTIFF")
-        self.zoom_to_geotiff_btn_cal.clicked.connect(self._zoom_to_geotiff)
-        cal_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_cal)
-        cal_plot_control_layout.addSpacing(3)
-        
         self.zoom_to_all_lines_btn = QPushButton("Zoom to Calibration Lines")
         self.zoom_to_all_lines_btn.clicked.connect(self._zoom_to_any_lines)
         cal_plot_control_layout.addWidget(self.zoom_to_all_lines_btn)
+        cal_plot_control_layout.addSpacing(3)
+        
+        self.zoom_to_geotiff_btn_cal = QPushButton("Zoom to GeoTIFF")
+        self.zoom_to_geotiff_btn_cal.clicked.connect(self._zoom_to_geotiff)
+        cal_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_cal)
         cal_plot_control_layout.addSpacing(3)
         
         self.clear_plot_btn_cal = QPushButton("Clear Plot")
@@ -8201,7 +8340,7 @@ class SurveyPlanApp(QMainWindow):
         cal_test_plan_info_layout.addWidget(self.cal_survey_speed_entry, cal_test_plan_row, 1)
         cal_test_plan_row += 1
         
-        self.cal_show_stats_btn = QPushButton("Show Calibration Planning Info")
+        self.cal_show_stats_btn = QPushButton("Show Calibration Test Info")
         self.cal_show_stats_btn.clicked.connect(self._show_calibration_statistics)
         cal_test_plan_info_layout.addWidget(self.cal_show_stats_btn, cal_test_plan_row, 0, 1, 2)
         
@@ -8288,14 +8427,14 @@ class SurveyPlanApp(QMainWindow):
         line_plot_control_layout.setSpacing(0)
         line_plot_control_layout.setContentsMargins(9, 9, 9, 9)
         
-        self.zoom_to_geotiff_btn_line = QPushButton("Zoom to GeoTIFF")
-        self.zoom_to_geotiff_btn_line.clicked.connect(self._zoom_to_geotiff)
-        line_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_line)
-        line_plot_control_layout.addSpacing(3)
-        
         self.zoom_to_line_btn = QPushButton("Zoom to Line")
         self.zoom_to_line_btn.clicked.connect(self._zoom_to_line)
         line_plot_control_layout.addWidget(self.zoom_to_line_btn)
+        line_plot_control_layout.addSpacing(3)
+        
+        self.zoom_to_geotiff_btn_line = QPushButton("Zoom to GeoTIFF")
+        self.zoom_to_geotiff_btn_line.clicked.connect(self._zoom_to_geotiff)
+        line_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_line)
         
         line_layout.addWidget(line_plot_control_groupbox, line_row, 0, 1, 2)
         line_layout.setRowStretch(line_row, 0)
@@ -8316,7 +8455,7 @@ class SurveyPlanApp(QMainWindow):
         line_test_plan_info_layout.addWidget(self.line_survey_speed_entry, line_test_plan_row, 1)
         line_test_plan_row += 1
         
-        self.line_show_info_btn = QPushButton("Show Line Information")
+        self.line_show_info_btn = QPushButton("Show Survey Info")
         self.line_show_info_btn.clicked.connect(self._show_line_information)
         line_test_plan_info_layout.addWidget(self.line_show_info_btn, line_test_plan_row, 0, 1, 2)
         
@@ -8356,7 +8495,7 @@ class SurveyPlanApp(QMainWindow):
         line_export_name_layout.setColumnStretch(1, 2)
         line_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
         self.line_export_name_entry = QLineEdit()
-        default_export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        default_export_name = f"Line_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.line_export_name_entry.setText(default_export_name)
         line_export_name_layout.addWidget(self.line_export_name_entry, 0, 1)
         line_import_export_layout.addWidget(line_export_name_frame)
@@ -8503,8 +8642,8 @@ class SurveyPlanApp(QMainWindow):
             return
         prefixed_message = f"[Line] {message}"
         self.activity_log_text.setReadOnly(False)
-        if not append:
-            # Prepend new message (newest at top)
+        if append:
+            # Prepend new message (newest at top) - only when explicitly requested
             current_text = self.activity_log_text.toPlainText().rstrip('\n')
             new_text = prefixed_message + "\n" + current_text if current_text else prefixed_message + "\n"
             # Split into lines and limit to 200
@@ -8517,9 +8656,9 @@ class SurveyPlanApp(QMainWindow):
             cursor.movePosition(QTextCursor.MoveOperation.Start)
             self.activity_log_text.setTextCursor(cursor)
         else:
-            # Append to end
+            # Append to end (default behavior - newest at bottom)
             self.activity_log_text.append(prefixed_message)
-            # Maintain up to 200 lines
+            # Maintain up to 200 lines by removing oldest from top
             num_lines = self.activity_log_text.document().blockCount()
             if num_lines > 200:
                 cursor = self.activity_log_text.textCursor()
@@ -8527,7 +8666,7 @@ class SurveyPlanApp(QMainWindow):
                 cursor.movePosition(QTextCursor.MoveOperation.Down, QTextCursor.MoveMode.MoveAnchor, num_lines - 200)
                 cursor.movePosition(QTextCursor.MoveOperation.Start, QTextCursor.MoveMode.KeepAnchor)
                 cursor.removeSelectedText()
-            # Move cursor to end
+            # Move cursor to end and scroll to show newest message
             cursor = self.activity_log_text.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.End)
             self.activity_log_text.setTextCursor(cursor)
@@ -8791,7 +8930,7 @@ class SurveyPlanApp(QMainWindow):
         try:
             import pyproj
             geod = pyproj.Geod(ellps="WGS84")
-            speed_knots = float(self.cal_survey_speed_entry.get()) if self.cal_survey_speed_entry.get() else 8.0
+            speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
             speed_m_per_h = speed_knots * 1852
             
             # Initialize statistics
@@ -8937,7 +9076,7 @@ class SurveyPlanApp(QMainWindow):
         
         # Survey parameters
         try:
-            speed_knots = float(self.cal_survey_speed_entry.get()) if self.cal_survey_speed_entry.get() else 8.0
+            speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
             stats_text += f"Survey Speed: {speed_knots} knots\n\n"
         except:
             stats_text += "Survey Speed: 8.0 knots (default)\n\n"
