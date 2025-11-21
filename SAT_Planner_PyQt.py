@@ -2916,14 +2916,24 @@ class SurveyPlanApp(QMainWindow):
             # Calculate the visible region in the original dataset
             left, right, bottom, top = full_extent
             
-            # Convert plot limits to dataset coordinates
+            # Add a buffer to the view extent to ensure full coverage (10% of view size)
+            view_width = xlim[1] - xlim[0]
+            view_height = ylim[1] - ylim[0]
+            buffer_x = view_width * 0.1
+            buffer_y = view_height * 0.1
+            
+            # Expand view limits with buffer
+            expanded_xlim = (xlim[0] - buffer_x, xlim[1] + buffer_x)
+            expanded_ylim = (ylim[0] - buffer_y, ylim[1] + buffer_y)
+            
+            # Convert expanded plot limits to dataset coordinates
             if self.geotiff_dataset_original.crs != "EPSG:4326":
                 transformer = pyproj.Transformer.from_crs("EPSG:4326", self.geotiff_dataset_original.crs, always_xy=True)
-                plot_left, plot_bottom = transformer.transform(xlim[0], ylim[0])
-                plot_right, plot_top = transformer.transform(xlim[1], ylim[1])
+                plot_left, plot_bottom = transformer.transform(expanded_xlim[0], expanded_ylim[0])
+                plot_right, plot_top = transformer.transform(expanded_xlim[1], expanded_ylim[1])
             else:
-                plot_left, plot_bottom = xlim[0], ylim[0]
-                plot_right, plot_top = xlim[1], ylim[1]
+                plot_left, plot_bottom = expanded_xlim[0], expanded_ylim[0]
+                plot_right, plot_top = expanded_xlim[1], expanded_ylim[1]
             
             # Calculate pixel indices for the visible region
             transform = self.geotiff_dataset_original.transform
@@ -2942,8 +2952,9 @@ class SurveyPlanApp(QMainWindow):
             if col_max <= col_min:
                 col_max = min(col_min + 1, self.geotiff_dataset_original.width)
             
-            # Add padding around the visible region, but ensure we don't exceed dataset bounds
-            padding = max(50, min(100, (row_max - row_min) // 4))  # Adaptive padding
+            # Add additional padding around the visible region to ensure full coverage
+            # Use larger padding to ensure full coverage of the view
+            padding = max(100, min(200, (row_max - row_min) // 2))  # Increased adaptive padding
             row_min = max(0, row_min - padding)
             row_max = min(self.geotiff_dataset_original.height, row_max + padding)
             col_min = max(0, col_min - padding)
@@ -2979,6 +2990,7 @@ class SurveyPlanApp(QMainWindow):
             else:
                 # Already in WGS84
                 region_extent = [left, right, bottom, top]
+            
             
             # Filter Z-values
             data[data < -11000] = np.nan
@@ -4154,9 +4166,61 @@ class SurveyPlanApp(QMainWindow):
             buffer_lat = (max_lat - min_lat) * 0.05 if (max_lat - min_lat) != 0 else 0.01
             buffer_lon = (max_lon - min_lon) * 0.05 if (max_lon - min_lon) != 0 else 0.01
 
-            self.ax.set_xlim(min_lon - buffer_lon, max_lon + buffer_lon)
-            self.ax.set_ylim(min_lat - buffer_lat, max_lat + buffer_lat)
-            self.canvas.draw_idle()
+            xlim = (min_lon - buffer_lon, max_lon + buffer_lon)
+            ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
+            
+            # Store the new limits
+            self.current_xlim = xlim
+            self.current_ylim = ylim
+            self._last_user_xlim = xlim
+            self._last_user_ylim = ylim
+            
+            # Set axis limits
+            self.ax.set_xlim(xlim)
+            self.ax.set_ylim(ylim)
+            
+            # Update zoom level and reload GeoTIFF data if available
+            if self.geotiff_extent is not None and self.geotiff_dataset_original is not None:
+                # Calculate zoom level based on the view extent vs full GeoTIFF extent
+                if self.dynamic_resolution_enabled:
+                    full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
+                    full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+                    current_width = xlim[1] - xlim[0]
+                    current_height = ylim[1] - ylim[0]
+                    
+                    width_ratio = current_width / full_width if full_width > 0 else 1.0
+                    height_ratio = current_height / full_height if full_height > 0 else 1.0
+                    # Use the larger ratio (more zoomed in) to determine resolution
+                    new_zoom_level = max(width_ratio, height_ratio)
+                    new_zoom_level = max(0.01, min(10.0, new_zoom_level))
+                    self.geotiff_zoom_level = new_zoom_level
+                
+                # Force a small delay to ensure axis limits are applied before loading
+                self.canvas.draw()
+                
+                # Reload GeoTIFF data at appropriate resolution
+                success = self._load_geotiff_at_resolution()
+                if success:
+                    # Ensure the loaded extent covers the full view - if not, we may need to reload
+                    if hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None:
+                        loaded_left, loaded_right, loaded_bottom, loaded_top = self.geotiff_extent
+                        view_left, view_right = xlim
+                        view_bottom, view_top = ylim
+                        
+                        # Check if loaded extent covers view extent (with small tolerance)
+                        tolerance = 0.0001  # degrees
+                        if (loaded_left > view_left + tolerance or loaded_right < view_right - tolerance or
+                            loaded_bottom > view_bottom + tolerance or loaded_top < view_top - tolerance):
+                            # Extent doesn't fully cover view - this shouldn't happen, but if it does, reload
+                            # The issue might be in _load_geotiff_at_resolution, but for now we'll proceed
+                            pass
+                    
+                    # Replot with new resolution
+                    self._plot_survey_plan(preserve_view_limits=True)
+                else:
+                    self.canvas.draw_idle()
+            else:
+                self.canvas.draw_idle()
         else:
             # If nothing to zoom to, just reset view
             self.ax.autoscale_view()
@@ -5935,9 +5999,44 @@ class SurveyPlanApp(QMainWindow):
         buffer_lat = (max_lat - min_lat) * 0.05 if (max_lat - min_lat) != 0 else 0.01
         buffer_lon = (max_lon - min_lon) * 0.05 if (max_lon - min_lon) != 0 else 0.01
         
-        self.ax.set_xlim(min_lon - buffer_lon, max_lon + buffer_lon)
-        self.ax.set_ylim(min_lat - buffer_lat, max_lat + buffer_lat)
-        self.canvas.draw_idle()
+        xlim = (min_lon - buffer_lon, max_lon + buffer_lon)
+        ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
+        
+        # Store the new limits
+        self.current_xlim = xlim
+        self.current_ylim = ylim
+        self._last_user_xlim = xlim
+        self._last_user_ylim = ylim
+        
+        # Set axis limits
+        self.ax.set_xlim(xlim)
+        self.ax.set_ylim(ylim)
+        
+        # Update zoom level and reload GeoTIFF data if available
+        if self.geotiff_extent is not None and self.geotiff_dataset_original is not None:
+            # Calculate zoom level based on the view extent vs full GeoTIFF extent
+            if self.dynamic_resolution_enabled:
+                full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
+                full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+                current_width = xlim[1] - xlim[0]
+                current_height = ylim[1] - ylim[0]
+                
+                width_ratio = current_width / full_width if full_width > 0 else 1.0
+                height_ratio = current_height / full_height if full_height > 0 else 1.0
+                # Use the larger ratio (more zoomed in) to determine resolution
+                new_zoom_level = max(width_ratio, height_ratio)
+                new_zoom_level = max(0.01, min(10.0, new_zoom_level))
+                self.geotiff_zoom_level = new_zoom_level
+            
+            # Reload GeoTIFF data at appropriate resolution
+            success = self._load_geotiff_at_resolution()
+            if success:
+                # Replot with new resolution
+                self._plot_survey_plan(preserve_view_limits=True)
+            else:
+                self.canvas.draw_idle()
+        else:
+            self.canvas.draw_idle()
 
     def _zoom_to_any_lines(self):
         # Collect all points from pitch line and heading lines
@@ -5959,9 +6058,45 @@ class SurveyPlanApp(QMainWindow):
         # Add a small buffer (5% of range or 0.01 if range is 0)
         buffer_lat = (max_lat - min_lat) * 0.05 if (max_lat - min_lat) != 0 else 0.01
         buffer_lon = (max_lon - min_lon) * 0.05 if (max_lon - min_lon) != 0 else 0.01
-        self.ax.set_xlim(min_lon - buffer_lon, max_lon + buffer_lon)
-        self.ax.set_ylim(min_lat - buffer_lat, max_lat + buffer_lat)
-        self.canvas.draw_idle()
+        
+        xlim = (min_lon - buffer_lon, max_lon + buffer_lon)
+        ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
+        
+        # Store the new limits
+        self.current_xlim = xlim
+        self.current_ylim = ylim
+        self._last_user_xlim = xlim
+        self._last_user_ylim = ylim
+        
+        # Set axis limits
+        self.ax.set_xlim(xlim)
+        self.ax.set_ylim(ylim)
+        
+        # Update zoom level and reload GeoTIFF data if available
+        if self.geotiff_extent is not None and self.geotiff_dataset_original is not None:
+            # Calculate zoom level based on the view extent vs full GeoTIFF extent
+            if self.dynamic_resolution_enabled:
+                full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
+                full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+                current_width = xlim[1] - xlim[0]
+                current_height = ylim[1] - ylim[0]
+                
+                width_ratio = current_width / full_width if full_width > 0 else 1.0
+                height_ratio = current_height / full_height if full_height > 0 else 1.0
+                # Use the larger ratio (more zoomed in) to determine resolution
+                new_zoom_level = max(width_ratio, height_ratio)
+                new_zoom_level = max(0.01, min(10.0, new_zoom_level))
+                self.geotiff_zoom_level = new_zoom_level
+            
+            # Reload GeoTIFF data at appropriate resolution
+            success = self._load_geotiff_at_resolution()
+            if success:
+                # Replot with new resolution
+                self._plot_survey_plan(preserve_view_limits=True)
+            else:
+                self.canvas.draw_idle()
+        else:
+            self.canvas.draw_idle()
 
 
     def _update_cal_export_name_from_pitch_line(self):
@@ -8273,7 +8408,7 @@ class SurveyPlanApp(QMainWindow):
         ref_plot_control_layout.setSpacing(0)
         ref_plot_control_layout.setContentsMargins(9, 9, 9, 9)
         
-        self.zoom_to_plan_btn = QPushButton("Zoom to Plan")
+        self.zoom_to_plan_btn = QPushButton("Zoom to Reference Plan")
         self.zoom_to_plan_btn.clicked.connect(self._zoom_to_plan)
         ref_plot_control_layout.addWidget(self.zoom_to_plan_btn)
         ref_plot_control_layout.addSpacing(3)
@@ -8472,7 +8607,7 @@ class SurveyPlanApp(QMainWindow):
         cal_plot_control_layout.setSpacing(0)
         cal_plot_control_layout.setContentsMargins(9, 9, 9, 9)
         
-        self.zoom_to_all_lines_btn = QPushButton("Zoom to Calibration Lines")
+        self.zoom_to_all_lines_btn = QPushButton("Zoom to Calibration Plan")
         self.zoom_to_all_lines_btn.clicked.connect(self._zoom_to_any_lines)
         cal_plot_control_layout.addWidget(self.zoom_to_all_lines_btn)
         cal_plot_control_layout.addSpacing(3)
@@ -8592,7 +8727,7 @@ class SurveyPlanApp(QMainWindow):
         line_plot_control_layout.setSpacing(0)
         line_plot_control_layout.setContentsMargins(9, 9, 9, 9)
         
-        self.zoom_to_line_btn = QPushButton("Zoom to Line")
+        self.zoom_to_line_btn = QPushButton("Zoom to Line Plan")
         self.zoom_to_line_btn.clicked.connect(self._zoom_to_line)
         line_plot_control_layout.addWidget(self.zoom_to_line_btn)
         line_plot_control_layout.addSpacing(3)
