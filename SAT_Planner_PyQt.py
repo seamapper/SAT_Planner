@@ -222,6 +222,13 @@ class SurveyPlanApp(QMainWindow):
                 self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             self.canvas.draw_idle()
             self.line_start_draw_btn.setText("Start Drawing Line")
+            # Reset "Start Drawing Line" button style - if GeoTIFF is loaded, make it bold and orange
+            if hasattr(self, 'geotiff_dataset_original') and self.geotiff_dataset_original is not None:
+                if hasattr(self, 'line_start_draw_btn'):
+                    self.line_start_draw_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+            else:
+                if hasattr(self, 'line_start_draw_btn'):
+                    self.line_start_draw_btn.setStyleSheet("")
             self.line_planning_mode = False
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             # Clear the profile plot
@@ -270,6 +277,9 @@ class SurveyPlanApp(QMainWindow):
                     
                     if len(self.line_planning_points) >= 2:
                         self.line_start_draw_btn.setText("Line Finished. Start Drawing Line")
+                        # Reset "Start Drawing Line" button to normal style after line is drawn
+                        if hasattr(self, 'line_start_draw_btn'):
+                            self.line_start_draw_btn.setStyleSheet("")
                         # Draw the elevation profile for the drawn line
                         try:
                             self._draw_line_planning_profile()
@@ -638,6 +648,9 @@ class SurveyPlanApp(QMainWindow):
                 
                 # Show success message
                 self.set_line_info_text(f"Successfully imported line plan with {len(self.line_planning_points)} points.")
+                # Reset "Start Drawing Line" button to normal style after importing line
+                if hasattr(self, 'line_start_draw_btn') and len(self.line_planning_points) >= 2:
+                    self.line_start_draw_btn.setStyleSheet("")
             
             except Exception as e:
                 self._show_message("error","Import Error", f"Failed to import line plan: {e}")
@@ -1095,6 +1108,13 @@ class SurveyPlanApp(QMainWindow):
                 self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             self.canvas.draw_idle()
             self.line_start_draw_btn.setText("Start Drawing Line")
+            # Reset "Start Drawing Line" button style - if GeoTIFF is loaded, make it bold and orange
+            if hasattr(self, 'geotiff_dataset_original') and self.geotiff_dataset_original is not None:
+                if hasattr(self, 'line_start_draw_btn'):
+                    self.line_start_draw_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+            else:
+                if hasattr(self, 'line_start_draw_btn'):
+                    self.line_start_draw_btn.setStyleSheet("")
             self.line_planning_mode = False
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             # Clear the profile plot
@@ -1143,6 +1163,9 @@ class SurveyPlanApp(QMainWindow):
                     
                     if len(self.line_planning_points) >= 2:
                         self.line_start_draw_btn.setText("Line Finished. Start Drawing Line")
+                        # Reset "Start Drawing Line" button to normal style after line is drawn
+                        if hasattr(self, 'line_start_draw_btn'):
+                            self.line_start_draw_btn.setStyleSheet("")
                         # Draw the elevation profile for the drawn line
                         try:
                             self._draw_line_planning_profile()
@@ -1511,6 +1534,9 @@ class SurveyPlanApp(QMainWindow):
                 
                 # Show success message
                 self.set_line_info_text(f"Successfully imported line plan with {len(self.line_planning_points)} points.")
+                # Reset "Start Drawing Line" button to normal style after importing line
+                if hasattr(self, 'line_start_draw_btn') and len(self.line_planning_points) >= 2:
+                    self.line_start_draw_btn.setStyleSheet("")
             
             except Exception as e:
                 self._show_message("error","Import Error", f"Failed to import line plan: {e}")
@@ -2546,7 +2572,7 @@ class SurveyPlanApp(QMainWindow):
             for i, line in enumerate(self.survey_lines_data):
                 latitudes = [p[0] for p in line]
                 longitudes = [p[1] for p in line]
-                label = "Survey Line" if i == 0 else "_nolegend_"
+                label = "Reference Line" if i == 0 else "_nolegend_"
                 self.ax.plot(longitudes, latitudes, color='blue', linewidth=1.5, label=label)
                 
                 # For alternating lines, flip the start/end points to show survey order
@@ -2806,6 +2832,9 @@ class SurveyPlanApp(QMainWindow):
             if hasattr(self, 'pick_center_btn'):
                 self.pick_center_btn.setEnabled(False)
                 self.pick_center_btn.setStyleSheet("")  # Reset to normal style when GeoTIFF is removed
+            # Reset "Start Drawing Line" button to normal style when GeoTIFF is removed
+            if hasattr(self, 'line_start_draw_btn'):
+                self.line_start_draw_btn.setStyleSheet("")
             # Reset Load GeoTIFF button to orange and bold when GeoTIFF is removed
             if hasattr(self, 'load_geotiff_btn'):
                 self.load_geotiff_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
@@ -3269,6 +3298,9 @@ class SurveyPlanApp(QMainWindow):
             # Make "Draw a Pitch Line" button bold and orange after loading GeoTIFF
             if hasattr(self, 'pick_pitch_line_btn'):
                 self.pick_pitch_line_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+            # Make "Start Drawing Line" button bold and orange after loading GeoTIFF
+            if hasattr(self, 'line_start_draw_btn'):
+                self.line_start_draw_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
 
             # Show success message
             filename = os.path.basename(file_path)
@@ -4148,7 +4180,7 @@ class SurveyPlanApp(QMainWindow):
             self.set_ref_info_text("GeoTIFF removed.")
 
     def _zoom_to_geotiff(self):
-        """Zooms the plot to the consistent extent that maintains window size and aspect ratio."""
+        """Zooms the plot to the GeoTIFF bounds without clearing existing lines."""
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot zoom to GeoTIFF.")
             return
@@ -4157,14 +4189,14 @@ class SurveyPlanApp(QMainWindow):
             self._show_message("warning","No GeoTIFF", "No GeoTIFF underlay is loaded to zoom to.")
             return
 
-        # Recalculate consistent plot limits
+        # Calculate consistent plot limits based on GeoTIFF extent
         self.current_xlim, self.current_ylim = self._calculate_consistent_plot_limits()
         
         # Store these as the user's intended view limits
         self._last_user_xlim = self.current_xlim
         self._last_user_ylim = self.current_ylim
         
-        # Set the axis limits first so _load_geotiff_at_resolution can see them
+        # Set the axis limits to zoom to GeoTIFF bounds
         self.ax.set_xlim(self.current_xlim)
         self.ax.set_ylim(self.current_ylim)
         
@@ -4181,15 +4213,15 @@ class SurveyPlanApp(QMainWindow):
             new_zoom_level = max(0.01, min(10.0, new_zoom_level))
             self.geotiff_zoom_level = new_zoom_level
         
-        # Reload GeoTIFF data to cover the new extent
+        # Reload GeoTIFF data to cover the new extent if needed
         if self.geotiff_dataset_original is not None:
             success = self._load_geotiff_at_resolution()
             if not success:
                 self._show_message("warning","GeoTIFF Reload", "Could not reload GeoTIFF data for the new view.")
         
-        # Re-plot with the new limits - this will properly set the aspect ratio and fill the window
-        # preserve_view_limits=False allows the aspect ratio adjustment to fill the window
-        self._plot_survey_plan(preserve_view_limits=False)
+        # Just redraw the canvas without replotting everything
+        # This preserves all existing lines from other tabs
+        self.canvas.draw_idle()
 
     def _reset_to_consistent_view(self):
         """Reset the plot view to the consistent limits that maintain window size."""
