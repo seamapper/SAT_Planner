@@ -2805,6 +2805,7 @@ class SurveyPlanApp(QMainWindow):
                 self.geotiff_dataset_original = None
             self.geotiff_data_array = None
             self.geotiff_extent = None
+            self.geotiff_original_extent = None
             self.initial_geotiff_xlim = None
             self.initial_geotiff_ylim = None
             self.geotiff_image_plot = None
@@ -3260,6 +3261,8 @@ class SurveyPlanApp(QMainWindow):
                 )
                 self.geotiff_data_array = reprojected_data.astype(float)
                 self.geotiff_extent = [dst_left, dst_right, dst_bottom, dst_top]
+                # Store original full extent for profile calculations (always use full extent for profiles)
+                self.geotiff_original_extent = [dst_left, dst_right, dst_bottom, dst_top]
 
                 # Create transformers for picking if reprojection happened
                 self.wgs84_to_geotiff_transformer = pyproj.Transformer.from_crs(dst_crs, src_crs, always_xy=True)
@@ -3281,6 +3284,8 @@ class SurveyPlanApp(QMainWindow):
                 
                 bounds = self.geotiff_dataset_original.bounds
                 self.geotiff_extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
+                # Store original full extent for profile calculations (always use full extent for profiles)
+                self.geotiff_original_extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
                 self.wgs84_to_geotiff_transformer = None
                 self.geotiff_to_wgs84_transformer = None
 
@@ -4758,6 +4763,112 @@ class SurveyPlanApp(QMainWindow):
     def _on_line_length_or_speed_change(self, *args):
         pass
 
+    def _get_profile_data_from_geotiff(self, lats, lons):
+        """Get elevation and slope data from GeoTIFF for profile calculations.
+        Always uses the original full dataset to ensure consistent results regardless of zoom level.
+        Returns (elevations, slopes, extent) or (None, None, None) if data unavailable."""
+        if self.geotiff_dataset_original is None:
+            return None, None, None
+        
+        # Use original full extent for profile calculations
+        if hasattr(self, 'geotiff_original_extent') and self.geotiff_original_extent is not None:
+            extent = self.geotiff_original_extent
+        elif self.geotiff_extent is not None:
+            extent = self.geotiff_extent
+        else:
+            return None, None, None
+        
+        # Read data directly from original dataset for full extent
+        try:
+            from rasterio.warp import reproject, Resampling, calculate_default_transform
+            from rasterio.transform import from_bounds
+            import pyproj
+            
+            # Get bounds in original CRS
+            if self.geotiff_dataset_original.crs != "EPSG:4326":
+                transformer = pyproj.Transformer.from_crs("EPSG:4326", self.geotiff_dataset_original.crs, always_xy=True)
+                # Transform extent to original CRS
+                left, bottom = transformer.transform(extent[0], extent[2])
+                right, top = transformer.transform(extent[1], extent[3])
+            else:
+                left, right, bottom, top = extent
+            
+            # Read full dataset
+            data = self.geotiff_dataset_original.read(1).astype(float)
+            
+            # If not WGS84, we need to reproject the data
+            if self.geotiff_dataset_original.crs != "EPSG:4326":
+                # Reproject to WGS84 for profile calculations
+                src_crs = self.geotiff_dataset_original.crs
+                dst_crs = "EPSG:4326"
+                src_bounds = self.geotiff_dataset_original.bounds
+                src_width = self.geotiff_dataset_original.width
+                src_height = self.geotiff_dataset_original.height
+                
+                # Calculate transform for reprojection
+                dst_transform, dst_width, dst_height = calculate_default_transform(
+                    src_crs, dst_crs, src_width, src_height,
+                    left=src_bounds.left, bottom=src_bounds.bottom,
+                    right=src_bounds.right, top=src_bounds.top
+                )
+                
+                # Reproject
+                reprojected_data = np.zeros((dst_height, dst_width), dtype=np.float32)
+                reproject(
+                    source=data,
+                    destination=reprojected_data,
+                    src_transform=self.geotiff_dataset_original.transform,
+                    src_crs=src_crs,
+                    dst_transform=dst_transform,
+                    dst_crs=dst_crs,
+                    resampling=Resampling.bilinear
+                )
+                data = reprojected_data
+                
+                # Get reprojected bounds
+                from rasterio.transform import array_bounds
+                dst_bounds = array_bounds(dst_height, dst_width, dst_transform)
+                extent = [dst_bounds.left, dst_bounds.right, dst_bounds.bottom, dst_bounds.top]
+            
+            # Filter Z-values
+            data[data < -11000] = np.nan
+            data[data > 0] = np.nan
+            
+            # Sample elevations and slopes along the line
+            left, right, bottom, top = extent
+            nrows, ncols = data.shape
+            rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
+            cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
+            
+            elevations = []
+            slopes = []
+            for r, c in zip(rows, cols):
+                ir, ic = int(round(r)), int(round(c))
+                elevations.append(data[ir, ic])
+                
+                # Slope calculation
+                slope = None
+                if 0 < ir < nrows-1 and 0 < ic < ncols-1:
+                    center_lat = (extent[2] + extent[3]) / 2
+                    m_per_deg_lat = 111320.0
+                    m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat))
+                    res_lat_deg = (extent[3] - extent[2]) / nrows
+                    res_lon_deg = (extent[1] - extent[0]) / ncols
+                    dx_m = res_lon_deg * m_per_deg_lon
+                    dy_m = res_lat_deg * m_per_deg_lat
+                    window = data[ir-1:ir+2, ic-1:ic+2]
+                    if window.shape == (3,3) and not np.all(np.isnan(window)):
+                        dz_dy, dz_dx = np.gradient(window, dy_m, dx_m)
+                        slope_rad = np.arctan(np.sqrt(dz_dx[1,1]**2 + dz_dy[1,1]**2))
+                        slope = np.degrees(slope_rad)
+                slopes.append(slope if slope is not None else np.nan)
+            
+            return np.array(elevations), np.array(slopes), extent
+            
+        except Exception as e:
+            print(f"Error reading profile data from GeoTIFF: {e}")
+            return None, None, None
+
     def _draw_crossline_profile(self):
         if not (
             self.geotiff_data_array is not None and
@@ -4794,33 +4905,40 @@ class SurveyPlanApp(QMainWindow):
         (lat1, lon1), (lat2, lon2) = self.cross_line_data
         lats = np.linspace(lat1, lat2, 100)
         lons = np.linspace(lon1, lon2, 100)
-        left, right, bottom, top = tuple(self.geotiff_extent)
-        nrows, ncols = self.geotiff_data_array.shape
-        rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
-        cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
-        elevations = []
-        slopes = []
-        for r, c in zip(rows, cols):
-            ir, ic = int(round(r)), int(round(c))
-            elevations.append(self.geotiff_data_array[ir, ic])
-            # Slope calculation (in degrees)
-            slope = None
-            if 0 < ir < nrows-1 and 0 < ic < ncols-1:
-                center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
-                m_per_deg_lat = 111320.0
-                m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat_geotiff))
-                res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / nrows
-                res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / ncols
-                dx_m = res_lon_deg * m_per_deg_lon
-                dy_m = res_lat_deg * m_per_deg_lat
-                window = self.geotiff_data_array[ir-1:ir+2, ic-1:ic+2]
-                if window.shape == (3,3) and not np.all(np.isnan(window)):
-                    dz_dy, dz_dx = np.gradient(window, dy_m, dx_m)
-                    slope_rad = np.arctan(np.sqrt(dz_dx[1,1]**2 + dz_dy[1,1]**2))
-                    slope = np.degrees(slope_rad)
-            slopes.append(slope if slope is not None else np.nan)
-        elevations = np.array(elevations)
-        slopes = np.array(slopes)
+        
+        # Use helper function to get data from original full dataset
+        elevations, slopes, profile_extent = self._get_profile_data_from_geotiff(lats, lons)
+        if elevations is None:
+            # Fallback to current data if helper fails
+            if self.geotiff_data_array is None or self.geotiff_extent is None:
+                return
+            left, right, bottom, top = tuple(self.geotiff_extent)
+            nrows, ncols = self.geotiff_data_array.shape
+            rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
+            cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
+            elevations = []
+            slopes = []
+            for r, c in zip(rows, cols):
+                ir, ic = int(round(r)), int(round(c))
+                elevations.append(self.geotiff_data_array[ir, ic])
+                # Slope calculation (in degrees)
+                slope = None
+                if 0 < ir < nrows-1 and 0 < ic < ncols-1:
+                    center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
+                    m_per_deg_lat = 111320.0
+                    m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat_geotiff))
+                    res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / nrows
+                    res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / ncols
+                    dx_m = res_lon_deg * m_per_deg_lon
+                    dy_m = res_lat_deg * m_per_deg_lat
+                    window = self.geotiff_data_array[ir-1:ir+2, ic-1:ic+2]
+                    if window.shape == (3,3) and not np.all(np.isnan(window)):
+                        dz_dy, dz_dx = np.gradient(window, dy_m, dx_m)
+                        slope_rad = np.arctan(np.sqrt(dz_dx[1,1]**2 + dz_dy[1,1]**2))
+                        slope = np.degrees(slope_rad)
+                slopes.append(slope if slope is not None else np.nan)
+            elevations = np.array(elevations)
+            slopes = np.array(slopes)
         if hasattr(self, 'local_proj_transformer') and self.local_proj_transformer is not None:
             eastings, northings = self.local_proj_transformer.transform(lons, lats)
             dists = np.sqrt((eastings - eastings[0])**2 + (northings - northings[0])**2)
@@ -4895,42 +5013,59 @@ class SurveyPlanApp(QMainWindow):
         self.profile_ax.set_ylabel("Elevation (m)", fontsize=8)
         self.profile_ax.tick_params(axis='both', which='major', labelsize=7)
         slope_ax = None
+        
+        # Always ensure canvas is updated, even if no data
+        if not (
+            hasattr(self, 'pitch_line_points') and
+            len(self.pitch_line_points) == 2
+        ):
+            # No data - just clear and update
+            self.profile_fig.tight_layout(pad=1.0)
+            if hasattr(self, 'profile_canvas'):
+                self.profile_canvas.draw_idle()
+            return
+        
         if (
-            self.geotiff_data_array is not None and
-            self.geotiff_extent is not None and
             hasattr(self, 'pitch_line_points') and
             len(self.pitch_line_points) == 2
         ):
             (lat1, lon1), (lat2, lon2) = self.pitch_line_points
             lats = np.linspace(lat1, lat2, 100)
             lons = np.linspace(lon1, lon2, 100)
-            left, right, bottom, top = tuple(self.geotiff_extent)
-            nrows, ncols = self.geotiff_data_array.shape
-            rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
-            cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
-            elevations = []
-            slopes = []
-            for r, c in zip(rows, cols):
-                ir, ic = int(round(r)), int(round(c))
-                elevations.append(self.geotiff_data_array[ir, ic])
-                # Slope calculation (in degrees)
-                slope = None
-                if 0 < ir < nrows-1 and 0 < ic < ncols-1:
-                    center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
-                    m_per_deg_lat = 111320.0
-                    m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat_geotiff))
-                    res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / nrows
-                    res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / ncols
-                    dx_m = res_lon_deg * m_per_deg_lon
-                    dy_m = res_lat_deg * m_per_deg_lat
-                    window = self.geotiff_data_array[ir-1:ir+2, ic-1:ic+2]
-                    if window.shape == (3,3) and not np.all(np.isnan(window)):
-                        dz_dy, dz_dx = np.gradient(window, dy_m, dx_m)
-                        slope_rad = np.arctan(np.sqrt(dz_dx[1,1]**2 + dz_dy[1,1]**2))
-                        slope = np.degrees(slope_rad)
-                slopes.append(slope if slope is not None else np.nan)
-            elevations = np.array(elevations)
-            slopes = np.array(slopes)
+            
+            # Use helper function to get data from original full dataset
+            elevations, slopes, profile_extent = self._get_profile_data_from_geotiff(lats, lons)
+            if elevations is None:
+                # Fallback to current data if helper fails
+                if self.geotiff_data_array is None or self.geotiff_extent is None:
+                    return
+                left, right, bottom, top = tuple(self.geotiff_extent)
+                nrows, ncols = self.geotiff_data_array.shape
+                rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
+                cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
+                elevations = []
+                slopes = []
+                for r, c in zip(rows, cols):
+                    ir, ic = int(round(r)), int(round(c))
+                    elevations.append(self.geotiff_data_array[ir, ic])
+                    # Slope calculation (in degrees)
+                    slope = None
+                    if 0 < ir < nrows-1 and 0 < ic < ncols-1:
+                        center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
+                        m_per_deg_lat = 111320.0
+                        m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat_geotiff))
+                        res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / nrows
+                        res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / ncols
+                        dx_m = res_lon_deg * m_per_deg_lon
+                        dy_m = res_lat_deg * m_per_deg_lat
+                        window = self.geotiff_data_array[ir-1:ir+2, ic-1:ic+2]
+                        if window.shape == (3,3) and not np.all(np.isnan(window)):
+                            dz_dy, dz_dx = np.gradient(window, dy_m, dx_m)
+                            slope_rad = np.arctan(np.sqrt(dz_dx[1,1]**2 + dz_dy[1,1]**2))
+                            slope = np.degrees(slope_rad)
+                    slopes.append(slope if slope is not None else np.nan)
+                elevations = np.array(elevations)
+                slopes = np.array(slopes)
             # Calculate true geodetic distance along the pitch line
             try:
                 import pyproj
@@ -7954,10 +8089,27 @@ class SurveyPlanApp(QMainWindow):
 
     def _draw_current_profile(self):
         # Helper to redraw the correct profile based on the current tab
-        if self.param_notebook.currentIndex() == 1:
-            self._draw_crossline_profile()
-        else:
+        if not hasattr(self, 'param_notebook'):
+            return
+        
+        if not hasattr(self, 'profile_ax') or not hasattr(self, 'profile_canvas'):
+            return
+        
+        current_tab = self.param_notebook.currentIndex()
+        if current_tab == 0:  # Calibration tab - show pitch line profile
             self._draw_pitch_line_profile()
+        elif current_tab == 1:  # Reference tab - show crossline profile
+            self._draw_crossline_profile()
+        elif current_tab == 2:  # Line tab - show line planning profile
+            self._draw_line_planning_profile()
+        else:
+            # Unknown tab - clear profile
+            self.profile_ax.clear()
+            self.profile_ax.set_title("Elevation Profile", fontsize=8)
+            self.profile_ax.set_xlabel("Distance (m)", fontsize=8)
+            self.profile_ax.set_ylabel("Elevation (m)", fontsize=8)
+            self.profile_fig.tight_layout(pad=1.0)
+            self.profile_canvas.draw()
 
 
     def set_ref_info_text(self, message, append=False):
@@ -8033,13 +8185,32 @@ class SurveyPlanApp(QMainWindow):
                 export_name = "Reference_0m_0deg"
             self.export_name_entry.setText(export_name)
         if hasattr(self, 'offset_direction_var'):
-            self.offset_direction_var.set("North")
+            # offset_direction_var is a string, not a widget
+            self.offset_direction_var = "North"
             if hasattr(self, 'offset_direction_combo'):
                 self.offset_direction_combo.setCurrentIndex(0)
         if hasattr(self, 'line_length_multiplier'):
-            self.line_length_multiplier.set(8.0)
+            # Check if it's a widget (QSlider) or just a value
+            if hasattr(self.line_length_multiplier, 'set'):
+                self.line_length_multiplier.set(8.0)
+            else:
+                self.line_length_multiplier = 8.0
+            # Also update the slider if it exists
+            if hasattr(self, 'multiplier_slider_len'):
+                self.multiplier_slider_len.setValue(int(8.0 * 10))
+            if hasattr(self, 'multiplier_label_len'):
+                self.multiplier_label_len.setText("8.0")
         if hasattr(self, 'dist_between_lines_multiplier'):
-            self.dist_between_lines_multiplier.set(1.0)
+            # Check if it's a widget (QSlider) or just a value
+            if hasattr(self.dist_between_lines_multiplier, 'set'):
+                self.dist_between_lines_multiplier.set(1.0)
+            else:
+                self.dist_between_lines_multiplier = 1.0
+            # Also update the slider if it exists
+            if hasattr(self, 'multiplier_slider_dist'):
+                self.multiplier_slider_dist.setValue(int(1.0 * 10))
+            if hasattr(self, 'multiplier_label_dist'):
+                self.multiplier_label_dist.setText("1.0")
         
         # Redraw plot (without clearing GeoTIFF)
         self._plot_survey_plan(preserve_view_limits=True)
@@ -8147,28 +8318,27 @@ class SurveyPlanApp(QMainWindow):
         self._plot_survey_plan(preserve_view_limits=True)
     
     def _on_tab_changed(self, event=None):
-        """Handle tab change event - clear previous tab's data and settings."""
+        """Handle tab change event - update profile plot for active tab."""
         if not hasattr(self, 'param_notebook'):
             return
         
         try:
             current_tab = self.param_notebook.currentIndex()
             
-            # Only clear if this is not the first tab change (i.e., user has actually switched tabs)
-            if self.tab_switch_initialized:
-                # Clear the previous tab's data (not the current one)
-                if self.previous_tab_index == 0:  # Calibration tab
-                    self._reset_calibration_tab()
-                elif self.previous_tab_index == 1:  # Reference tab
-                    self._reset_reference_tab()
-                elif self.previous_tab_index == 2:  # Line Planning tab
-                    self._reset_line_planning_tab()
-            
             # Mark as initialized and update previous tab index
             self.tab_switch_initialized = True
             self.previous_tab_index = current_tab
         except Exception as e:
             print(f"Error in tab change handler: {e}")
+        
+        # Always update profile plot to show the profile for the active tab
+        try:
+            self._draw_current_profile()
+            # Force immediate canvas update
+            if hasattr(self, 'profile_canvas'):
+                self.profile_canvas.draw()
+        except Exception as e:
+            print(f"Error updating profile plot: {e}")
 
     def _create_widgets(self):
         print("Creating widgets...")
@@ -8273,7 +8443,7 @@ class SurveyPlanApp(QMainWindow):
         self.activity_log_text = QTextEdit()
         self.activity_log_text.setReadOnly(True)
         # Set light yellow background and black text color for visibility
-        self.activity_log_text.setStyleSheet("background-color: #ffffe0; color: black;")
+        self.activity_log_text.setStyleSheet("background-color: #e0e0e0; color: black;")
         # Let it expand to fill the groupbox - no height constraint
         activity_log_layout.addWidget(self.activity_log_text, 1)  # Stretch factor 1 to fill available space
         
@@ -8836,9 +9006,18 @@ class SurveyPlanApp(QMainWindow):
         self.profile_ax.set_ylabel("Elevation (m)", fontsize=8)
         self.profile_ax.tick_params(axis='both', which='major', labelsize=7)
         slope_ax = None
+        
+        # Always ensure canvas is updated, even if no data
+        if not (
+            hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 2
+        ):
+            # No data - just clear and update
+            self.profile_fig.tight_layout(pad=1.0)
+            if hasattr(self, 'profile_canvas'):
+                self.profile_canvas.draw_idle()
+            return
+        
         if (
-            hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None and
-            hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None and
             hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 2
         ):
             # Interpolate points along the line
@@ -8873,35 +9052,41 @@ class SurveyPlanApp(QMainWindow):
             lats = np.array(lats)
             lons = np.array(lons)
             dists = np.array(dists)
-            # Sample elevations and slopes
-            left, right, bottom, top = tuple(self.geotiff_extent)
-            nrows, ncols = self.geotiff_data_array.shape
-            rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
-            cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
-            elevations = []
-            slopes = []
-            for idx, (r, c) in enumerate(zip(rows, cols)):
-                ir, ic = int(round(r)), int(round(c))
-                elev = self.geotiff_data_array[ir, ic]
-                elevations.append(elev)
-                # Slope calculation (in degrees)
-                slope = None
-                if 0 < ir < nrows-1 and 0 < ic < ncols-1:
-                    center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
-                    m_per_deg_lat = 111320.0
-                    m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat_geotiff))
-                    res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / nrows
-                    res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / ncols
-                    dx_m = res_lon_deg * m_per_deg_lon
-                    dy_m = res_lat_deg * m_per_deg_lat
-                    window = self.geotiff_data_array[ir-1:ir+2, ic-1:ic+2]
-                    if window.shape == (3,3) and not np.all(np.isnan(window)):
-                        dz_dy, dz_dx = np.gradient(window, dy_m, dx_m)
-                        slope_rad = np.arctan(np.sqrt(dz_dx[1,1]**2 + dz_dy[1,1]**2))
-                        slope = np.degrees(slope_rad)
-                slopes.append(slope if slope is not None else np.nan)
-            elevations = np.array(elevations)
-            slopes = np.array(slopes)
+            
+            # Use helper function to get data from original full dataset
+            elevations, slopes, profile_extent = self._get_profile_data_from_geotiff(lats, lons)
+            if elevations is None:
+                # Fallback to current data if helper fails
+                if self.geotiff_data_array is None or self.geotiff_extent is None:
+                    return
+                left, right, bottom, top = tuple(self.geotiff_extent)
+                nrows, ncols = self.geotiff_data_array.shape
+                rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
+                cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
+                elevations = []
+                slopes = []
+                for idx, (r, c) in enumerate(zip(rows, cols)):
+                    ir, ic = int(round(r)), int(round(c))
+                    elev = self.geotiff_data_array[ir, ic]
+                    elevations.append(elev)
+                    # Slope calculation (in degrees)
+                    slope = None
+                    if 0 < ir < nrows-1 and 0 < ic < ncols-1:
+                        center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
+                        m_per_deg_lat = 111320.0
+                        m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat_geotiff))
+                        res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / nrows
+                        res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / ncols
+                        dx_m = res_lon_deg * m_per_deg_lon
+                        dy_m = res_lat_deg * m_per_deg_lat
+                        window = self.geotiff_data_array[ir-1:ir+2, ic-1:ic+2]
+                        if window.shape == (3,3) and not np.all(np.isnan(window)):
+                            dz_dy, dz_dx = np.gradient(window, dy_m, dx_m)
+                            slope_rad = np.arctan(np.sqrt(dz_dx[1,1]**2 + dz_dy[1,1]**2))
+                            slope = np.degrees(slope_rad)
+                    slopes.append(slope if slope is not None else np.nan)
+                elevations = np.array(elevations)
+                slopes = np.array(slopes)
             self.profile_ax.plot(dists, elevations, color='orange', lw=1, label='Elevation')
             # Plot waypoints as circles on the elevation profile
             waypoint_elevations = []
