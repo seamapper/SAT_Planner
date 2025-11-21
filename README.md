@@ -1,6 +1,6 @@
 # SAT/QAT Planner
 
-A comprehensive SHipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) planning tool with GeoTIFF support, built with PyQt6.
+A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) planning tool with GeoTIFF support, built with PyQt6.
 
 ## Overview
 
