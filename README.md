@@ -1,6 +1,6 @@
 # SAT/QAT Planner
 
-A comprehensive survey planning application for multibeam survey operations with GeoTIFF support, built with PyQt6.
+A comprehensive SHipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) planning tool with GeoTIFF support, built with PyQt6.
 
 ## Overview
 
