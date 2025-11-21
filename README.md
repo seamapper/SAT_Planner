@@ -1,10 +1,10 @@
 # SAT/QAT Planner
 
-A comprehensive survey planning application for multibeam survey operations with GeoTIFF support, built with PyQt6.
+A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) planning tool with GeoTIFF support, built with PyQt6.
 
 ## Overview
 
-The SAT/QAT Planner is a desktop application designed for planning and visualizing multibeam survey operations. It supports three main planning modes:
+The SAT/QAT Planner is a desktop application designed for planning and visualizing multibeam testing operations. It supports three main planning modes:
 - **Calibration Survey Planning**: Plan pitch, roll, and heading calibration lines
 - **Reference Survey Planning**: Generate parallel survey lines with customizable parameters
 - **Line Planning**: Interactive line drawing with real-time elevation profiles
