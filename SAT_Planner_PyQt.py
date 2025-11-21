@@ -2805,6 +2805,8 @@ class SurveyPlanApp(QMainWindow):
                 self.geotiff_dataset_original = None
             self.geotiff_data_array = None
             self.geotiff_extent = None
+            self.initial_geotiff_xlim = None
+            self.initial_geotiff_ylim = None
             self.geotiff_image_plot = None
             self.geotiff_hillshade_plot = None
             # Robustly remove colorbars
@@ -3329,6 +3331,9 @@ class SurveyPlanApp(QMainWindow):
             
             # Update the plot and zoom after loading
             self._plot_survey_plan()
+            # Store the initial limits after first plot
+            self.initial_geotiff_xlim = self.current_xlim
+            self.initial_geotiff_ylim = self.current_ylim
             self._zoom_to_geotiff()
 
         except RasterioIOError as e:
@@ -4180,7 +4185,7 @@ class SurveyPlanApp(QMainWindow):
             self.set_ref_info_text("GeoTIFF removed.")
 
     def _zoom_to_geotiff(self):
-        """Zooms the plot to the GeoTIFF bounds without clearing existing lines."""
+        """Zooms the plot to the initial GeoTIFF bounds (same as when first loaded)."""
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot zoom to GeoTIFF.")
             return
@@ -4189,18 +4194,28 @@ class SurveyPlanApp(QMainWindow):
             self._show_message("warning","No GeoTIFF", "No GeoTIFF underlay is loaded to zoom to.")
             return
 
-        # Calculate consistent plot limits based on GeoTIFF extent
-        self.current_xlim, self.current_ylim = self._calculate_consistent_plot_limits()
+        # Use stored initial limits if available, otherwise calculate them
+        if hasattr(self, 'initial_geotiff_xlim') and self.initial_geotiff_xlim is not None and \
+           hasattr(self, 'initial_geotiff_ylim') and self.initial_geotiff_ylim is not None:
+            # Restore to the exact initial limits when GeoTIFF was first loaded
+            self.current_xlim = self.initial_geotiff_xlim
+            self.current_ylim = self.initial_geotiff_ylim
+        else:
+            # Fallback: calculate consistent plot limits (same method used when GeoTIFF is first loaded)
+            self.current_xlim, self.current_ylim = self._calculate_consistent_plot_limits()
+            # Store them for future use
+            self.initial_geotiff_xlim = self.current_xlim
+            self.initial_geotiff_ylim = self.current_ylim
         
-        # Store these as the user's intended view limits
+        # Store these as the user's intended view limits BEFORE setting axes
         self._last_user_xlim = self.current_xlim
         self._last_user_ylim = self.current_ylim
         
-        # Set the axis limits to zoom to GeoTIFF bounds
+        # Set axis limits FIRST so _load_geotiff_at_resolution can see them
         self.ax.set_xlim(self.current_xlim)
         self.ax.set_ylim(self.current_ylim)
         
-        # Update zoom level if dynamic resolution is enabled
+        # Calculate zoom level based on the view extent vs full GeoTIFF extent
         if self.dynamic_resolution_enabled and hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None:
             full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
             full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
@@ -4209,19 +4224,24 @@ class SurveyPlanApp(QMainWindow):
             
             width_ratio = current_width / full_width if full_width > 0 else 1.0
             height_ratio = current_height / full_height if full_height > 0 else 1.0
-            new_zoom_level = min(width_ratio, height_ratio)
+            # Use the larger ratio (more zoomed in) to determine resolution
+            new_zoom_level = max(width_ratio, height_ratio)
             new_zoom_level = max(0.01, min(10.0, new_zoom_level))
             self.geotiff_zoom_level = new_zoom_level
+        else:
+            # If dynamic resolution is disabled, use full resolution
+            self.geotiff_zoom_level = 1.0
         
-        # Reload GeoTIFF data to cover the new extent if needed
+        # Reload GeoTIFF data at appropriate resolution for the view
+        # This now uses the axis limits we just set
         if self.geotiff_dataset_original is not None:
             success = self._load_geotiff_at_resolution()
             if not success:
                 self._show_message("warning","GeoTIFF Reload", "Could not reload GeoTIFF data for the new view.")
         
-        # Just redraw the canvas without replotting everything
-        # This preserves all existing lines from other tabs
-        self.canvas.draw_idle()
+        # Replot everything with preserve_view_limits=True to keep our limits
+        # This will properly display the GeoTIFF and preserve all existing lines
+        self._plot_survey_plan(preserve_view_limits=True)
 
     def _reset_to_consistent_view(self):
         """Reset the plot view to the consistent limits that maintain window size."""
@@ -5806,6 +5826,17 @@ class SurveyPlanApp(QMainWindow):
             valid_count = np.sum(~np.isnan(elevations))
             offset_value = abs(median_val)
             self.cal_line_offset_entry.setText(f"{offset_value:.2f}")
+            
+            # Update Pitch Line Info labels
+            if hasattr(self, 'pitch_shallowest_depth_label'):
+                self.pitch_shallowest_depth_label.setText(f"{abs(max_val):.2f}")
+            if hasattr(self, 'pitch_max_depth_label'):
+                self.pitch_max_depth_label.setText(f"{abs(min_val):.2f}")
+            if hasattr(self, 'pitch_mean_depth_label'):
+                self.pitch_mean_depth_label.setText(f"{abs(mean_val):.2f}")
+            if hasattr(self, 'pitch_median_depth_label'):
+                self.pitch_median_depth_label.setText(f"{abs(median_val):.2f}")
+            
             # Log calculation details to activity log
             if hasattr(self, 'set_cal_info_text'):
                 self.set_cal_info_text(
@@ -5816,6 +5847,17 @@ class SurveyPlanApp(QMainWindow):
                 )
         else:
             self.cal_line_offset_entry.setText("-")
+            
+            # Clear Pitch Line Info labels
+            if hasattr(self, 'pitch_shallowest_depth_label'):
+                self.pitch_shallowest_depth_label.setText("-")
+            if hasattr(self, 'pitch_max_depth_label'):
+                self.pitch_max_depth_label.setText("-")
+            if hasattr(self, 'pitch_mean_depth_label'):
+                self.pitch_mean_depth_label.setText("-")
+            if hasattr(self, 'pitch_median_depth_label'):
+                self.pitch_median_depth_label.setText("-")
+            
             if hasattr(self, 'set_cal_info_text'):
                 self.set_cal_info_text(
                     "Heading Line Offset: Could not calculate (no valid elevation data along pitch line).",
@@ -7523,6 +7565,17 @@ class SurveyPlanApp(QMainWindow):
         self.pitch_line_points = []
         self.heading_lines = []
         self.roll_line_points = []
+        
+        # Clear Pitch Line Info labels
+        if hasattr(self, 'pitch_shallowest_depth_label'):
+            self.pitch_shallowest_depth_label.setText("-")
+        if hasattr(self, 'pitch_max_depth_label'):
+            self.pitch_max_depth_label.setText("-")
+        if hasattr(self, 'pitch_mean_depth_label'):
+            self.pitch_mean_depth_label.setText("-")
+        if hasattr(self, 'pitch_median_depth_label'):
+            self.pitch_median_depth_label.setText("-")
+        
         self._plot_survey_plan(preserve_view_limits=True)
         self._draw_pitch_line_profile()
         self._update_cal_line_times()
@@ -7999,6 +8052,8 @@ class SurveyPlanApp(QMainWindow):
         # --- GeoTIFF Control GroupBox (above tabs) ---
         geotiff_groupbox = QGroupBox("GeoTIFF Control")
         geotiff_layout = QVBoxLayout(geotiff_groupbox)
+        geotiff_layout.setSpacing(0)
+        geotiff_layout.setContentsMargins(9, 9, 9, 9)
         
         # Load GeoTIFF and Remove GeoTIFF buttons
         geotiff_button_frame = QWidget()
@@ -8014,19 +8069,26 @@ class SurveyPlanApp(QMainWindow):
         self.remove_geotiff_btn.setEnabled(False)  # Disabled initially (no GeoTIFF loaded)
         geotiff_button_layout.addWidget(self.remove_geotiff_btn)
         geotiff_layout.addWidget(geotiff_button_frame)
+        geotiff_layout.addSpacing(3)
         
-        # Display mode dropdown
-        geotiff_layout.addWidget(QLabel("Display Mode:"))
+        # Display mode dropdown - label and combo on same line
+        display_frame = QWidget()
+        display_layout = QHBoxLayout(display_frame)
+        display_layout.setContentsMargins(0, 0, 0, 0)
+        display_layout.addWidget(QLabel("Display:"))
         self.elevation_slope_combo = QComboBox()
         self.elevation_slope_combo.addItems(["Shaded Relief", "Shaded Slope", "Hillshade", "Slope"])
         self.elevation_slope_combo.setCurrentText("Shaded Relief")  # Set default
         self.elevation_slope_combo.currentTextChanged.connect(self._on_geotiff_display_mode_changed)
-        geotiff_layout.addWidget(self.elevation_slope_combo)
+        display_layout.addWidget(self.elevation_slope_combo)
+        geotiff_layout.addWidget(display_frame)
+        geotiff_layout.addSpacing(3)
         
         # Dynamic Resolution button
         self.dynamic_resolution_btn = QPushButton("Dynamic Resolution: ON")
         self.dynamic_resolution_btn.clicked.connect(self._toggle_dynamic_resolution)
         geotiff_layout.addWidget(self.dynamic_resolution_btn)
+        geotiff_layout.addSpacing(3)
         
         # Show Contours checkbox and Interval on same row
         contours_interval_frame = QWidget()
@@ -8205,7 +8267,7 @@ class SurveyPlanApp(QMainWindow):
         row += 1
         
         # --- Plot Control GroupBox ---
-        ref_plot_control_groupbox = QGroupBox("Plot Control")
+        ref_plot_control_groupbox = QGroupBox("Reference Plot Control")
         ref_plot_control_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ref_plot_control_layout = QVBoxLayout(ref_plot_control_groupbox)
         ref_plot_control_layout.setSpacing(0)
@@ -8230,7 +8292,7 @@ class SurveyPlanApp(QMainWindow):
         row += 1
         
         # --- Test Plan Info GroupBox ---
-        ref_test_plan_info_groupbox = QGroupBox("Test Plan Info")
+        ref_test_plan_info_groupbox = QGroupBox("Reference Info")
         ref_test_plan_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ref_test_plan_info_layout = QGridLayout(ref_test_plan_info_groupbox)
         ref_test_plan_info_layout.setSpacing(3)
@@ -8258,7 +8320,7 @@ class SurveyPlanApp(QMainWindow):
         row += 1
         
         # --- Import/Export GroupBox ---
-        ref_import_export_groupbox = QGroupBox("Import/Export")
+        ref_import_export_groupbox = QGroupBox("Reference Import/Export")
         ref_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ref_import_export_layout = QVBoxLayout(ref_import_export_groupbox)
         ref_import_export_layout.setSpacing(0)
@@ -8370,8 +8432,41 @@ class SurveyPlanApp(QMainWindow):
         cal_layout.setRowStretch(cal_row, 0)
         cal_row += 1
         
+        # --- Pitch Line Info GroupBox ---
+        pitch_line_info_groupbox = QGroupBox("Pitch Line Info")
+        pitch_line_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        pitch_line_info_layout = QGridLayout(pitch_line_info_groupbox)
+        pitch_line_info_layout.setSpacing(3)
+        pitch_line_info_layout.setContentsMargins(9, 9, 9, 9)
+        pitch_line_info_layout.setColumnStretch(0, 1)
+        pitch_line_info_layout.setColumnStretch(1, 2)
+        
+        pitch_info_row = 0
+        pitch_line_info_layout.addWidget(QLabel("Shallowest Depth (m):"), pitch_info_row, 0)
+        self.pitch_shallowest_depth_label = QLabel("-")
+        pitch_line_info_layout.addWidget(self.pitch_shallowest_depth_label, pitch_info_row, 1)
+        pitch_info_row += 1
+        
+        pitch_line_info_layout.addWidget(QLabel("Maximum Depth (m):"), pitch_info_row, 0)
+        self.pitch_max_depth_label = QLabel("-")
+        pitch_line_info_layout.addWidget(self.pitch_max_depth_label, pitch_info_row, 1)
+        pitch_info_row += 1
+        
+        pitch_line_info_layout.addWidget(QLabel("Mean Depth (m):"), pitch_info_row, 0)
+        self.pitch_mean_depth_label = QLabel("-")
+        pitch_line_info_layout.addWidget(self.pitch_mean_depth_label, pitch_info_row, 1)
+        pitch_info_row += 1
+        
+        pitch_line_info_layout.addWidget(QLabel("Median Depth (m):"), pitch_info_row, 0)
+        self.pitch_median_depth_label = QLabel("-")
+        pitch_line_info_layout.addWidget(self.pitch_median_depth_label, pitch_info_row, 1)
+        
+        cal_layout.addWidget(pitch_line_info_groupbox, cal_row, 0, 1, 2)
+        cal_layout.setRowStretch(cal_row, 0)
+        cal_row += 1
+        
         # --- Plot Control GroupBox ---
-        cal_plot_control_groupbox = QGroupBox("Plot Control")
+        cal_plot_control_groupbox = QGroupBox("Calibration Plot Control")
         cal_plot_control_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         cal_plot_control_layout = QVBoxLayout(cal_plot_control_groupbox)
         cal_plot_control_layout.setSpacing(0)
@@ -8396,7 +8491,7 @@ class SurveyPlanApp(QMainWindow):
         cal_row += 1
         
         # --- Test Plan Info GroupBox ---
-        cal_test_plan_info_groupbox = QGroupBox("Test Plan Info")
+        cal_test_plan_info_groupbox = QGroupBox("Calibration Info")
         cal_test_plan_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         cal_test_plan_info_layout = QGridLayout(cal_test_plan_info_groupbox)
         cal_test_plan_info_layout.setSpacing(3)
@@ -8419,7 +8514,7 @@ class SurveyPlanApp(QMainWindow):
         cal_row += 1
         
         # --- Import/Export GroupBox ---
-        cal_import_export_groupbox = QGroupBox("Import/Export")
+        cal_import_export_groupbox = QGroupBox("Calibration Import/Export")
         cal_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         cal_import_export_layout = QVBoxLayout(cal_import_export_groupbox)
         cal_import_export_layout.setSpacing(0)
@@ -8491,7 +8586,7 @@ class SurveyPlanApp(QMainWindow):
         line_row += 1
         
         # --- Plot Control GroupBox ---
-        line_plot_control_groupbox = QGroupBox("Plot Control")
+        line_plot_control_groupbox = QGroupBox("Line Plot Control")
         line_plot_control_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         line_plot_control_layout = QVBoxLayout(line_plot_control_groupbox)
         line_plot_control_layout.setSpacing(0)
@@ -8511,7 +8606,7 @@ class SurveyPlanApp(QMainWindow):
         line_row += 1
         
         # --- Test Plan Info GroupBox ---
-        line_test_plan_info_groupbox = QGroupBox("Test Plan Info")
+        line_test_plan_info_groupbox = QGroupBox("Line Info")
         line_test_plan_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         line_test_plan_info_layout = QGridLayout(line_test_plan_info_groupbox)
         line_test_plan_info_layout.setSpacing(3)
@@ -8534,7 +8629,7 @@ class SurveyPlanApp(QMainWindow):
         line_row += 1
         
         # --- Import/Export GroupBox ---
-        line_import_export_groupbox = QGroupBox("Import/Export")
+        line_import_export_groupbox = QGroupBox("Line Import/Export")
         line_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         line_import_export_layout = QVBoxLayout(line_import_export_groupbox)
         line_import_export_layout.setSpacing(0)
