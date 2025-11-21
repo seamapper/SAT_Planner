@@ -31,7 +31,8 @@ except ImportError:
 # __version__ = "2025.01"  # 1st version of the app
 #__version__ = "2025.02"  # Added metadata file saving/loading, contour interval synchronization
 # __version__ = "2025.03"  # Added line planning, import/export of lines, and other improvements
-__version__ = "2025.04"  # Converted to PyQt6
+# __version__ = "2025.04"  # Converted to PyQt6
+__version__ = "2025.05"  # Added ability to plan all tests (calibration, reference, and line planning) at the same time, fixed profile plot not updating when switching tabs, and other improvements
 
 # --- Conditional Imports for Geospatial Libraries ---
 GEOSPATIAL_LIBS_AVAILABLE = True  # Assume true until an import fails
@@ -4284,19 +4285,31 @@ class SurveyPlanApp(QMainWindow):
         self.ax.set_xlim(self.current_xlim)
         self.ax.set_ylim(self.current_ylim)
         
-        # Calculate zoom level based on the view extent vs full GeoTIFF extent
-        if self.dynamic_resolution_enabled and hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None:
-            full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
-            full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
-            current_width = self.current_xlim[1] - self.current_xlim[0]
-            current_height = self.current_ylim[1] - self.current_ylim[0]
+        # Calculate zoom level based on the view extent vs original full GeoTIFF extent
+        if self.dynamic_resolution_enabled:
+            # Use original extent for comparison, not current extent (which may be a subset)
+            if hasattr(self, 'geotiff_original_extent') and self.geotiff_original_extent is not None:
+                full_extent = self.geotiff_original_extent
+            elif hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None:
+                full_extent = self.geotiff_extent
+            else:
+                full_extent = None
             
-            width_ratio = current_width / full_width if full_width > 0 else 1.0
-            height_ratio = current_height / full_height if full_height > 0 else 1.0
-            # Use the larger ratio (more zoomed in) to determine resolution
-            new_zoom_level = max(width_ratio, height_ratio)
-            new_zoom_level = max(0.01, min(10.0, new_zoom_level))
-            self.geotiff_zoom_level = new_zoom_level
+            if full_extent is not None:
+                full_width = full_extent[1] - full_extent[0]
+                full_height = full_extent[3] - full_extent[2]
+                current_width = self.current_xlim[1] - self.current_xlim[0]
+                current_height = self.current_ylim[1] - self.current_ylim[0]
+                
+                width_ratio = current_width / full_width if full_width > 0 else 1.0
+                height_ratio = current_height / full_height if full_height > 0 else 1.0
+                # Use the larger ratio (more zoomed in) to determine resolution
+                new_zoom_level = max(width_ratio, height_ratio)
+                new_zoom_level = max(0.01, min(10.0, new_zoom_level))
+                self.geotiff_zoom_level = new_zoom_level
+            else:
+                # If no extent available, use full resolution
+                self.geotiff_zoom_level = 1.0
         else:
             # If dynamic resolution is disabled, use full resolution
             self.geotiff_zoom_level = 1.0
