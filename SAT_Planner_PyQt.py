@@ -4,6 +4,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar, QGroupBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat
+from PyQt6.QtGui import QFont, QPixmap
+
 # Ensure matplotlib is imported (for PyInstaller)
 import matplotlib
 matplotlib.use('QtAgg')
@@ -13,6 +15,7 @@ from matplotlib.colors import LightSource
 from matplotlib.figure import Figure
 import numpy as np
 import os
+import sys
 import csv
 import traceback  # Added for more detailed error logging
 import json
@@ -28,11 +31,61 @@ try:
 except ImportError:
     pyproj = None
 
+"""
+UNH/CCOM-JHC Shipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) Planner
+A Python application to help plan and visualize shipboard acceptance testing and quality assurance testing.
+
+![Example Plot](media/SAT_Planner.jpg)
+
+Program by Paul Johnson, pjohnson@ccom.unh.edu
+Date: 2025-09-12
+
+Center for Coastal and Ocean Mapping/Joint Hydrographic Center, University of New Hampshire
+
+This program was developed at the University of New Hampshire, Center for Coastal and Ocean Mapping - Joint Hydrographic Center (UNH/CCOM-JHC) under the grant NA20NOS4000196 from the National Oceanic and Atmospheric Administration (NOAA).
+
+Copyright (c) 2025, University of New Hampshire Center for Coastal and Ocean Mapping / Joint Hydrographic Center (UNH/CCOM-JHC)
+All rights reserved.
+
+BSD 3-Clause License
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+For the full license text, see the LICENSE file in the project root.
+
+"""
+
 # __version__ = "2025.01"  # 1st version of the app
-#__version__ = "2025.02"  # Added metadata file saving/loading, contour interval synchronization
+# __version__ = "2025.02"  # Added metadata file saving/loading, contour interval synchronization
 # __version__ = "2025.03"  # Added line planning, import/export of lines, and other improvements
 # __version__ = "2025.04"  # Converted to PyQt6
-__version__ = "2025.05"  # Added ability to plan all tests (calibration, reference, and line planning) at the same time, fixed profile plot not updating when switching tabs, and other improvements
+# __version__ = "2025.05"  # Added ability to plan all tests (calibration, reference, and line planning) at the same time, fixed profile plot not updating when switching tabs, and other improvements
+# __version__ = "2025.06"  # Fixed labeling of waypoints in line planning tab, fixed preservation of lines when changing tabs, and other improvements
+# __version__ = "2025.07"  # Added ability to plan all tests (calibration, reference, and line planning) at the same time, fixed profile plot not updating when switching tabs, and other improvements
+__version__ = "2025.08"  # Added About button to the profile plot, and other improvements
 
 # --- Conditional Imports for Geospatial Libraries ---
 GEOSPATIAL_LIBS_AVAILABLE = True  # Assume true until an import fails
@@ -336,7 +389,11 @@ class SurveyPlanApp(QMainWindow):
                     if hasattr(self, 'line_planning_info_text') and self.line_planning_info_text is not None:
                         self.line_planning_info_text.set_visible(False)
                         self.line_planning_info_text = None
-                    self.canvas.draw_idle()
+                    # Redraw plot to show waypoint labels
+                    if len(self.line_planning_points) >= 2:
+                        self._plot_survey_plan(preserve_view_limits=True)
+                    else:
+                        self.canvas.draw_idle()
                     # Update button states
                     self._update_line_planning_button_states()
                     return  # Do not process as other modes
@@ -833,6 +890,11 @@ class SurveyPlanApp(QMainWindow):
         self.slope_profile_checkbox = QCheckBox("Show Slope Profile")
         self.slope_profile_checkbox.setChecked(self.show_slope_profile_var)
         self.slope_profile_checkbox.stateChanged.connect(self._draw_current_profile)
+        
+        # About button (only create once)
+        if not hasattr(self, 'about_btn'):
+            self.about_btn = QPushButton("About This Program")
+            self.about_btn.clicked.connect(self._show_about_dialog)
 
         self._setup_layout()
 
@@ -945,6 +1007,114 @@ class SurveyPlanApp(QMainWindow):
         reply = QMessageBox.question(self, title, message,
                                      QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
         return reply == QMessageBox.StandardButton.Ok
+    
+    def _show_about_dialog(self):
+        """Show About dialog with program information"""
+        # Create dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("About This Program")
+        dialog.setMinimumWidth(500)
+        dialog.setMinimumHeight(400)
+        
+        # Main layout
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Program name
+        program_name = QLabel(f"UNH/CCOM-JHC SAT PLanner v{__version__}")
+        program_name.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        program_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(program_name)
+        
+        # Get compilation date
+        compile_date = "Unknown"
+        try:
+            if getattr(sys, 'frozen', False):
+                # Running as compiled exe
+                exe_path = sys.executable
+                if os.path.exists(exe_path):
+                    mod_time = os.path.getmtime(exe_path)
+                    compile_date = datetime.datetime.fromtimestamp(mod_time).strftime("%B %d, %Y")
+            else:
+                # Running as script - use script modification date
+                script_path = __file__
+                if os.path.exists(script_path):
+                    mod_time = os.path.getmtime(script_path)
+                    compile_date = datetime.datetime.fromtimestamp(mod_time).strftime("%B %d, %Y")
+        except Exception:
+            compile_date = "Unknown"
+        
+        # Compilation date
+        date_label = QLabel(f"Compiled: {compile_date}")
+        date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        date_label.setStyleSheet("font-size: 10pt; color: gray;")
+        layout.addWidget(date_label)
+        
+        # CCOM logo/image
+        logo_path = os.path.join(os.path.dirname(__file__), "media", "CCOM.png")
+        if os.path.exists(logo_path):
+            logo_label = QLabel()
+            pixmap = QPixmap(logo_path)
+            # Scale logo to reasonable size (max width 300px)
+            if pixmap.width() > 300:
+                pixmap = pixmap.scaledToWidth(300, Qt.TransformationMode.SmoothTransformation)
+            logo_label.setPixmap(pixmap)
+            logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(logo_label)
+        
+        # Author name
+        author_label = QLabel("Paul Johnson")
+        author_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        author_label.setStyleSheet("font-size: 12pt; font-weight: bold; margin-top: 10px;")
+        layout.addWidget(author_label)
+        
+        # Author email
+        email_label = QLabel("pjohnson@ccom.unh.edu")
+        email_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        email_label.setStyleSheet("font-size: 10pt; margin-top: 3px; color: #333;")
+        layout.addWidget(email_label)
+        
+        # Institution
+        institution_label = QLabel("Center for Coastal and Ocean Mapping/Joint Hydrographic Center, University of New Hampshire")
+        institution_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        institution_label.setWordWrap(True)
+        institution_label.setStyleSheet("font-size: 10pt; margin-top: 5px;")
+        layout.addWidget(institution_label)
+        
+        # Grant information
+        grant_text = ("This program was developed at the University of New Hampshire, "
+                     "Center for Coastal and Ocean Mapping - Joint Hydrographic Center "
+                     "(UNH/CCOM-JHC) under the grant NA20NOS4000196 from the National "
+                     "Oceanic and Atmospheric Administration (NOAA).")
+        grant_label = QLabel(grant_text)
+        grant_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        grant_label.setWordWrap(True)
+        grant_label.setStyleSheet("font-size: 9pt; margin-top: 15px; color: #555;")
+        layout.addWidget(grant_label)
+        
+        # License information
+        license_label = QLabel("This software is released for general use under the BSD 3-Clause License.")
+        license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        license_label.setWordWrap(True)
+        license_label.setStyleSheet("font-size: 9pt; margin-top: 10px; color: #555;")
+        layout.addWidget(license_label)
+        
+        # Add stretch to push everything up
+        layout.addStretch()
+        
+        # OK button
+        ok_button = QPushButton("OK")
+        ok_button.setMaximumWidth(100)
+        ok_button.clicked.connect(dialog.accept)
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(ok_button)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+        
+        # Show dialog
+        dialog.exec()
 
     def set_cal_info_text(self, message, append=False):
         """Add a message to the Activity Log with [Calibration] prefix. Maintains up to 200 lines of history."""
@@ -1222,7 +1392,11 @@ class SurveyPlanApp(QMainWindow):
                     if hasattr(self, 'line_planning_info_text') and self.line_planning_info_text is not None:
                         self.line_planning_info_text.set_visible(False)
                         self.line_planning_info_text = None
-                    self.canvas.draw_idle()
+                    # Redraw plot to show waypoint labels
+                    if len(self.line_planning_points) >= 2:
+                        self._plot_survey_plan(preserve_view_limits=True)
+                    else:
+                        self.canvas.draw_idle()
                     # Update button states
                     self._update_line_planning_button_states()
                     return  # Do not process as other modes
@@ -1719,6 +1893,11 @@ class SurveyPlanApp(QMainWindow):
         self.slope_profile_checkbox = QCheckBox("Show Slope Profile")
         self.slope_profile_checkbox.setChecked(self.show_slope_profile_var)
         self.slope_profile_checkbox.stateChanged.connect(self._draw_current_profile)
+        
+        # About button (only create once)
+        if not hasattr(self, 'about_btn'):
+            self.about_btn = QPushButton("About This Program")
+            self.about_btn.clicked.connect(self._show_about_dialog)
 
         self._setup_layout()
 
@@ -1866,7 +2045,16 @@ class SurveyPlanApp(QMainWindow):
                 profile_layout = QVBoxLayout()
                 profile_layout.setContentsMargins(0, 0, 0, 0)
                 profile_layout.addWidget(self.profile_widget)
-                profile_layout.addWidget(self.slope_profile_checkbox)
+                
+                # Create horizontal layout for checkbox and About button
+                checkbox_button_layout = QHBoxLayout()
+                checkbox_button_layout.setContentsMargins(0, 0, 0, 0)
+                checkbox_button_layout.addWidget(self.slope_profile_checkbox)
+                checkbox_button_layout.addStretch()  # Push button to the right
+                if hasattr(self, 'about_btn'):
+                    checkbox_button_layout.addWidget(self.about_btn)
+                profile_layout.addLayout(checkbox_button_layout)
+                
                 profile_widget = QWidget()
                 profile_widget.setLayout(profile_layout)
                 profile_widget.setMaximumHeight(250)  # Limit profile height
@@ -2278,7 +2466,11 @@ class SurveyPlanApp(QMainWindow):
             self._show_message("error","Calculation Error", error_msg)
 
         # In _generate_and_plot and _load_geotiff, after plotting/plan generation, call:
-        self._draw_crossline_profile()
+        # Use _draw_current_profile to draw the appropriate profile based on active tab
+        if hasattr(self, '_draw_current_profile'):
+            self._draw_current_profile()
+        else:
+            self._draw_crossline_profile()
 
     def _remove_colorbar(self, colorbar_attr):
         colorbar = getattr(self, colorbar_attr, None)
@@ -2395,7 +2587,8 @@ class SurveyPlanApp(QMainWindow):
                         # Add colorbar for elevation
                         # Let matplotlib automatically adjust the axes position (like original Tkinter version)
                         self.elevation_colorbar = self.figure.colorbar(self.geotiff_image_plot, ax=self.ax,
-                                                                       orientation='vertical', label='Elevation (m)')
+                                                                       orientation='vertical', label='Elevation (m)',
+                                                                       pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
 
                     elif self.geotiff_display_mode == "hillshade_only":
                         # Hillshade only mode - no overlay, just the hillshade
@@ -2442,7 +2635,8 @@ class SurveyPlanApp(QMainWindow):
                                                                  zorder=-1)
 
                         self.slope_colorbar = self.figure.colorbar(self.geotiff_image_plot, ax=self.ax,
-                                                                   orientation='vertical', label='Slope (degrees)')
+                                                                   orientation='vertical', label='Slope (degrees)',
+                                                                   pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
 
                         num_ticks = 7
                         tick_values = np.linspace(0, max_slope_for_cmap, num_ticks)
@@ -2480,7 +2674,8 @@ class SurveyPlanApp(QMainWindow):
                                                              vmax=max_slope_for_cmap, zorder=-1)
 
                     self.slope_colorbar = self.figure.colorbar(self.geotiff_image_plot, ax=self.ax,
-                                                               orientation='vertical', label='Slope (degrees)')
+                                                               orientation='vertical', label='Slope (degrees)',
+                                                               pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
 
                     num_ticks = 7
                     tick_values = np.linspace(0, max_slope_for_cmap, num_ticks)
