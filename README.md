@@ -239,5 +239,5 @@ For questions or issues, please contact:
 
 ## Acknowledgments
 
-Developed at the University of New Hampshire Center for Coastal and Ocean Mapping / Joint Hydrographic Center (UNH/CCOM-JHC).
+Developed at the University of New Hampshire, Center for Coastal and Ocean Mapping - Joint Hydrographic Center (UNH/CCOM-JHC) under grant NA20NOS4000196 from the National Oceanic and Atmospheric Administration (NOAA).
 
