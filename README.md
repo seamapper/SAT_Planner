@@ -1,5 +1,6 @@
 # SAT/QAT Planner
 
+![Example Plot](media/SAT_Planner.jpg)
 A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) planning tool with GeoTIFF support, built with PyQt6.
 
 ## Overview
@@ -226,7 +227,9 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-[Add your license information here]
+This project is licensed under the BSD 3-Clause License - see the [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2025, University of New Hampshire Center for Coastal and Ocean Mapping / Joint Hydrographic Center (UNH/CCOM-JHC)
 
 ## Contact
 

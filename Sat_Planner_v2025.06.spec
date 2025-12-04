@@ -54,7 +54,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='Sat_Planner_v2025.05',
+    name='Sat_Planner_v2025.06',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -69,4 +69,6 @@ exe = EXE(
     entitlements_file=None,
     icon='media/CCOM.ico',
 )
+
+
 
