@@ -3191,7 +3191,7 @@ class SurveyPlanApp(QMainWindow):
             
             # Filter Z-values
             data[data < -11000] = np.nan
-            data[data > 0] = np.nan
+            data[data >= 0] = np.nan
             
             # Validate the extent to prevent flipping
             if region_extent[1] <= region_extent[0] or region_extent[3] <= region_extent[2]:
@@ -3485,12 +3485,12 @@ class SurveyPlanApp(QMainWindow):
                 self.wgs84_to_geotiff_transformer = None
                 self.geotiff_to_wgs84_transformer = None
 
-            # Filter Z-values: values < -11000 or > 0 are set to NaN
+            # Filter Z-values: values < -11000 or >= 0 are set to NaN
             progress_label.setText("Processing elevation data...")
             QApplication.processEvents()
             
             self.geotiff_data_array[self.geotiff_data_array < -11000] = np.nan
-            self.geotiff_data_array[self.geotiff_data_array > 0] = np.nan
+            self.geotiff_data_array[self.geotiff_data_array >= 0] = np.nan
 
             # Store the full resolution data for dynamic loading
             self.geotiff_full_resolution = self.geotiff_data_array.copy()
@@ -5040,7 +5040,7 @@ class SurveyPlanApp(QMainWindow):
             
             # Filter Z-values
             data[data < -11000] = np.nan
-            data[data > 0] = np.nan
+            data[data >= 0] = np.nan
             
             # Sample elevations and slopes along the line
             left, right, bottom, top = extent
