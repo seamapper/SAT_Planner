@@ -2489,6 +2489,34 @@ class SurveyPlanApp(QMainWindow):
             if not has_any_colorbar and hasattr(self, '_axes_pos_with_colorbar'):
                 delattr(self, '_axes_pos_with_colorbar')
 
+    def _calculate_adaptive_vert_exag(self, data_array):
+        """
+        Calculate adaptive vertical exaggeration based on elevation range.
+        Returns a vert_exag value that adapts to the relief in the data.
+        """
+        # Get valid (non-NaN) elevation values
+        valid_data = data_array[~np.isnan(data_array)]
+        if len(valid_data) == 0:
+            return 0.1  # Default if no valid data
+        
+        elevation_range = np.max(valid_data) - np.min(valid_data)
+        
+        # Adaptive vertical exaggeration based on elevation range
+        if elevation_range < 20:
+            # Very small relief: use high exaggeration (1.5-3.0)
+            vert_exag = 1.5 + (elevation_range / 20) * 1.5  # Linear interpolation: 1.5 at 0m, 3.0 at 20m
+        elif elevation_range < 50:
+            # Small relief: use moderate exaggeration (0.8-1.5)
+            vert_exag = 0.8 + ((elevation_range - 20) / 30) * 0.7  # Linear interpolation: 0.8 at 20m, 1.5 at 50m
+        elif elevation_range < 200:
+            # Medium relief: use higher exaggeration (0.4-0.8)
+            vert_exag = 0.4 + ((elevation_range - 50) / 150) * 0.4  # Linear interpolation: 0.4 at 50m, 0.8 at 200m
+        else:
+            # Large relief: use current or lower (0.05-0.1)
+            vert_exag = max(0.05, 0.1 - ((elevation_range - 200) / 800) * 0.05)  # Decrease from 0.1 to 0.05 as range increases
+        
+        return vert_exag
+
     def _plot_survey_plan(self, preserve_view_limits=True):
         try:
             # Remove all axes except the main one to prevent accumulation of colorbar axes
@@ -2531,16 +2559,29 @@ class SurveyPlanApp(QMainWindow):
 
             # Plot GeoTIFF if loaded
             if self.geotiff_data_array is not None and self.geotiff_extent is not None:
+                # Reset flag for logging vertical exaggeration (only log once per plot cycle)
+                self._vert_exag_logged_this_cycle = False
                 if self.hillshade_vs_slope_viz_mode == "hillshade":
                     # Use multidirectional hillshade: average of 4 azimuths
                     masked_data = np.ma.array(self.geotiff_data_array, mask=np.isnan(self.geotiff_data_array))
                     data_for_hillshade = np.nan_to_num(masked_data.filled(np.nanmin(self.geotiff_data_array)))
+                    # Calculate adaptive vertical exaggeration based on elevation range
+                    vert_exag = self._calculate_adaptive_vert_exag(self.geotiff_data_array)
+                    # Log vertical exaggeration to activity log
+                    if hasattr(self, 'param_notebook'):
+                        current_tab = self.param_notebook.currentIndex()
+                        if current_tab == 0 and hasattr(self, 'set_cal_info_text'):
+                            self.set_cal_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                        elif current_tab == 1 and hasattr(self, 'set_ref_info_text'):
+                            self.set_ref_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                        elif current_tab == 2 and hasattr(self, 'set_line_info_text'):
+                            self.set_line_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
                     azimuths = [45, 135, 225, 315]
                     altitude = 45
                     hillshades = []
                     for az in azimuths:
                         ls = LightSource(azdeg=az, altdeg=altitude)
-                        hillshade = ls.hillshade(data_for_hillshade,vert_exag=0.1)
+                        hillshade = ls.hillshade(data_for_hillshade, vert_exag=vert_exag)
                         hillshades.append(hillshade)
                     # Average the hillshades
                     hillshade_array = np.mean(hillshades, axis=0)
@@ -2624,8 +2665,21 @@ class SurveyPlanApp(QMainWindow):
                         display_data = np.clip(slope_degrees, 0, max_slope_for_cmap)
 
                         # Add hillshade underlay from a single direction (315, 45)
+                        # Calculate adaptive vertical exaggeration based on elevation range
+                        vert_exag = self._calculate_adaptive_vert_exag(self.geotiff_data_array)
+                        # Log vertical exaggeration to activity log (only if not already logged in this plot cycle)
+                        if not hasattr(self, '_vert_exag_logged_this_cycle') or not self._vert_exag_logged_this_cycle:
+                            if hasattr(self, 'param_notebook'):
+                                current_tab = self.param_notebook.currentIndex()
+                                if current_tab == 0 and hasattr(self, 'set_cal_info_text'):
+                                    self.set_cal_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                                elif current_tab == 1 and hasattr(self, 'set_ref_info_text'):
+                                    self.set_ref_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                                elif current_tab == 2 and hasattr(self, 'set_line_info_text'):
+                                    self.set_line_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                            self._vert_exag_logged_this_cycle = True
                         ls = LightSource(azdeg=315, altdeg=45)
-                        hillshade = ls.hillshade(temp_data)
+                        hillshade = ls.hillshade(temp_data, vert_exag=vert_exag)
                         self.ax.imshow(hillshade, extent=tuple(self.geotiff_extent), cmap='gray', origin='upper', alpha=0.5, zorder=-2)
 
                         cmap = 'plasma'
@@ -3594,11 +3648,10 @@ class SurveyPlanApp(QMainWindow):
         # --- Preserve current plot area ---
         xlim = self.ax.get_xlim()
         ylim = self.ax.get_ylim()
-        self._plot_survey_plan()  # Re-plot with new display mode
-        # Restore previous plot area if valid
-        if xlim and ylim:
-            self.ax.set_xlim(xlim)
-            self.ax.set_ylim(ylim)
+        # Store the limits so _plot_survey_plan() can preserve them properly
+        self._last_user_xlim = xlim
+        self._last_user_ylim = ylim
+        self._plot_survey_plan(preserve_view_limits=True)  # Re-plot with new display mode, preserving view
         self.canvas.draw_idle()
 
         # Report the current layer in the info/error box
