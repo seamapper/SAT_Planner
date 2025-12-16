@@ -85,8 +85,8 @@ For the full license text, see the LICENSE file in the project root.
 # __version__ = "2025.05"  # Added ability to plan all tests (calibration, reference, and line planning) at the same time, fixed profile plot not updating when switching tabs, and other improvements
 # __version__ = "2025.06"  # Fixed labeling of waypoints in line planning tab, fixed preservation of lines when changing tabs, and other improvements
 # __version__ = "2025.07"  # Added ability to plan all tests (calibration, reference, and line planning) at the same time, fixed profile plot not updating when switching tabs, and other improvements
-__version__ = "2025.08"  # Added About button to the profile plot, and other improvements
-
+# __version__ = "2025.08"  # Added About button to the profile plot, and other improvements
+__version__ = "2025.09"  # Made the color of profiles coordinate with the survey plot, and other improvements
 # --- Conditional Imports for Geospatial Libraries ---
 GEOSPATIAL_LIBS_AVAILABLE = True  # Assume true until an import fails
 try:
@@ -2769,7 +2769,7 @@ class SurveyPlanApp(QMainWindow):
                 latitudes = [p[0] for p in line]
                 longitudes = [p[1] for p in line]
                 label = "Reference Line" if i == 0 else "_nolegend_"
-                self.ax.plot(longitudes, latitudes, color='blue', linewidth=1.5, label=label)
+                self.ax.plot(longitudes, latitudes, color='blue', linewidth=1.5, linestyle='--', label=label)
                 
                 # For alternating lines, flip the start/end points to show survey order
                 # Even lines (0, 2, 4...) use normal order, odd lines (1, 3, 5...) use flipped order
@@ -2798,17 +2798,17 @@ class SurveyPlanApp(QMainWindow):
             if self.cross_line_data:
                 latitudes = [p[0] for p in self.cross_line_data]
                 longitudes = [p[1] for p in self.cross_line_data]
-                self.ax.plot(longitudes, latitudes, color='red', linestyle='--', linewidth=1.5,
+                self.ax.plot(longitudes, latitudes, color='darkorchid', linestyle='-', linewidth=1.5,
                              label='Crossline')
                 
                 # Add labels for crossline points
                 self.ax.annotate('CLS', (longitudes[0], latitudes[0]), 
                                 xytext=(5, 5), textcoords='offset points', 
-                                fontsize=8, color='red', weight='bold',
+                                fontsize=8, color='darkorchid', weight='bold',
                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
                 self.ax.annotate('CLE', (longitudes[1], latitudes[1]), 
                                 xytext=(5, 5), textcoords='offset points', 
-                                fontsize=8, color='red', weight='bold',
+                                fontsize=8, color='darkorchid', weight='bold',
                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
             # Plot central point
@@ -2858,17 +2858,17 @@ class SurveyPlanApp(QMainWindow):
                     latitudes = [p[0] for p in line]
                     longitudes = [p[1] for p in line]
                     label = 'Heading1' if i == 0 else 'Heading2'
-                    self.ax.plot(longitudes, latitudes, color='orange', linewidth=2, linestyle='--', marker='x', label=label)
+                    self.ax.plot(longitudes, latitudes, color='deeppink', linewidth=2, linestyle='--', marker='x', label=label)
                     
                     # Add labels for heading line points
                     prefix = 'H1' if i == 0 else 'H2'
                     self.ax.annotate(f'{prefix}S', (longitudes[0], latitudes[0]), 
                                     xytext=(5, 5), textcoords='offset points', 
-                                    fontsize=8, color='orange', weight='bold',
+                                    fontsize=8, color='deeppink', weight='bold',
                                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
                     self.ax.annotate(f'{prefix}E', (longitudes[1], latitudes[1]), 
                                     xytext=(5, 5), textcoords='offset points', 
-                                    fontsize=8, color='orange', weight='bold',
+                                    fontsize=8, color='deeppink', weight='bold',
                                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
             # --- Plot the drawn line in Line Planning tab if it exists ---
@@ -5155,10 +5155,10 @@ class SurveyPlanApp(QMainWindow):
         self._profile_dists = dists
         self._profile_elevations = elevations
         self._profile_slopes = slopes
-        self.profile_ax.plot(dists, elevations, color='purple', lw=1, label='Elevation')
+        self.profile_ax.plot(dists, elevations, color='darkorchid', lw=1, label='Elevation')
         if self.show_slope_profile_var:
             slope_ax = self.profile_ax.twinx()
-            slope_ax.plot(dists, slopes, color='blue', lw=1, linestyle='--', label='Slope (deg)')
+            slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
             slope_ax.set_ylabel('Slope (deg)', fontsize=8)
             slope_ax.tick_params(axis='y', labelsize=7)
             slope_ax.grid(False)
@@ -5285,10 +5285,10 @@ class SurveyPlanApp(QMainWindow):
                 dists = np.array(dists)
             except Exception:
                 dists = np.linspace(0, 1, 100)
-            self.profile_ax.plot(dists, elevations, color='orange', lw=1, label='Elevation')
+            self.profile_ax.plot(dists, elevations, color='red', lw=1, label='Elevation')
             if self.show_slope_profile_var:
                 slope_ax = self.profile_ax.twinx()
-                slope_ax.plot(dists, slopes, color='blue', lw=1, linestyle='--', label='Slope (deg)')
+                slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
                 slope_ax.set_ylabel('Slope (deg)', fontsize=8)
                 slope_ax.tick_params(axis='y', labelsize=7)
                 slope_ax.grid(False)
@@ -9302,10 +9302,10 @@ class SurveyPlanApp(QMainWindow):
                 # Find the closest point in the interpolated profile
                 _, idx = min((abs(lat - lats[j]) + abs(lon - lons[j]), j) for j in range(len(lats)))
                 waypoint_elevations.append(elevations[idx])
-            self.profile_ax.plot(waypoint_distances, waypoint_elevations, 'o', color='red', markersize=6, label='Waypoints')
+            self.profile_ax.plot(waypoint_distances, waypoint_elevations, 'o', color='orange', markersize=6, label='Waypoints')
             if np.any(~np.isnan(slopes)):
                 slope_ax = self.profile_ax.twinx()
-                slope_ax.plot(dists, slopes, color='blue', lw=1, linestyle='--', label='Slope (deg)')
+                slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
                 slope_ax.set_ylabel('Slope (deg)', fontsize=8)
                 slope_ax.tick_params(axis='y', labelsize=7)
                 slope_ax.grid(False)
