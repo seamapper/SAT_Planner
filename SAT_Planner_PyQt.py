@@ -120,7 +120,7 @@ class SurveyPlanApp(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"UNH/CCOM-JHC - SAT/QAT Planner - v{__version__} - pjohnson@ccom.unh.edu")
+        self.setWindowTitle(f"UNH/CCOM-JHC - SAT Planner - v{__version__} - pjohnson@ccom.unh.edu")
         
         # Set minimum window size
         self.setMinimumSize(1600, 1150)
@@ -903,6 +903,25 @@ class SurveyPlanApp(QMainWindow):
             self.imagery_basemap_checkbox.stateChanged.connect(self._toggle_imagery_basemap)
             if not hasattr(self, 'basemap_image_plot'):
                 self.basemap_image_plot = None  # Store the basemap image plot
+        
+        # NOAA ENC Charts checkbox and opacity slider (only create once)
+        if not hasattr(self, 'noaa_charts_checkbox'):
+            self.show_noaa_charts_var = False
+            self.noaa_charts_checkbox = QCheckBox("NOAA ENC Charts")
+            self.noaa_charts_checkbox.setChecked(self.show_noaa_charts_var)
+            self.noaa_charts_checkbox.stateChanged.connect(self._toggle_noaa_charts)
+            self.noaa_charts_opacity = 50  # Default 50% opacity
+            self.noaa_charts_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+            self.noaa_charts_opacity_slider.setMinimum(0)
+            self.noaa_charts_opacity_slider.setMaximum(100)
+            self.noaa_charts_opacity_slider.setValue(self.noaa_charts_opacity)
+            self.noaa_charts_opacity_slider.setMaximumWidth(100)  # Make slider narrower
+            self.noaa_charts_opacity_slider.setEnabled(False)  # Disabled until checkbox is checked
+            self.noaa_charts_opacity_slider.valueChanged.connect(self._update_noaa_charts_opacity)
+            self.noaa_charts_opacity_label = QLabel(f"Opacity: {self.noaa_charts_opacity}%")
+            self.noaa_charts_opacity_label.setEnabled(False)
+            if not hasattr(self, 'noaa_charts_image_plot'):
+                self.noaa_charts_image_plot = None  # Store the NOAA charts image plot
         
         # About button (only create once)
         if not hasattr(self, 'about_btn'):
@@ -1916,6 +1935,25 @@ class SurveyPlanApp(QMainWindow):
             if not hasattr(self, 'basemap_image_plot'):
                 self.basemap_image_plot = None  # Store the basemap image plot
         
+        # NOAA ENC Charts checkbox and opacity slider (only create once)
+        if not hasattr(self, 'noaa_charts_checkbox'):
+            self.show_noaa_charts_var = False
+            self.noaa_charts_checkbox = QCheckBox("NOAA ENC Charts")
+            self.noaa_charts_checkbox.setChecked(self.show_noaa_charts_var)
+            self.noaa_charts_checkbox.stateChanged.connect(self._toggle_noaa_charts)
+            self.noaa_charts_opacity = 50  # Default 50% opacity
+            self.noaa_charts_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+            self.noaa_charts_opacity_slider.setMinimum(0)
+            self.noaa_charts_opacity_slider.setMaximum(100)
+            self.noaa_charts_opacity_slider.setValue(self.noaa_charts_opacity)
+            self.noaa_charts_opacity_slider.setMaximumWidth(100)  # Make slider narrower
+            self.noaa_charts_opacity_slider.setEnabled(False)  # Disabled until checkbox is checked
+            self.noaa_charts_opacity_slider.valueChanged.connect(self._update_noaa_charts_opacity)
+            self.noaa_charts_opacity_label = QLabel(f"Opacity: {self.noaa_charts_opacity}%")
+            self.noaa_charts_opacity_label.setEnabled(False)
+            if not hasattr(self, 'noaa_charts_image_plot'):
+                self.noaa_charts_image_plot = None  # Store the NOAA charts image plot
+        
         # About button (only create once)
         if not hasattr(self, 'about_btn'):
             self.about_btn = QPushButton("About This Program")
@@ -2074,6 +2112,14 @@ class SurveyPlanApp(QMainWindow):
                 checkbox_button_layout.addWidget(self.slope_profile_checkbox)
                 if hasattr(self, 'imagery_basemap_checkbox'):
                     checkbox_button_layout.addWidget(self.imagery_basemap_checkbox)
+                if hasattr(self, 'noaa_charts_checkbox'):
+                    checkbox_button_layout.addWidget(self.noaa_charts_checkbox)
+                    # Add opacity slider and label next to NOAA charts checkbox
+                    if hasattr(self, 'noaa_charts_opacity_label'):
+                        checkbox_button_layout.addWidget(self.noaa_charts_opacity_label)
+                    if hasattr(self, 'noaa_charts_opacity_slider'):
+                        self.noaa_charts_opacity_slider.setMaximumWidth(100)  # Make slider narrower
+                        checkbox_button_layout.addWidget(self.noaa_charts_opacity_slider)
                 checkbox_button_layout.addStretch()  # Push button to the right
                 if hasattr(self, 'about_btn'):
                     checkbox_button_layout.addWidget(self.about_btn)
@@ -3093,6 +3139,11 @@ class SurveyPlanApp(QMainWindow):
             else:
                 if self.ax.get_legend() is not None:
                     self.ax.get_legend().remove()
+            
+            # Plot NOAA ENC Charts overlay if enabled (plot last so it overlays everything)
+            # Force reload since axes were just cleared
+            if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
+                self._load_and_plot_noaa_charts(force_reload=True)
 
             self.canvas.draw_idle()
 
@@ -3846,6 +3897,45 @@ class SurveyPlanApp(QMainWindow):
             # Redraw the plot to show/hide basemap
             self._plot_survey_plan(preserve_view_limits=True)
     
+    def _toggle_noaa_charts(self):
+        """Toggle NOAA ENC Charts overlay on/off."""
+        if hasattr(self, 'noaa_charts_checkbox'):
+            self.show_noaa_charts_var = self.noaa_charts_checkbox.isChecked()
+            # Enable/disable opacity slider and label
+            if hasattr(self, 'noaa_charts_opacity_slider'):
+                self.noaa_charts_opacity_slider.setEnabled(self.show_noaa_charts_var)
+            if hasattr(self, 'noaa_charts_opacity_label'):
+                self.noaa_charts_opacity_label.setEnabled(self.show_noaa_charts_var)
+            
+            # Remove chart overlay if disabling
+            if not self.show_noaa_charts_var:
+                if hasattr(self, 'noaa_charts_image_plot') and self.noaa_charts_image_plot is not None:
+                    try:
+                        self.noaa_charts_image_plot.remove()
+                    except:
+                        pass
+                    self.noaa_charts_image_plot = None
+                self.canvas.draw_idle()
+            else:
+                # Load and plot NOAA charts if enabling
+                self._load_and_plot_noaa_charts()
+    
+    def _update_noaa_charts_opacity(self, value):
+        """Update the opacity of NOAA charts overlay."""
+        self.noaa_charts_opacity = value
+        if hasattr(self, 'noaa_charts_opacity_label'):
+            self.noaa_charts_opacity_label.setText(f"Opacity: {value}%")
+        
+        # Update the existing plot if it exists
+        if hasattr(self, 'noaa_charts_image_plot') and self.noaa_charts_image_plot is not None:
+            try:
+                # Update alpha value
+                alpha = value / 100.0
+                self.noaa_charts_image_plot.set_alpha(alpha)
+                self.canvas.draw_idle()
+            except Exception as e:
+                print(f"Error updating NOAA charts opacity: {e}")
+    
     def _load_and_plot_basemap(self, force_reload=False):
         """Load and display ArcGIS World Imagery basemap tiles.
         
@@ -4054,6 +4144,201 @@ class SurveyPlanApp(QMainWindow):
                 
         except Exception as e:
             print(f"Error in _load_and_plot_basemap: {e}")
+            traceback.print_exc()
+
+    def _load_and_plot_noaa_charts(self, force_reload=False):
+        """Load and display NOAA ENC Charts using ESRI REST MapServer export endpoint."""
+        try:
+            # Get current plot limits
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            
+            if not xlim or not ylim or xlim[0] >= xlim[1] or ylim[0] >= ylim[1]:
+                return
+            
+            # Check if we need to reload (unless force_reload is True)
+            extent_width = xlim[1] - xlim[0]
+            extent_height = ylim[1] - ylim[0]
+            current_extent = (xlim[0], xlim[1], ylim[0], ylim[1])
+            
+            if not force_reload:
+                if hasattr(self, '_last_noaa_charts_extent'):
+                    if self._last_noaa_charts_extent is not None:
+                        last_extent = self._last_noaa_charts_extent
+                        last_width = last_extent[1] - last_extent[0]
+                        last_height = last_extent[3] - last_extent[2]
+                        width_change = abs(extent_width - last_width) / max(extent_width, last_width) if max(extent_width, last_width) > 0 else 1.0
+                        height_change = abs(extent_height - last_height) / max(extent_height, last_height) if max(extent_height, last_height) > 0 else 1.0
+                        center_x = (xlim[0] + xlim[1]) / 2
+                        center_y = (ylim[0] + ylim[1]) / 2
+                        last_center_x = (last_extent[0] + last_extent[1]) / 2
+                        last_center_y = (last_extent[2] + last_extent[3]) / 2
+                        center_x_change = abs(center_x - last_center_x) / extent_width if extent_width > 0 else 0
+                        center_y_change = abs(center_y - last_center_y) / extent_height if extent_height > 0 else 0
+                        
+                        # Only reload if change is significant (15% width/height or 25% center movement)
+                        if width_change < 0.15 and height_change < 0.15 and center_x_change < 0.25 and center_y_change < 0.25:
+                            return  # No significant change, skip reload
+            
+            # Store current extent for next comparison
+            self._last_noaa_charts_extent = current_extent
+            
+            # Get the canvas size to determine image size
+            canvas_width = int(self.canvas.width())
+            canvas_height = int(self.canvas.height())
+            # Use a reasonable size for the export (max 2048x2048 for performance)
+            image_width = min(canvas_width, 2048)
+            image_height = min(canvas_height, 2048)
+            
+            # Build ESRI REST export URL
+            # The service uses Web Mercator (EPSG:3857 / 102100) as spatial reference
+            if not GEOSPATIAL_LIBS_AVAILABLE:
+                return
+            
+            try:
+                # Create transformer from WGS84 to Web Mercator
+                wgs84_to_mercator = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+                
+                # Add padding to ensure full coverage
+                # Calculate aspect ratios to ensure proper coverage
+                width = xlim[1] - xlim[0]
+                height = ylim[1] - ylim[0]
+                plot_aspect = width / height if height > 0 else 1.0
+                image_aspect = image_width / image_height if image_height > 0 else 1.0
+                
+                # If image aspect is different from plot aspect, we need more padding on the shorter dimension
+                # Use larger padding factor to ensure full coverage, especially for height
+                base_padding = 0.10
+                if image_aspect > plot_aspect:
+                    # Image is wider than plot - need more vertical padding
+                    x_padding = base_padding
+                    y_padding = base_padding * (image_aspect / plot_aspect)
+                else:
+                    # Image is taller than plot - need more horizontal padding
+                    x_padding = base_padding * (plot_aspect / image_aspect)
+                    y_padding = base_padding
+                
+                # Add extra padding to ensure we definitely cover the full area
+                x_padding = max(x_padding, 0.15)  # At least 15% horizontal padding
+                y_padding = max(y_padding, 0.15)  # At least 15% vertical padding
+                
+                padded_xlim = (xlim[0] - width * x_padding, xlim[1] + width * x_padding)
+                padded_ylim = (ylim[0] - height * y_padding, ylim[1] + height * y_padding)
+                
+                print(f"[NOAA CHARTS DEBUG] Padding: x={x_padding:.2%}, y={y_padding:.2%}, plot_aspect={plot_aspect:.3f}, image_aspect={image_aspect:.3f}")
+                
+                # Transform bounds to Web Mercator (the service uses 102100 which is the same as 3857)
+                x_min_merc, y_min_merc = wgs84_to_mercator.transform(padded_xlim[0], padded_ylim[0])
+                x_max_merc, y_max_merc = wgs84_to_mercator.transform(padded_xlim[1], padded_ylim[1])
+                
+                # Build the export URL
+                # ESRI REST export format: /export?bbox=xmin,ymin,xmax,ymax&bboxSR=...&imageSR=...&size=...&format=...&transparent=...&f=image
+                bbox_merc = f"{x_min_merc},{y_min_merc},{x_max_merc},{y_max_merc}"
+                base_url = "https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/MapServer/export"
+                params = {
+                    'bbox': bbox_merc,
+                    'bboxSR': '102100',  # Web Mercator (same as 3857)
+                    'imageSR': '102100',  # Web Mercator
+                    'size': f"{image_width},{image_height}",
+                    'format': 'png',
+                    'transparent': 'true',
+                    'f': 'image',
+                    'layers': 'show:0,1,2,3,4,5,6,7'  # Show visible layers (exclude hidden ones like data quality, low accuracy, etc.)
+                }
+                
+                # Build query string
+                query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
+                url = f"{base_url}?{query_string}"
+                
+                print(f"[NOAA CHARTS DEBUG] Requesting charts from ESRI REST endpoint: {url}")
+                print(f"[NOAA CHARTS DEBUG] Bbox (Web Mercator): {bbox_merc}, Size: {image_width}x{image_height}")
+                
+                # Fetch the image
+                req = Request(url, headers={'User-Agent': 'SAT_Planner'})
+                with urlopen(req, timeout=10) as response:
+                    img_data = response.read()
+                    print(f"[NOAA CHARTS DEBUG] Received {len(img_data)} bytes")
+                    
+                    # Check if response is actually an image (PNG starts with specific bytes)
+                    if len(img_data) < 8 or img_data[:8] != b'\x89PNG\r\n\x1a\n':
+                        print(f"[NOAA CHARTS DEBUG] Warning: Response doesn't appear to be a PNG image")
+                        print(f"[NOAA CHARTS DEBUG] First 100 bytes: {img_data[:100]}")
+                        # Try to decode as text to see error message
+                        try:
+                            error_text = img_data.decode('utf-8')
+                            print(f"[NOAA CHARTS DEBUG] Response text: {error_text[:500]}")
+                        except:
+                            pass
+                        return
+                    
+                    img = Image.open(BytesIO(img_data))
+                    print(f"[NOAA CHARTS DEBUG] Image format: {img.format}, Mode: {img.mode}, Size: {img.size}")
+                    
+                    # Convert to numpy array
+                    img_array = np.array(img)
+                    print(f"[NOAA CHARTS DEBUG] Array shape: {img_array.shape}, dtype: {img_array.dtype}")
+                    print(f"[NOAA CHARTS DEBUG] Array min: {img_array.min()}, max: {img_array.max()}")
+                    
+                    # Ensure the array is in the right format for imshow
+                    if len(img_array.shape) == 2:
+                        # Grayscale - convert to RGB
+                        img_array = np.stack([img_array] * 3, axis=-1)
+                        print(f"[NOAA CHARTS DEBUG] Converted grayscale to RGB, new shape: {img_array.shape}")
+                    elif len(img_array.shape) == 3 and img_array.shape[2] == 4:
+                        # RGBA - ensure values are in 0-255 range
+                        if img_array.dtype != np.uint8:
+                            img_array = (img_array * 255).astype(np.uint8) if img_array.max() <= 1.0 else img_array.astype(np.uint8)
+                    elif len(img_array.shape) == 3 and img_array.shape[2] == 3:
+                        # RGB - ensure values are in 0-255 range
+                        if img_array.dtype != np.uint8:
+                            img_array = (img_array * 255).astype(np.uint8) if img_array.max() <= 1.0 else img_array.astype(np.uint8)
+                    
+                    # Remove old chart overlay if it exists
+                    if hasattr(self, 'noaa_charts_image_plot') and self.noaa_charts_image_plot is not None:
+                        try:
+                            self.noaa_charts_image_plot.remove()
+                        except:
+                            pass
+                    
+                    # Calculate opacity
+                    alpha = self.noaa_charts_opacity / 100.0 if hasattr(self, 'noaa_charts_opacity') else 0.5
+                    
+                    # Calculate the actual extent of the returned image
+                    # The image was requested with a padded bbox, so we need to calculate the extent
+                    # based on the image dimensions and the requested bbox
+                    img_height, img_width = img_array.shape[:2]
+                    
+                    # Calculate the actual extent covered by the image
+                    # The service returns an image that covers the requested bbox
+                    # Account for the padding we added
+                    actual_x_min = padded_xlim[0]
+                    actual_x_max = padded_xlim[1]
+                    actual_y_min = padded_ylim[0]
+                    actual_y_max = padded_ylim[1]
+                    
+                    print(f"[NOAA CHARTS DEBUG] Plotting with extent: [{actual_x_min:.6f}, {actual_x_max:.6f}, {actual_y_min:.6f}, {actual_y_max:.6f}], alpha: {alpha}")
+                    print(f"[NOAA CHARTS DEBUG] Image size: {img_width}x{img_height}, Original plot limits: [{xlim[0]:.6f}, {xlim[1]:.6f}, {ylim[0]:.6f}, {ylim[1]:.6f}]")
+                    
+                    # Plot the NOAA charts overlay
+                    # Use the actual extent that was requested (with padding to ensure full coverage)
+                    self.noaa_charts_image_plot = self.ax.imshow(img_array,
+                                                                 extent=[actual_x_min, actual_x_max, actual_y_min, actual_y_max],
+                                                                 origin='upper',
+                                                                 zorder=10,  # High zorder to overlay other layers
+                                                                 alpha=alpha,
+                                                                 interpolation='bilinear')
+                    
+                    print(f"[NOAA CHARTS DEBUG] Successfully plotted NOAA charts overlay")
+                    
+                    # Force a redraw
+                    self.canvas.draw_idle()
+                
+            except Exception as e:
+                print(f"Error loading NOAA charts: {e}")
+                traceback.print_exc()
+                
+        except Exception as e:
+            print(f"Error in _load_and_plot_noaa_charts: {e}")
             traceback.print_exc()
 
     def _toggle_slope_visualization(self):
@@ -4667,6 +4952,15 @@ class SurveyPlanApp(QMainWindow):
         else:
             print("[BASEMAP DEBUG] Basemap not enabled, skipping reload")
         
+        # Reload NOAA charts if enabled (similar to basemap)
+        if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
+            if not hasattr(self, '_noaa_charts_reload_timer'):
+                self._noaa_charts_reload_timer = QTimer()
+                self._noaa_charts_reload_timer.setSingleShot(True)
+                self._noaa_charts_reload_timer.timeout.connect(self._load_and_plot_noaa_charts)
+            self._noaa_charts_reload_timer.stop()
+            self._noaa_charts_reload_timer.start(150)  # Reload after 150ms delay
+        
         # Update zoom level for dynamic resolution loading (only if GeoTIFF is loaded and dynamic resolution enabled)
         if (old_zoom_level is not None and 
             self.geotiff_dataset_original is not None and 
@@ -5251,6 +5545,9 @@ class SurveyPlanApp(QMainWindow):
         # Reload basemap if enabled (after panning)
         if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
             self._load_and_plot_basemap()
+        # Reload NOAA charts if enabled (after panning)
+        if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
+            self._load_and_plot_noaa_charts()
         # Only handle middle button (button 2)
         if event.button != 2:
             return
@@ -5267,6 +5564,9 @@ class SurveyPlanApp(QMainWindow):
             # Reload basemap if enabled (after panning to update tiles for new location)
             if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
                 self._load_and_plot_basemap()
+            # Reload NOAA charts if enabled (after panning to update charts for new location)
+            if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
+                self._load_and_plot_noaa_charts()
             
             # Clear panning mode and timeout
             if hasattr(self, '_panning_mode'):
