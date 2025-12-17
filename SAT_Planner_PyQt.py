@@ -4300,33 +4300,43 @@ class SurveyPlanApp(QMainWindow):
                         except:
                             pass
                     
+                    # Preserve current aspect ratio and limits to prevent map area from changing
+                    current_aspect = self.ax.get_aspect()
+                    current_xlim_before = self.ax.get_xlim()
+                    current_ylim_before = self.ax.get_ylim()
+                    
                     # Calculate opacity
                     alpha = self.noaa_charts_opacity / 100.0 if hasattr(self, 'noaa_charts_opacity') else 0.5
                     
-                    # Calculate the actual extent of the returned image
-                    # The image was requested with a padded bbox, so we need to calculate the extent
-                    # based on the image dimensions and the requested bbox
-                    img_height, img_width = img_array.shape[:2]
-                    
-                    # Calculate the actual extent covered by the image
-                    # The service returns an image that covers the requested bbox
-                    # Account for the padding we added
-                    actual_x_min = padded_xlim[0]
-                    actual_x_max = padded_xlim[1]
-                    actual_y_min = padded_ylim[0]
-                    actual_y_max = padded_ylim[1]
-                    
-                    print(f"[NOAA CHARTS DEBUG] Plotting with extent: [{actual_x_min:.6f}, {actual_x_max:.6f}, {actual_y_min:.6f}, {actual_y_max:.6f}], alpha: {alpha}")
-                    print(f"[NOAA CHARTS DEBUG] Image size: {img_width}x{img_height}, Original plot limits: [{xlim[0]:.6f}, {xlim[1]:.6f}, {ylim[0]:.6f}, {ylim[1]:.6f}]")
+                    # Use the original plot limits for the extent (not the padded extent)
+                    # The padding is only for requesting a larger image from the service to ensure coverage,
+                    # but we plot using the current plot limits so it doesn't change the map boundaries
+                    print(f"[NOAA CHARTS DEBUG] Plotting with extent: [{xlim[0]:.6f}, {xlim[1]:.6f}, {ylim[0]:.6f}, {ylim[1]:.6f}], alpha: {alpha}")
+                    print(f"[NOAA CHARTS DEBUG] Image size: {img_array.shape[1]}x{img_array.shape[0]}, Requested padded bbox covers larger area for full coverage")
                     
                     # Plot the NOAA charts overlay
-                    # Use the actual extent that was requested (with padding to ensure full coverage)
+                    # Use the current plot limits (same as basemap approach) so it doesn't change map boundaries
                     self.noaa_charts_image_plot = self.ax.imshow(img_array,
-                                                                 extent=[actual_x_min, actual_x_max, actual_y_min, actual_y_max],
+                                                                 extent=[xlim[0], xlim[1], ylim[0], ylim[1]],
                                                                  origin='upper',
                                                                  zorder=10,  # High zorder to overlay other layers
                                                                  alpha=alpha,
                                                                  interpolation='bilinear')
+                    
+                    # Restore aspect ratio and limits if they were changed by imshow
+                    # This ensures the map area in the GUI stays the same size
+                    current_xlim_after = self.ax.get_xlim()
+                    current_ylim_after = self.ax.get_ylim()
+                    current_aspect_after = self.ax.get_aspect()
+                    
+                    if (current_xlim_before != current_xlim_after or 
+                        current_ylim_before != current_ylim_after or
+                        current_aspect != current_aspect_after):
+                        print(f"[NOAA CHARTS DEBUG] Restoring aspect ratio and limits to prevent map area change")
+                        self.ax.set_xlim(current_xlim_before)
+                        self.ax.set_ylim(current_ylim_before)
+                        if current_aspect != 'auto':
+                            self.ax.set_aspect(current_aspect, adjustable='datalim')
                     
                     print(f"[NOAA CHARTS DEBUG] Successfully plotted NOAA charts overlay")
                     
