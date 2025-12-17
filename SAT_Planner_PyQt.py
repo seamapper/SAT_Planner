@@ -24,6 +24,10 @@ import datetime
 import re
 import threading
 import time
+from urllib.request import urlopen, Request
+from urllib.error import URLError
+from io import BytesIO
+from PIL import Image
 
 # Import pyproj for coordinate transformations and heading calculations
 try:
@@ -890,6 +894,15 @@ class SurveyPlanApp(QMainWindow):
         self.slope_profile_checkbox = QCheckBox("Show Slope Profile")
         self.slope_profile_checkbox.setChecked(self.show_slope_profile_var)
         self.slope_profile_checkbox.stateChanged.connect(self._draw_current_profile)
+        
+        # Imagery Basemap checkbox
+        if not hasattr(self, 'imagery_basemap_checkbox'):
+            self.show_imagery_basemap_var = False
+            self.imagery_basemap_checkbox = QCheckBox("Imagery Basemap")
+            self.imagery_basemap_checkbox.setChecked(self.show_imagery_basemap_var)
+            self.imagery_basemap_checkbox.stateChanged.connect(self._toggle_imagery_basemap)
+            if not hasattr(self, 'basemap_image_plot'):
+                self.basemap_image_plot = None  # Store the basemap image plot
         
         # About button (only create once)
         if not hasattr(self, 'about_btn'):
@@ -1894,6 +1907,15 @@ class SurveyPlanApp(QMainWindow):
         self.slope_profile_checkbox.setChecked(self.show_slope_profile_var)
         self.slope_profile_checkbox.stateChanged.connect(self._draw_current_profile)
         
+        # Imagery Basemap checkbox
+        if not hasattr(self, 'imagery_basemap_checkbox'):
+            self.show_imagery_basemap_var = False
+            self.imagery_basemap_checkbox = QCheckBox("Imagery Basemap")
+            self.imagery_basemap_checkbox.setChecked(self.show_imagery_basemap_var)
+            self.imagery_basemap_checkbox.stateChanged.connect(self._toggle_imagery_basemap)
+            if not hasattr(self, 'basemap_image_plot'):
+                self.basemap_image_plot = None  # Store the basemap image plot
+        
         # About button (only create once)
         if not hasattr(self, 'about_btn'):
             self.about_btn = QPushButton("About This Program")
@@ -2050,6 +2072,8 @@ class SurveyPlanApp(QMainWindow):
                 checkbox_button_layout = QHBoxLayout()
                 checkbox_button_layout.setContentsMargins(0, 0, 0, 0)
                 checkbox_button_layout.addWidget(self.slope_profile_checkbox)
+                if hasattr(self, 'imagery_basemap_checkbox'):
+                    checkbox_button_layout.addWidget(self.imagery_basemap_checkbox)
                 checkbox_button_layout.addStretch()  # Push button to the right
                 if hasattr(self, 'about_btn'):
                     checkbox_button_layout.addWidget(self.about_btn)
@@ -2518,6 +2542,7 @@ class SurveyPlanApp(QMainWindow):
         return vert_exag
 
     def _plot_survey_plan(self, preserve_view_limits=True):
+        print(f"[BASEMAP DEBUG] _plot_survey_plan() called (preserve_view_limits={preserve_view_limits})")
         try:
             # Remove all axes except the main one to prevent accumulation of colorbar axes
             for ax in self.figure.axes[:]:
@@ -2536,6 +2561,7 @@ class SurveyPlanApp(QMainWindow):
             self.geotiff_image_plot = None
             self.geotiff_hillshade_plot = None
             self.contour_plot = None
+            self.basemap_image_plot = None
 
             # Calculate consistent plot limits before plotting
             self.current_xlim, self.current_ylim = self._calculate_consistent_plot_limits()
@@ -2557,6 +2583,11 @@ class SurveyPlanApp(QMainWindow):
                 preserved_xlim = None
                 preserved_ylim = None
 
+            # Plot imagery basemap if enabled (plot first so it's in the background)
+            # Force reload since axes were just cleared
+            if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
+                self._load_and_plot_basemap(force_reload=True)
+            
             # Plot GeoTIFF if loaded
             if self.geotiff_data_array is not None and self.geotiff_extent is not None:
                 # Reset flag for logging vertical exaggeration (only log once per plot cycle)
@@ -2585,7 +2616,9 @@ class SurveyPlanApp(QMainWindow):
                         hillshades.append(hillshade)
                     # Average the hillshades
                     hillshade_array = np.mean(hillshades, axis=0)
-                    self.geotiff_hillshade_plot = self.ax.imshow(hillshade_array, extent=tuple(self.geotiff_extent),
+                    # Mask NaN values to make them transparent
+                    masked_hillshade = np.ma.masked_where(np.isnan(self.geotiff_data_array), hillshade_array)
+                    self.geotiff_hillshade_plot = self.ax.imshow(masked_hillshade, extent=tuple(self.geotiff_extent),
                                                                  cmap='gray', origin='upper',
                                                                  zorder=-2)  # Plot beneath everything
 
@@ -2632,8 +2665,42 @@ class SurveyPlanApp(QMainWindow):
                                                                        pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
 
                     elif self.geotiff_display_mode == "hillshade_only":
-                        # Hillshade only mode - no overlay, just the hillshade
-                        # The hillshade is already plotted above, so we don't add any overlay
+                        # Hillshade only mode - use same elevation overlay code but with alpha=0
+                        # This ensures matplotlib calculates data limits the same way as Shaded Relief mode
+                        display_data = self.geotiff_data_array
+                        cmap = 'rainbow'  # Same as elevation mode
+
+                        # Calculate min/max for the displayed elevation data (ignoring NaNs) in the current plot window
+                        xlim = self.ax.get_xlim()
+                        ylim = self.ax.get_ylim()
+                        left, right, bottom, top = tuple(self.geotiff_extent)
+                        nrows, ncols = display_data.shape
+                        # Find the pixel indices that correspond to the current axes limits
+                        col_min = int(np.clip((min(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
+                        col_max = int(np.clip((max(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
+                        row_min = int(np.clip((top - max(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
+                        row_max = int(np.clip((top - min(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
+                        # Ensure min <= max
+                        r0, r1 = sorted([row_min, row_max])
+                        c0, c1 = sorted([col_min, col_max])
+                        visible_region = display_data[r0:r1+1, c0:c1+1]
+                        if visible_region.size > 0 and not np.all(np.isnan(visible_region)):
+                            vmin_elev = np.nanmin(visible_region)
+                            vmax_elev = np.nanmax(visible_region)
+                        else:
+                            vmin_elev = np.nanmin(display_data) if not np.all(np.isnan(display_data)) else None
+                            vmax_elev = np.nanmax(display_data) if not np.all(np.isnan(display_data)) else None
+
+                        # Only set vmin/vmax if valid range exists
+                        if vmin_elev is not None and vmax_elev is not None and vmin_elev != vmax_elev:
+                            self.geotiff_image_plot = self.ax.imshow(display_data, extent=tuple(self.geotiff_extent),
+                                                                     cmap=cmap, origin='upper', alpha=0, zorder=-1,
+                                                                     vmin=vmin_elev,
+                                                                     vmax=vmax_elev)
+                        else:
+                            self.geotiff_image_plot = self.ax.imshow(display_data, extent=tuple(self.geotiff_extent),
+                                                                     cmap=cmap, origin='upper', alpha=0, zorder=-1)
+
                         # Remove any existing colorbars
                         if hasattr(self, 'elevation_colorbar') and self.elevation_colorbar is not None:
                             self.elevation_colorbar.remove()
@@ -2641,6 +2708,12 @@ class SurveyPlanApp(QMainWindow):
                         if hasattr(self, 'slope_colorbar') and self.slope_colorbar is not None:
                             self.slope_colorbar.remove()
                             self.slope_colorbar = None
+                        
+                        # Add colorbar for hillshade intensity to match layout of other modes
+                        if hasattr(self, 'geotiff_hillshade_plot') and self.geotiff_hillshade_plot is not None:
+                            self.elevation_colorbar = self.figure.colorbar(self.geotiff_hillshade_plot, ax=self.ax,
+                                                                           orientation='vertical', label='Multidirectional Hillshade Intensity',
+                                                                           pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
 
                     elif self.geotiff_display_mode == "slope":
                         # Calculate slope in degrees for overlay
@@ -2680,7 +2753,9 @@ class SurveyPlanApp(QMainWindow):
                             self._vert_exag_logged_this_cycle = True
                         ls = LightSource(azdeg=315, altdeg=45)
                         hillshade = ls.hillshade(temp_data, vert_exag=vert_exag)
-                        self.ax.imshow(hillshade, extent=tuple(self.geotiff_extent), cmap='gray', origin='upper', alpha=0.5, zorder=-2)
+                        # Mask NaN values to make them transparent
+                        masked_hillshade = np.ma.masked_where(np.isnan(self.geotiff_data_array), hillshade)
+                        self.ax.imshow(masked_hillshade, extent=tuple(self.geotiff_extent), cmap='gray', origin='upper', alpha=0.5, zorder=-2)
 
                         cmap = 'plasma'
                         self.geotiff_image_plot = self.ax.imshow(display_data, extent=tuple(self.geotiff_extent),
@@ -3759,6 +3834,228 @@ class SurveyPlanApp(QMainWindow):
         except Exception:
             pass  # Silently handle errors
 
+    def _toggle_imagery_basemap(self):
+        """Toggle imagery basemap on/off."""
+        if hasattr(self, 'imagery_basemap_checkbox'):
+            self.show_imagery_basemap_var = self.imagery_basemap_checkbox.isChecked()
+            # Initialize basemap zoom tracking
+            if not hasattr(self, '_last_basemap_zoom_level'):
+                self._last_basemap_zoom_level = None
+            if not hasattr(self, '_last_basemap_extent'):
+                self._last_basemap_extent = None
+            # Redraw the plot to show/hide basemap
+            self._plot_survey_plan(preserve_view_limits=True)
+    
+    def _load_and_plot_basemap(self, force_reload=False):
+        """Load and display ArcGIS World Imagery basemap tiles.
+        
+        Args:
+            force_reload: If True, bypass the early return check and always reload.
+                         Use this when the axes have been cleared and the basemap needs to be restored.
+        """
+        print(f"[BASEMAP DEBUG] _load_and_plot_basemap() called (force_reload={force_reload})")
+        try:
+            # Get current plot limits
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            print(f"[BASEMAP DEBUG] Current plot limits: xlim={xlim}, ylim={ylim}")
+            
+            if not xlim or not ylim or xlim[0] >= xlim[1] or ylim[0] >= ylim[1]:
+                print("[BASEMAP DEBUG] Invalid plot limits, returning early")
+                return
+            
+            # Check if we need to reload (zoom level or extent changed significantly)
+            # Calculate current zoom level
+            extent_width = xlim[1] - xlim[0]
+            extent_height = ylim[1] - ylim[0]
+            current_extent = (xlim[0], xlim[1], ylim[0], ylim[1])
+            
+            # Only reload if zoom level or extent changed significantly (unless force_reload is True)
+            if not force_reload:
+                if hasattr(self, '_last_basemap_extent'):
+                    if self._last_basemap_extent is not None:
+                        last_extent = self._last_basemap_extent
+                        # Check if extent changed significantly (more than 15% change in width or height)
+                        last_width = last_extent[1] - last_extent[0]
+                        last_height = last_extent[3] - last_extent[2]
+                        width_change = abs(extent_width - last_width) / max(extent_width, last_width) if max(extent_width, last_width) > 0 else 1.0
+                        height_change = abs(extent_height - last_height) / max(extent_height, last_height) if max(extent_height, last_height) > 0 else 1.0
+                        # Check if center moved significantly (more than 25% of current extent)
+                        center_x = (xlim[0] + xlim[1]) / 2
+                        center_y = (ylim[0] + ylim[1]) / 2
+                        last_center_x = (last_extent[0] + last_extent[1]) / 2
+                        last_center_y = (last_extent[2] + last_extent[3]) / 2
+                        center_x_change = abs(center_x - last_center_x) / extent_width if extent_width > 0 else 0
+                        center_y_change = abs(center_y - last_center_y) / extent_height if extent_height > 0 else 0
+                        
+                        print(f"[BASEMAP DEBUG] Extent change check: width_change={width_change:.3f}, height_change={height_change:.3f}, "
+                              f"center_x_change={center_x_change:.3f}, center_y_change={center_y_change:.3f}")
+                        
+                        # Only reload if change is significant
+                        if width_change < 0.15 and height_change < 0.15 and center_x_change < 0.25 and center_y_change < 0.25:
+                            print("[BASEMAP DEBUG] No significant change detected, skipping reload (early return)")
+                            return  # No significant change, skip reload
+                    else:
+                        print("[BASEMAP DEBUG] No previous basemap extent stored, proceeding with reload")
+                else:
+                    print("[BASEMAP DEBUG] _last_basemap_extent not set, proceeding with reload")
+            else:
+                print("[BASEMAP DEBUG] force_reload=True, bypassing early return check")
+            
+            # Store current extent for next comparison
+            self._last_basemap_extent = current_extent
+            print(f"[BASEMAP DEBUG] Stored new basemap extent: {current_extent}")
+            
+            # Convert WGS84 bounds to Web Mercator (EPSG:3857)
+            if not GEOSPATIAL_LIBS_AVAILABLE:
+                print("[BASEMAP DEBUG] Geospatial libraries not available, returning")
+                return
+            
+            try:
+                # Create transformer from WGS84 to Web Mercator
+                wgs84_to_mercator = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+                
+                # Transform bounds
+                x_min_merc, y_min_merc = wgs84_to_mercator.transform(xlim[0], ylim[0])
+                x_max_merc, y_max_merc = wgs84_to_mercator.transform(xlim[1], ylim[1])
+                
+                # Calculate appropriate zoom level based on extent
+                # Web Mercator uses meters, tile size is 256 pixels
+                # Resolution at zoom level z = 156543.03392 / (2^z) meters per pixel
+                extent_width_m = abs(x_max_merc - x_min_merc)
+                extent_height_m = abs(y_max_merc - y_min_merc)
+                
+                # Estimate zoom level (aim for higher resolution - use smaller dimension to ensure detail)
+                # Use the smaller dimension to ensure we get enough resolution
+                min_extent = min(extent_width_m, extent_height_m)
+                # Target: aim for ~512-768 pixels to get higher resolution tiles
+                # Higher target pixels = higher zoom level = more detail
+                target_resolution = min_extent / 512  # Aim for ~512 pixels on the smaller dimension
+                # Resolution = 156543.03392 / (2^z), so 2^z = 156543.03392 / resolution
+                # Use round() instead of int() to get better zoom level transitions
+                zoom_level = int(np.round(np.clip(np.log2(156543.03392 / target_resolution), 0, 19)))
+                print(f"[BASEMAP DEBUG] Calculated zoom level: {zoom_level} (extent_width_m={extent_width_m:.1f}, extent_height_m={extent_height_m:.1f}, min_extent={min_extent:.1f}, target_resolution={target_resolution:.1f})")
+                
+                # Calculate tile coordinates
+                # Web Mercator origin is at (-20037508.34, 20037508.34)
+                origin_x = -20037508.34
+                origin_y = 20037508.34
+                tile_size = 256
+                resolution = 156543.03392 / (2 ** zoom_level)
+                
+                # Calculate tile indices
+                tile_x_min = int(np.floor((x_min_merc - origin_x) / (tile_size * resolution)))
+                tile_x_max = int(np.ceil((x_max_merc - origin_x) / (tile_size * resolution)))
+                tile_y_min = int(np.floor((origin_y - y_max_merc) / (tile_size * resolution)))
+                tile_y_max = int(np.ceil((origin_y - y_min_merc) / (tile_size * resolution)))
+                
+                # Limit tile range
+                max_tile = 2 ** zoom_level
+                tile_x_min = max(0, min(tile_x_min, max_tile - 1))
+                tile_x_max = max(0, min(tile_x_max, max_tile - 1))
+                tile_y_min = max(0, min(tile_y_min, max_tile - 1))
+                tile_y_max = max(0, min(tile_y_max, max_tile - 1))
+                
+                # Fetch and composite tiles
+                tiles = []
+                tile_coords = []
+                base_url = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                print(f"[BASEMAP DEBUG] Fetching tiles: tile_x_range=({tile_x_min}, {tile_x_max}), tile_y_range=({tile_y_min}, {tile_y_max})")
+                
+                tiles_requested = 0
+                tiles_failed = 0
+                for ty in range(tile_y_min, tile_y_max + 1):
+                    for tx in range(tile_x_min, tile_x_max + 1):
+                        tiles_requested += 1
+                        try:
+                            url = base_url.format(z=zoom_level, y=ty, x=tx)
+                            req = Request(url, headers={'User-Agent': 'SAT_Planner'})
+                            with urlopen(req, timeout=5) as response:
+                                img_data = response.read()
+                                img = Image.open(BytesIO(img_data))
+                                tiles.append((tx, ty, img))
+                                tile_coords.append((tx, ty))
+                        except Exception as e:
+                            # Skip failed tiles
+                            tiles_failed += 1
+                            print(f"[BASEMAP DEBUG] Failed to fetch tile ({tx}, {ty}): {e}")
+                            continue
+                
+                print(f"[BASEMAP DEBUG] Tile fetch complete: {len(tiles)}/{tiles_requested} tiles fetched successfully ({tiles_failed} failed)")
+                
+                if not tiles:
+                    print("[BASEMAP DEBUG] No tiles fetched, returning early")
+                    return
+                
+                # Composite tiles into single image
+                # Calculate composite image bounds
+                tile_x_coords = [tx for tx, ty, _ in tiles]
+                tile_y_coords = [ty for tx, ty, _ in tiles]
+                min_tx, max_tx = min(tile_x_coords), max(tile_x_coords)
+                min_ty, max_ty = min(tile_y_coords), max(tile_y_coords)
+                
+                composite_width = (max_tx - min_tx + 1) * tile_size
+                composite_height = (max_ty - min_ty + 1) * tile_size
+                composite = Image.new('RGB', (composite_width, composite_height))
+                
+                for tx, ty, img in tiles:
+                    x_offset = (tx - min_tx) * tile_size
+                    y_offset = (ty - min_ty) * tile_size
+                    composite.paste(img, (x_offset, y_offset))
+                
+                # Convert to numpy array
+                composite_array = np.array(composite)
+                
+                # Calculate extent in WGS84 for the composite
+                # Tile bounds in Web Mercator
+                tile_x_min_merc = origin_x + min_tx * tile_size * resolution
+                tile_x_max_merc = origin_x + (max_tx + 1) * tile_size * resolution
+                tile_y_max_merc = origin_y - min_ty * tile_size * resolution
+                tile_y_min_merc = origin_y - (max_ty + 1) * tile_size * resolution
+                
+                # Transform back to WGS84
+                mercator_to_wgs84 = pyproj.Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+                lon_min, lat_max = mercator_to_wgs84.transform(tile_x_min_merc, tile_y_max_merc)
+                lon_max, lat_min = mercator_to_wgs84.transform(tile_x_max_merc, tile_y_min_merc)
+                
+                # Remove old basemap if it exists
+                if hasattr(self, 'basemap_image_plot') and self.basemap_image_plot is not None:
+                    try:
+                        print("[BASEMAP DEBUG] Removing old basemap plot")
+                        self.basemap_image_plot.remove()
+                        self.basemap_image_plot = None
+                    except Exception as e:
+                        print(f"[BASEMAP DEBUG] Error removing old basemap: {e}")
+                        pass
+                
+                # Plot the basemap
+                print(f"[BASEMAP DEBUG] Plotting basemap with extent: lon=[{lon_min:.6f}, {lon_max:.6f}], lat=[{lat_min:.6f}, {lat_max:.6f}]")
+                print(f"[BASEMAP DEBUG] Composite array shape: {composite_array.shape}")
+                try:
+                    self.basemap_image_plot = self.ax.imshow(composite_array, 
+                                                             extent=[lon_min, lon_max, lat_min, lat_max],
+                                                             origin='upper', 
+                                                             zorder=-3,  # Behind everything
+                                                             interpolation='bilinear')
+                    print("[BASEMAP DEBUG] Basemap imshow() completed successfully")
+                except Exception as e:
+                    print(f"[BASEMAP DEBUG] Error in imshow(): {e}")
+                    traceback.print_exc()
+                    raise
+                
+                # Force a redraw to show the basemap
+                print("[BASEMAP DEBUG] Calling canvas.draw_idle()")
+                self.canvas.draw_idle()
+                print("[BASEMAP DEBUG] Basemap reload complete")
+                
+            except Exception as e:
+                print(f"Error loading basemap: {e}")
+                traceback.print_exc()
+                
+        except Exception as e:
+            print(f"Error in _load_and_plot_basemap: {e}")
+            traceback.print_exc()
+
     def _toggle_slope_visualization(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning","Disabled Feature",
@@ -4353,6 +4650,23 @@ class SurveyPlanApp(QMainWindow):
         except:
             pass
         
+        # Reload basemap if enabled (to get higher resolution when zooming in/out)
+        # Do this after setting aspect ratio so limits are finalized
+        # The throttling in _load_and_plot_basemap() will prevent excessive reloads
+        if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
+            print(f"[BASEMAP DEBUG] Zoom event detected, basemap enabled. Setting up reload timer. New limits: xlim={new_xlim}, ylim={new_ylim}")
+            # Use QTimer to reload basemap after a short delay to avoid reloading on every scroll event
+            # This ensures the limits are stable before reloading
+            if not hasattr(self, '_basemap_reload_timer'):
+                self._basemap_reload_timer = QTimer()
+                self._basemap_reload_timer.setSingleShot(True)
+                self._basemap_reload_timer.timeout.connect(self._load_and_plot_basemap)
+            self._basemap_reload_timer.stop()  # Cancel any pending reload
+            self._basemap_reload_timer.start(150)  # Reload after 150ms delay
+            print("[BASEMAP DEBUG] Basemap reload timer started (150ms delay)")
+        else:
+            print("[BASEMAP DEBUG] Basemap not enabled, skipping reload")
+        
         # Update zoom level for dynamic resolution loading (only if GeoTIFF is loaded and dynamic resolution enabled)
         if (old_zoom_level is not None and 
             self.geotiff_dataset_original is not None and 
@@ -4934,6 +5248,9 @@ class SurveyPlanApp(QMainWindow):
         self.canvas.draw_idle()
 
     def _on_middle_release(self, event):
+        # Reload basemap if enabled (after panning)
+        if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
+            self._load_and_plot_basemap()
         # Only handle middle button (button 2)
         if event.button != 2:
             return
@@ -4946,6 +5263,10 @@ class SurveyPlanApp(QMainWindow):
             current_xlim = self.ax.get_xlim()
             current_ylim = self.ax.get_ylim()
             self._current_view_limits = (current_xlim, current_ylim)
+            
+            # Reload basemap if enabled (after panning to update tiles for new location)
+            if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
+                self._load_and_plot_basemap()
             
             # Clear panning mode and timeout
             if hasattr(self, '_panning_mode'):
