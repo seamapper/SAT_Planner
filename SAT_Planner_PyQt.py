@@ -4183,15 +4183,8 @@ class SurveyPlanApp(QMainWindow):
             # Store current extent for next comparison
             self._last_noaa_charts_extent = current_extent
             
-            # Get the canvas size to determine image size
-            canvas_width = int(self.canvas.width())
-            canvas_height = int(self.canvas.height())
-            # Use a reasonable size for the export (max 2048x2048 for performance)
-            image_width = min(canvas_width, 2048)
-            image_height = min(canvas_height, 2048)
-            
             # Build ESRI REST export URL
-            # The service uses Web Mercator (EPSG:3857 / 102100) as spatial reference
+            # Request in EPSG:3857 (Web Mercator) for equal cell size in meters, then reproject to EPSG:4326 for display
             if not GEOSPATIAL_LIBS_AVAILABLE:
                 return
             
@@ -4200,45 +4193,71 @@ class SurveyPlanApp(QMainWindow):
                 wgs84_to_mercator = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
                 
                 # Add padding to ensure full coverage
-                # Calculate aspect ratios to ensure proper coverage
                 width = xlim[1] - xlim[0]
                 height = ylim[1] - ylim[0]
-                plot_aspect = width / height if height > 0 else 1.0
-                image_aspect = image_width / image_height if image_height > 0 else 1.0
                 
-                # If image aspect is different from plot aspect, we need more padding on the shorter dimension
-                # Use larger padding factor to ensure full coverage, especially for height
-                base_padding = 0.10
-                if image_aspect > plot_aspect:
-                    # Image is wider than plot - need more vertical padding
-                    x_padding = base_padding
-                    y_padding = base_padding * (image_aspect / plot_aspect)
-                else:
-                    # Image is taller than plot - need more horizontal padding
-                    x_padding = base_padding * (plot_aspect / image_aspect)
-                    y_padding = base_padding
+                # Add padding to ensure full coverage
+                base_padding = 0.15  # 15% padding on all sides
+                padded_xlim = (xlim[0] - width * base_padding, xlim[1] + width * base_padding)
+                padded_ylim = (ylim[0] - height * base_padding, ylim[1] + height * base_padding)
                 
-                # Add extra padding to ensure we definitely cover the full area
-                x_padding = max(x_padding, 0.15)  # At least 15% horizontal padding
-                y_padding = max(y_padding, 0.15)  # At least 15% vertical padding
-                
-                padded_xlim = (xlim[0] - width * x_padding, xlim[1] + width * x_padding)
-                padded_ylim = (ylim[0] - height * y_padding, ylim[1] + height * y_padding)
-                
-                print(f"[NOAA CHARTS DEBUG] Padding: x={x_padding:.2%}, y={y_padding:.2%}, plot_aspect={plot_aspect:.3f}, image_aspect={image_aspect:.3f}")
-                
-                # Transform bounds to Web Mercator (the service uses 102100 which is the same as 3857)
+                # Transform bounds to Web Mercator (EPSG:3857) for the request
                 x_min_merc, y_min_merc = wgs84_to_mercator.transform(padded_xlim[0], padded_ylim[0])
                 x_max_merc, y_max_merc = wgs84_to_mercator.transform(padded_xlim[1], padded_ylim[1])
                 
+                # Calculate bbox dimensions in meters (Web Mercator uses meters)
+                bbox_width_merc = x_max_merc - x_min_merc
+                bbox_height_merc = y_max_merc - y_min_merc
+                
+                # Determine image size to ensure equal cell size (meters per pixel) for x and y
+                # Cell size = bbox_width / image_width = bbox_height / image_height
+                # We'll use the larger dimension to determine the base resolution, then scale both accordingly
+                max_dimension_pixels = 2048  # Maximum dimension for performance
+                
+                # Calculate cell size based on the larger bbox dimension
+                # Use the larger dimension to ensure we get sufficient detail
+                if bbox_width_merc >= bbox_height_merc:
+                    # Width is larger - use it to determine cell size
+                    cell_size = bbox_width_merc / max_dimension_pixels
+                    image_width = max_dimension_pixels
+                    image_height = int(bbox_height_merc / cell_size)
+                else:
+                    # Height is larger - use it to determine cell size
+                    cell_size = bbox_height_merc / max_dimension_pixels
+                    image_height = max_dimension_pixels
+                    image_width = int(bbox_width_merc / cell_size)
+                
+                # Ensure we don't exceed max dimensions and maintain minimum size
+                if image_width > max_dimension_pixels:
+                    image_width = max_dimension_pixels
+                    cell_size = bbox_width_merc / image_width
+                    image_height = int(bbox_height_merc / cell_size)
+                if image_height > max_dimension_pixels:
+                    image_height = max_dimension_pixels
+                    cell_size = bbox_height_merc / image_height
+                    image_width = int(bbox_width_merc / cell_size)
+                
+                # Ensure minimum dimensions
+                image_width = max(image_width, 256)
+                image_height = max(image_height, 256)
+                
+                # Verify cell sizes are equal (within rounding tolerance)
+                cell_size_x = bbox_width_merc / image_width
+                cell_size_y = bbox_height_merc / image_height
+                
+                print(f"[NOAA CHARTS DEBUG] Bbox (EPSG:3857): width={bbox_width_merc:.2f}m, height={bbox_height_merc:.2f}m")
+                print(f"[NOAA CHARTS DEBUG] Image size: {image_width}x{image_height}, Cell size: x={cell_size_x:.2f}m/pixel, y={cell_size_y:.2f}m/pixel")
+                print(f"[NOAA CHARTS DEBUG] Padding: {base_padding:.2%} on all sides")
+                
                 # Build the export URL
                 # ESRI REST export format: /export?bbox=xmin,ymin,xmax,ymax&bboxSR=...&imageSR=...&size=...&format=...&transparent=...&f=image
-                bbox_merc = f"{x_min_merc},{y_min_merc},{x_max_merc},{y_max_merc}"
+                # Note: ESRI REST API expects bbox in format: xmin,ymin,xmax,ymax
+                bbox_3857 = f"{x_min_merc},{y_min_merc},{x_max_merc},{y_max_merc}"
                 base_url = "https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/MapServer/export"
                 params = {
-                    'bbox': bbox_merc,
-                    'bboxSR': '102100',  # Web Mercator (same as 3857)
-                    'imageSR': '102100',  # Web Mercator
+                    'bbox': bbox_3857,
+                    'bboxSR': '3857',  # Web Mercator
+                    'imageSR': '3857',  # Web Mercator
                     'size': f"{image_width},{image_height}",
                     'format': 'png',
                     'transparent': 'true',
@@ -4251,7 +4270,7 @@ class SurveyPlanApp(QMainWindow):
                 url = f"{base_url}?{query_string}"
                 
                 print(f"[NOAA CHARTS DEBUG] Requesting charts from ESRI REST endpoint: {url}")
-                print(f"[NOAA CHARTS DEBUG] Bbox (Web Mercator): {bbox_merc}, Size: {image_width}x{image_height}")
+                print(f"[NOAA CHARTS DEBUG] Bbox (EPSG:3857): {bbox_3857}, Size: {image_width}x{image_height}")
                 
                 # Fetch the image
                 req = Request(url, headers={'User-Agent': 'SAT_Planner'})
@@ -4275,23 +4294,82 @@ class SurveyPlanApp(QMainWindow):
                     print(f"[NOAA CHARTS DEBUG] Image format: {img.format}, Mode: {img.mode}, Size: {img.size}")
                     
                     # Convert to numpy array
-                    img_array = np.array(img)
-                    print(f"[NOAA CHARTS DEBUG] Array shape: {img_array.shape}, dtype: {img_array.dtype}")
-                    print(f"[NOAA CHARTS DEBUG] Array min: {img_array.min()}, max: {img_array.max()}")
+                    img_array_3857 = np.array(img)
+                    print(f"[NOAA CHARTS DEBUG] Array shape (EPSG:3857): {img_array_3857.shape}, dtype: {img_array_3857.dtype}")
+                    print(f"[NOAA CHARTS DEBUG] Array min: {img_array_3857.min()}, max: {img_array_3857.max()}")
                     
-                    # Ensure the array is in the right format for imshow
-                    if len(img_array.shape) == 2:
-                        # Grayscale - convert to RGB
-                        img_array = np.stack([img_array] * 3, axis=-1)
-                        print(f"[NOAA CHARTS DEBUG] Converted grayscale to RGB, new shape: {img_array.shape}")
-                    elif len(img_array.shape) == 3 and img_array.shape[2] == 4:
-                        # RGBA - ensure values are in 0-255 range
-                        if img_array.dtype != np.uint8:
-                            img_array = (img_array * 255).astype(np.uint8) if img_array.max() <= 1.0 else img_array.astype(np.uint8)
-                    elif len(img_array.shape) == 3 and img_array.shape[2] == 3:
+                    # Ensure the array is in the right format for reprojection
+                    # Handle different image formats
+                    has_alpha = False
+                    if len(img_array_3857.shape) == 2:
+                        # Grayscale - convert to RGB for reprojection
+                        img_array_3857 = np.stack([img_array_3857] * 3, axis=-1)
+                        print(f"[NOAA CHARTS DEBUG] Converted grayscale to RGB, new shape: {img_array_3857.shape}")
+                    elif len(img_array_3857.shape) == 3 and img_array_3857.shape[2] == 4:
+                        # RGBA - keep alpha channel
+                        has_alpha = True
+                        if img_array_3857.dtype != np.uint8:
+                            img_array_3857 = (img_array_3857 * 255).astype(np.uint8) if img_array_3857.max() <= 1.0 else img_array_3857.astype(np.uint8)
+                    elif len(img_array_3857.shape) == 3 and img_array_3857.shape[2] == 3:
                         # RGB - ensure values are in 0-255 range
-                        if img_array.dtype != np.uint8:
-                            img_array = (img_array * 255).astype(np.uint8) if img_array.max() <= 1.0 else img_array.astype(np.uint8)
+                        if img_array_3857.dtype != np.uint8:
+                            img_array_3857 = (img_array_3857 * 255).astype(np.uint8) if img_array_3857.max() <= 1.0 else img_array_3857.astype(np.uint8)
+                    
+                    # Reproject image from EPSG:3857 to EPSG:4326
+                    # Calculate output dimensions to maintain similar resolution
+                    # Use the padded extent in EPSG:4326 for output
+                    output_width = image_width
+                    output_height = image_height
+                    
+                    # Source transform (EPSG:3857)
+                    src_transform = transform.from_bounds(
+                        x_min_merc, y_min_merc, x_max_merc, y_max_merc,
+                        image_width, image_height
+                    )
+                    
+                    # Destination transform (EPSG:4326) - use padded extent
+                    dst_transform = transform.from_bounds(
+                        padded_xlim[0], padded_ylim[0], padded_xlim[1], padded_ylim[1],
+                        output_width, output_height
+                    )
+                    
+                    # Reproject each band separately (RGB or RGBA)
+                    num_bands = img_array_3857.shape[2] if len(img_array_3857.shape) == 3 else 1
+                    reprojected_bands = []
+                    
+                    for band_idx in range(num_bands):
+                        if len(img_array_3857.shape) == 3:
+                            source_band = img_array_3857[:, :, band_idx]
+                        else:
+                            source_band = img_array_3857
+                        
+                        # Create destination array for this band
+                        destination_band = np.zeros((output_height, output_width), dtype=source_band.dtype)
+                        
+                        # Reproject this band
+                        reproject(
+                            source=source_band,
+                            destination=destination_band,
+                            src_transform=src_transform,
+                            src_crs='EPSG:3857',
+                            dst_transform=dst_transform,
+                            dst_crs='EPSG:4326',
+                            resampling=Resampling.bilinear
+                        )
+                        
+                        reprojected_bands.append(destination_band)
+                    
+                    # Stack bands back together
+                    if len(reprojected_bands) == 1:
+                        img_array = reprojected_bands[0]
+                    else:
+                        img_array = np.stack(reprojected_bands, axis=-1)
+                    
+                    print(f"[NOAA CHARTS DEBUG] Reprojected image shape (EPSG:4326): {img_array.shape}")
+                    
+                    # Convert back to uint8 if needed
+                    if img_array.dtype != np.uint8:
+                        img_array = img_array.astype(np.uint8)
                     
                     # Remove old chart overlay if it exists
                     if hasattr(self, 'noaa_charts_image_plot') and self.noaa_charts_image_plot is not None:
@@ -4308,16 +4386,15 @@ class SurveyPlanApp(QMainWindow):
                     # Calculate opacity
                     alpha = self.noaa_charts_opacity / 100.0 if hasattr(self, 'noaa_charts_opacity') else 0.5
                     
-                    # Use the original plot limits for the extent (not the padded extent)
-                    # The padding is only for requesting a larger image from the service to ensure coverage,
-                    # but we plot using the current plot limits so it doesn't change the map boundaries
-                    print(f"[NOAA CHARTS DEBUG] Plotting with extent: [{xlim[0]:.6f}, {xlim[1]:.6f}, {ylim[0]:.6f}, {ylim[1]:.6f}], alpha: {alpha}")
-                    print(f"[NOAA CHARTS DEBUG] Image size: {img_array.shape[1]}x{img_array.shape[0]}, Requested padded bbox covers larger area for full coverage")
+                    # Use the padded extent for the reprojected image (EPSG:4326)
+                    # The image was reprojected to cover the padded area, so we use padded extent for display
+                    print(f"[NOAA CHARTS DEBUG] Plotting reprojected image with extent: [{padded_xlim[0]:.6f}, {padded_xlim[1]:.6f}, {padded_ylim[0]:.6f}, {padded_ylim[1]:.6f}], alpha: {alpha}")
+                    print(f"[NOAA CHARTS DEBUG] Reprojected image size: {img_array.shape[1]}x{img_array.shape[0]}")
                     
                     # Plot the NOAA charts overlay
-                    # Use the current plot limits (same as basemap approach) so it doesn't change map boundaries
+                    # Use the padded extent since the image covers that area after reprojection
                     self.noaa_charts_image_plot = self.ax.imshow(img_array,
-                                                                 extent=[xlim[0], xlim[1], ylim[0], ylim[1]],
+                                                                 extent=[padded_xlim[0], padded_xlim[1], padded_ylim[0], padded_ylim[1]],
                                                                  origin='upper',
                                                                  zorder=10,  # High zorder to overlay other layers
                                                                  alpha=alpha,
