@@ -137,67 +137,15 @@ To build a macOS application (.app bundle):
 pip install pyinstaller
 ```
 
-2. **Create a macOS spec file** (or modify the existing spec file):
-   - The spec file needs to use `APP` instead of `EXE` for macOS
-   - Icon file should be in `.icns` format (convert from `.ico` if needed)
-   - Example spec file structure for macOS:
-
-```python
-# -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files
-
-block_cipher = None
-
-# Collect data files for geospatial libraries
-datas = []
-datas += collect_data_files('pyproj')
-datas += collect_data_files('fiona')
-datas += collect_data_files('shapely')
-datas += collect_data_files('rasterio')
-datas += collect_data_files('matplotlib')
-datas += [('media/CCOM.ico', 'media')]
-# Include CCOM.png if it exists
-import os
-if os.path.exists('media/CCOM.png'):
-    datas += [('media/CCOM.png', 'media')]
-
-a = Analysis(
-    ['SAT_Planner_PyQt.py'],
-    pathex=[],
-    binaries=[],
-    datas=datas,
-    hiddenimports=[
-        'fiona', 'shapely', 'pyproj', 'rasterio',
-        'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
-        'matplotlib.backends.backend_qtagg',
-        # ... (same hidden imports as Windows version)
-    ],
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=[],
-    cipher=block_cipher,
-    noarchive=False,
-)
-
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-
-app = BUNDLE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='SAT_Planner',
-    icon='media/CCOM.icns',  # Use .icns format for macOS
-    bundle_identifier='edu.unh.ccom.satplanner',
-)
-
-# Note: For macOS, PyInstaller creates an .app bundle instead of an executable
+2. **Prepare the icon file** (if needed):
+   - The spec file uses `media/CCOM.icns` for the app icon
+   - If you only have `CCOM.ico`, convert it to `.icns` format:
+```bash
+# Using sips (built into macOS):
+sips -s format icns media/CCOM.ico --out media/CCOM.icns
 ```
 
-3. **Build the app bundle**:
+3. **Build the app bundle** using the provided macOS spec file:
 ```bash
 pyinstaller Sat_Planner_macOS.spec
 ```
