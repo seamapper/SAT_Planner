@@ -49,6 +49,12 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Dynamic resolution loading for performance
 - Support for various coordinate reference systems (CRS)
 
+### Map Overlays
+- **Imagery Basemap**: Toggle satellite imagery basemap overlay with adjustable opacity
+- **NOAA ENC Charts**: Display NOAA Electronic Navigational Charts overlay with adjustable opacity
+- Both overlays support real-time updates as you pan and zoom
+- Overlays are properly reprojected to match your plot coordinate system
+
 ## Requirements
 
 ### Python Version
@@ -70,7 +76,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `Sat_Planner_v2025.05.exe` (Windows)
+- `Sat_Planner_v2025.08.exe` (Windows) or newer
 
 No installation required - just run the executable.
 
@@ -115,7 +121,7 @@ build_exe.bat
 
 Or manually:
 ```bash
-pyinstaller Sat_Planner_v2025.05.spec
+pyinstaller Sat_Planner_v2025.08.spec
 ```
 
 The executable will be created in the `dist` folder.
@@ -125,11 +131,12 @@ The executable will be created in the `dist` folder.
 ### Basic Workflow
 
 1. **Load GeoTIFF** (optional): Click "Load GeoTIFF" to load elevation data for visualization
-2. **Select Planning Mode**: Choose between Calibration, Reference, or Line tabs
-3. **Configure Parameters**: Set survey parameters in the appropriate tab
-4. **Generate/Plan**: Create survey lines based on parameters or draw interactively
-5. **View Statistics**: Click "Show [Type] Test Info" to view survey statistics
-6. **Export**: Save survey plans using the Export buttons
+2. **Enable Map Overlays** (optional): Toggle Imagery Basemap or NOAA ENC Charts checkboxes and adjust opacity sliders
+3. **Select Planning Mode**: Choose between Calibration, Reference, or Line tabs
+4. **Configure Parameters**: Set survey parameters in the appropriate tab
+5. **Generate/Plan**: Create survey lines based on parameters or draw interactively
+6. **View Statistics**: Click "Show [Type] Test Info" to view survey statistics
+7. **Export**: Save survey plans using the Export buttons
 
 ### Calibration Survey Planning
 
@@ -161,6 +168,17 @@ The executable will be created in the `dist` folder.
 5. Edit by clicking "Edit Line Planning" and dragging waypoints
 6. View elevation profile and statistics
 7. Export the line plan
+
+### Map Overlays
+
+1. **Imagery Basemap**: Check the "Imagery Basemap" checkbox to overlay satellite imagery
+   - Adjust opacity using the slider (0-100%)
+   - The basemap updates automatically as you pan and zoom
+
+2. **NOAA ENC Charts**: Check the "NOAA ENC Charts" checkbox to overlay navigational charts
+   - Adjust opacity using the slider (0-100%)
+   - Charts are requested with equal cell size and properly reprojected for display
+   - Charts update automatically as you pan and zoom
 
 ## Configuration
 
@@ -215,6 +233,11 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2025.10**: Added Imagery Basemap and NOAA ENC Charts overlays with opacity controls, improved map visualization
+- **v2025.09**: Made profile colors coordinate with survey plot
+- **v2025.08**: Added About button to profile plot
+- **v2025.07**: Added ability to plan all tests simultaneously, fixed profile plot updates
+- **v2025.06**: Fixed labeling of waypoints in line planning tab, fixed preservation of lines when changing tabs
 - **v2025.05**: Added ability to plan all tests simultaneously, fixed profile plot updates, improved dynamic resolution
 - **v2025.04**: Converted to PyQt6
 - **v2025.03**: Added line planning, import/export of lines

@@ -4,7 +4,7 @@ REM This script builds the executable using PyInstaller
 
 set PYTHON_PATH=C:\Users\pjohnson\PycharmProjects\MultibeamToolsMolokai\.venv\Scripts\python.exe
 
-echo Building Sat_Planner_v2025.08.exe...
+echo Building Sat_Planner_v2025.10.exe...
 echo.
 
 REM Check if PyInstaller is installed
@@ -15,7 +15,7 @@ if errorlevel 1 (
 )
 
 REM Build the executable using the spec file
-"%PYTHON_PATH%" -m PyInstaller Sat_Planner_v2025.08.spec
+"%PYTHON_PATH%" -m PyInstaller Sat_Planner_v2025.10.spec
 
 if errorlevel 1 (
     echo.

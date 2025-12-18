@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use('QtAgg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.colors import LightSource
 from matplotlib.figure import Figure
 import numpy as np
@@ -945,6 +946,9 @@ class SurveyPlanApp(QMainWindow):
         self.cid_middle_release = self.canvas.mpl_connect('button_release_event', self._on_middle_release)
         # Connect draw event for dynamic colormap scaling
         self.cid_draw = self.canvas.mpl_connect('draw_event', self._on_draw_event_update_colormap)
+        # Connect axis limit change events for Dynamic Resolution (toolbar zoom support)
+        self.cid_xlim_changed = self.ax.callbacks.connect('xlim_changed', self._on_axis_limits_changed)
+        self.cid_ylim_changed = self.ax.callbacks.connect('ylim_changed', self._on_axis_limits_changed)
 
         # Initialize buttons states based on library availability
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -1976,6 +1980,9 @@ class SurveyPlanApp(QMainWindow):
         self.cid_middle_release = self.canvas.mpl_connect('button_release_event', self._on_middle_release)
         # Connect draw event for dynamic colormap scaling
         self.cid_draw = self.canvas.mpl_connect('draw_event', self._on_draw_event_update_colormap)
+        # Connect axis limit change events for Dynamic Resolution (toolbar zoom support)
+        self.cid_xlim_changed = self.ax.callbacks.connect('xlim_changed', self._on_axis_limits_changed)
+        self.cid_ylim_changed = self.ax.callbacks.connect('ylim_changed', self._on_axis_limits_changed)
 
         # Initialize buttons states based on library availability
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -5094,6 +5101,103 @@ class SurveyPlanApp(QMainWindow):
         # Use draw_idle() for non-blocking updates during zoom
         self.canvas.draw_idle()
 
+    def _on_axis_limits_changed(self, ax):
+        """Callback for axis limit changes (e.g., from toolbar zoom/pan)."""
+        print(f"[DYNAMIC RES DEBUG] _on_axis_limits_changed called, ax={ax}, self.ax={self.ax}")
+        # Only process if this is the main axes
+        if ax != self.ax:
+            print(f"[DYNAMIC RES DEBUG] Not main axes, returning")
+            return
+        
+        # Skip if during rapid zoom mode (scroll wheel zoom)
+        if hasattr(self, '_rapid_zoom_mode') and self._rapid_zoom_mode:
+            return
+        
+        # Skip if limits are being set programmatically (e.g., during GeoTIFF loading)
+        if hasattr(self, '_setting_limits_programmatically') and self._setting_limits_programmatically:
+            return
+        
+        # Debounce: only process once per change event (both xlim and ylim will trigger)
+        # Use a flag to track if we're already processing this change
+        if not hasattr(self, '_processing_limit_change'):
+            self._processing_limit_change = False
+        
+        if self._processing_limit_change:
+            return
+        
+        self._processing_limit_change = True
+        # Clear the flag after a short delay
+        if not hasattr(self, '_limit_change_flag_timer'):
+            self._limit_change_flag_timer = QTimer()
+            self._limit_change_flag_timer.setSingleShot(True)
+            self._limit_change_flag_timer.timeout.connect(lambda: setattr(self, '_processing_limit_change', False))
+        self._limit_change_flag_timer.stop()
+        self._limit_change_flag_timer.start(100)
+        
+        print(f"[DYNAMIC RES DEBUG] Axis limits changed callback triggered")
+        
+        # Get current limits
+        current_xlim = self.ax.get_xlim()
+        current_ylim = self.ax.get_ylim()
+        
+        # Update Dynamic Resolution if GeoTIFF is loaded and dynamic resolution is enabled
+        if (self.geotiff_dataset_original is not None and 
+            self.dynamic_resolution_enabled and
+            hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None):
+            
+            # Calculate zoom level based on the updated view
+            full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
+            full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+            new_width = current_xlim[1] - current_xlim[0]
+            new_height = current_ylim[1] - current_ylim[0]
+            
+            # New zoom level is the ratio of current view to full extent
+            width_ratio = new_width / full_width if full_width > 0 else 1.0
+            height_ratio = new_height / full_height if full_height > 0 else 1.0
+            new_zoom_level = min(width_ratio, height_ratio)
+            new_zoom_level = max(0.01, min(10.0, new_zoom_level))
+            
+            # Update zoom level and reload GeoTIFF
+            old_zoom_level = getattr(self, 'geotiff_zoom_level', 1.0)
+            zoom_change = abs(new_zoom_level - old_zoom_level)
+            
+            print(f"[DYNAMIC RES DEBUG] Axis limits changed - old_zoom: {old_zoom_level:.4f}, new_zoom: {new_zoom_level:.4f}, change: {zoom_change:.4f}")
+            
+            # Only reload if zoom change is significant (to avoid excessive reloads)
+            if zoom_change > 0.05:  # 5% change threshold
+                print(f"[DYNAMIC RES DEBUG] Significant zoom change detected, updating resolution")
+                self.geotiff_zoom_level = new_zoom_level
+                self._last_user_xlim = current_xlim
+                self._last_user_ylim = current_ylim
+                
+                # Use a timer to debounce rapid limit changes
+                if not hasattr(self, '_limit_change_timer'):
+                    self._limit_change_timer = QTimer()
+                    self._limit_change_timer.setSingleShot(True)
+                    self._limit_change_timer.timeout.connect(self._reload_geotiff_at_current_zoom)
+                self._limit_change_timer.stop()
+                self._limit_change_timer.start(500)  # Wait 500ms for limit changes to stabilize
+            else:
+                print(f"[DYNAMIC RES DEBUG] Zoom change too small ({zoom_change:.4f}), skipping reload")
+        
+        # Reload basemap if enabled
+        if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
+            if not hasattr(self, '_basemap_reload_timer'):
+                self._basemap_reload_timer = QTimer()
+                self._basemap_reload_timer.setSingleShot(True)
+                self._basemap_reload_timer.timeout.connect(self._load_and_plot_basemap)
+            self._basemap_reload_timer.stop()
+            self._basemap_reload_timer.start(150)
+        
+        # Reload NOAA charts if enabled
+        if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
+            if not hasattr(self, '_noaa_charts_reload_timer'):
+                self._noaa_charts_reload_timer = QTimer()
+                self._noaa_charts_reload_timer.setSingleShot(True)
+                self._noaa_charts_reload_timer.timeout.connect(self._load_and_plot_noaa_charts)
+            self._noaa_charts_reload_timer.stop()
+            self._noaa_charts_reload_timer.start(150)
+
     def _zoom_to_plan(self):
         all_lats = []
         all_lons = []
@@ -7979,6 +8083,54 @@ class SurveyPlanApp(QMainWindow):
             traceback.print_exc()
 
     def _on_draw_event_update_colormap(self, event=None):
+        # Check for Dynamic Resolution updates (toolbar zoom/pan support)
+        # Track previous limits to detect changes
+        current_xlim = self.ax.get_xlim()
+        current_ylim = self.ax.get_ylim()
+        
+        # Check if limits have changed significantly (for Dynamic Resolution)
+        if (hasattr(self, '_last_draw_xlim') and hasattr(self, '_last_draw_ylim')):
+            xlim_changed = abs(current_xlim[0] - self._last_draw_xlim[0]) > 1e-6 or abs(current_xlim[1] - self._last_draw_xlim[1]) > 1e-6
+            ylim_changed = abs(current_ylim[0] - self._last_draw_ylim[0]) > 1e-6 or abs(current_ylim[1] - self._last_draw_ylim[1]) > 1e-6
+            
+            if xlim_changed or ylim_changed:
+                # Limits changed - check Dynamic Resolution
+                if (self.geotiff_dataset_original is not None and 
+                    self.dynamic_resolution_enabled and
+                    hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None and
+                    not (hasattr(self, '_rapid_zoom_mode') and self._rapid_zoom_mode)):
+                    
+                    # Calculate zoom level
+                    full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
+                    full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+                    new_width = current_xlim[1] - current_xlim[0]
+                    new_height = current_ylim[1] - current_ylim[0]
+                    
+                    width_ratio = new_width / full_width if full_width > 0 else 1.0
+                    height_ratio = new_height / full_height if full_height > 0 else 1.0
+                    new_zoom_level = min(width_ratio, height_ratio)
+                    new_zoom_level = max(0.01, min(10.0, new_zoom_level))
+                    
+                    old_zoom_level = getattr(self, 'geotiff_zoom_level', 1.0)
+                    zoom_change = abs(new_zoom_level - old_zoom_level)
+                    
+                    if zoom_change > 0.05:  # 5% change threshold
+                        self.geotiff_zoom_level = new_zoom_level
+                        self._last_user_xlim = current_xlim
+                        self._last_user_ylim = current_ylim
+                        
+                        # Use a timer to debounce rapid limit changes
+                        if not hasattr(self, '_limit_change_timer'):
+                            self._limit_change_timer = QTimer()
+                            self._limit_change_timer.setSingleShot(True)
+                            self._limit_change_timer.timeout.connect(self._reload_geotiff_at_current_zoom)
+                        self._limit_change_timer.stop()
+                        self._limit_change_timer.start(500)
+        
+        # Store current limits for next comparison
+        self._last_draw_xlim = current_xlim
+        self._last_draw_ylim = current_ylim
+        
         # Only update if elevation overlay is active and geotiff is loaded
         if not hasattr(self, 'geotiff_data_array') or self.geotiff_data_array is None:
             return
@@ -7989,8 +8141,8 @@ class SurveyPlanApp(QMainWindow):
         if not hasattr(self, 'geotiff_image_plot') or self.geotiff_image_plot is None:
             return
         display_data = self.geotiff_data_array
-        xlim = self.ax.get_xlim()
-        ylim = self.ax.get_ylim()
+        xlim = current_xlim
+        ylim = current_ylim
         left, right, bottom, top = tuple(self.geotiff_extent)
         nrows, ncols = display_data.shape
         col_min = int(np.clip((min(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
@@ -9957,6 +10109,9 @@ class SurveyPlanApp(QMainWindow):
         self.canvas = FigureCanvas(self.figure)
         plot_layout.addWidget(self.canvas)
         self.canvas_widget = self.canvas  # For compatibility
+        # Add navigation toolbar at the bottom
+        self.toolbar = NavigationToolbar(self.canvas, self.plot_frame)
+        plot_layout.addWidget(self.toolbar)
         
         print(f"Widgets created - param_scroll: {self.param_scroll is not None}, plot_frame: {self.plot_frame is not None}, canvas: {self.canvas is not None}")
 
