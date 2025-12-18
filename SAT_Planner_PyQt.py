@@ -90,7 +90,10 @@ For the full license text, see the LICENSE file in the project root.
 # __version__ = "2025.06"  # Fixed labeling of waypoints in line planning tab, fixed preservation of lines when changing tabs, and other improvements
 # __version__ = "2025.07"  # Added ability to plan all tests (calibration, reference, and line planning) at the same time, fixed profile plot not updating when switching tabs, and other improvements
 # __version__ = "2025.08"  # Added About button to the profile plot, and other improvements
-__version__ = "2025.09"  # Made the color of profiles coordinate with the survey plot, and other improvements
+# __version__ = "2025.09"  # Made the color of profiles coordinate with the survey plot, and other improvements
+__version__ = "2025.10"  # Added Imagery Basemap and NOAA ENC Charts, and other improvements
+
+
 # --- Conditional Imports for Geospatial Libraries ---
 GEOSPATIAL_LIBS_AVAILABLE = True  # Assume true until an import fails
 try:
