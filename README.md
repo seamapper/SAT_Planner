@@ -15,7 +15,8 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ### Core Functionality
 - **Multi-tab Interface**: Separate tabs for Calibration, Reference, and Line planning
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
-- **Dynamic Resolution**: Automatically adjust GeoTIFF resolution based on zoom level
+- **Dynamic Resolution**: Automatically adjust GeoTIFF resolution based on zoom level (works with mouse wheel, toolbar zoom, and pan)
+- **Navigation Toolbar**: Built-in matplotlib navigation toolbar at bottom of map window
 - **Interactive Plotting**: Pan, zoom, and interact with survey plans on the map
 - **Real-time Statistics**: Calculate survey distances, times, and comprehensive statistics
 - **Elevation Profiles**: View elevation and slope profiles for drawn lines
@@ -76,7 +77,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `Sat_Planner_v2025.08.exe` (Windows) or newer
+- `Sat_Planner_v2025.11.exe` (Windows) or newer
 
 No installation required - just run the executable.
 
@@ -121,7 +122,7 @@ build_exe.bat
 
 Or manually:
 ```bash
-pyinstaller Sat_Planner_v2025.08.spec
+pyinstaller Sat_Planner_v2025.11.spec
 ```
 
 The executable will be created in the `dist` folder.
@@ -193,12 +194,23 @@ The application saves configuration in:
 - **Shapefile**: Geospatial vector format for GIS applications
 - **Statistics Reports**: Text reports with distances, timing, and survey details
 
-## Keyboard Shortcuts
+## Navigation
 
+### Mouse Controls
 - **Left Click**: Add waypoint (in drawing mode)
 - **Right Click**: Finish drawing line
-- **Pan**: Click and drag on the plot
-- **Zoom**: Use mouse wheel or zoom buttons
+- **Middle Mouse Button**: Pan the map
+- **Scroll Wheel**: Zoom in/out
+- **Click and Drag**: Pan the map
+
+### Navigation Toolbar
+The navigation toolbar at the bottom of the map window provides:
+- **Home**: Reset to original view
+- **Back/Forward**: Navigate through previous views
+- **Pan**: Pan the map
+- **Zoom**: Zoom in/out with rectangular selection
+- **Configure Subplots**: Adjust subplot parameters
+- **Save**: Save the current figure
 
 ## Troubleshooting
 
@@ -233,7 +245,8 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
-- **v2025.10**: Added Imagery Basemap and NOAA ENC Charts overlays with opacity controls, improved map visualization
+- **v2025.11**: Fixed Dynamic Resolution for toolbar zoom/pan operations, updated About this Program dialog
+- **v2025.10**: Added Imagery Basemap and NOAA ENC Charts overlays with opacity controls, navigation toolbar at bottom of map, fixed Dynamic Resolution for toolbar zoom/pan, improved map visualization
 - **v2025.09**: Made profile colors coordinate with survey plot
 - **v2025.08**: Added About button to profile plot
 - **v2025.07**: Added ability to plan all tests simultaneously, fixed profile plot updates

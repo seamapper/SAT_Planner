@@ -58,7 +58,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='Sat_Planner_v2025.10',
+    name='Sat_Planner_v2025.11',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

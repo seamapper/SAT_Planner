@@ -92,7 +92,8 @@ For the full license text, see the LICENSE file in the project root.
 # __version__ = "2025.07"  # Added ability to plan all tests (calibration, reference, and line planning) at the same time, fixed profile plot not updating when switching tabs, and other improvements
 # __version__ = "2025.08"  # Added About button to the profile plot, and other improvements
 # __version__ = "2025.09"  # Made the color of profiles coordinate with the survey plot, and other improvements
-__version__ = "2025.10"  # Added Imagery Basemap and NOAA ENC Charts, and other improvements
+# __version__ = "2025.10"  # Added Imagery Basemap and NOAA ENC Charts, and other improvements
+__version__ = "2025.11"  # Fixed dynamic resoltions and update the About this Program
 
 
 # --- Conditional Imports for Geospatial Libraries ---
@@ -1111,7 +1112,7 @@ class SurveyPlanApp(QMainWindow):
         # Author email
         email_label = QLabel("pjohnson@ccom.unh.edu")
         email_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        email_label.setStyleSheet("font-size: 10pt; margin-top: 3px; color: #333;")
+        email_label.setStyleSheet("font-size: 10pt; margin-top: 3px;")
         layout.addWidget(email_label)
         
         # Institution
@@ -1124,19 +1125,19 @@ class SurveyPlanApp(QMainWindow):
         # Grant information
         grant_text = ("This program was developed at the University of New Hampshire, "
                      "Center for Coastal and Ocean Mapping - Joint Hydrographic Center "
-                     "(UNH/CCOM-JHC) under the grant NA20NOS4000196 from the National "
+                     "(UNH/CCOM-JHC) under the grant NA25NOSX400C0001-T1-01 from the National "
                      "Oceanic and Atmospheric Administration (NOAA).")
         grant_label = QLabel(grant_text)
         grant_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         grant_label.setWordWrap(True)
-        grant_label.setStyleSheet("font-size: 9pt; margin-top: 15px; color: #555;")
+        grant_label.setStyleSheet("font-size: 9pt; margin-top: 15px;")
         layout.addWidget(grant_label)
         
         # License information
         license_label = QLabel("This software is released for general use under the BSD 3-Clause License.")
         license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         license_label.setWordWrap(True)
-        license_label.setStyleSheet("font-size: 9pt; margin-top: 10px; color: #555;")
+        license_label.setStyleSheet("font-size: 9pt; margin-top: 10px;")
         layout.addWidget(license_label)
         
         # Add stretch to push everything up
