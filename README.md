@@ -78,8 +78,9 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
 - `Sat_Planner_v2025.11.exe` (Windows) or newer
+- `SAT_Planner.app` (macOS) - if available
 
-No installation required - just run the executable.
+No installation required - just run the executable or app bundle.
 
 ### Option 2: From Source
 
@@ -96,7 +97,7 @@ cd SAT_Planner
 pip install PyQt6 matplotlib numpy rasterio pyproj shapely fiona
 ```
 
-**Using conda (recommended for Windows):**
+**Using conda (recommended for Windows and macOS):**
 ```bash
 conda install -c conda-forge pyqt matplotlib numpy rasterio pyproj shapely fiona
 ```
@@ -108,7 +109,7 @@ python SAT_Planner_PyQt.py
 
 ## Building from Source
 
-To build your own executable:
+### Building for Windows
 
 1. Install PyInstaller:
 ```bash
@@ -126,6 +127,101 @@ pyinstaller Sat_Planner_v2025.11.spec
 ```
 
 The executable will be created in the `dist` folder.
+
+### Building for macOS
+
+To build a macOS application (.app bundle):
+
+1. **Install PyInstaller**:
+```bash
+pip install pyinstaller
+```
+
+2. **Create a macOS spec file** (or modify the existing spec file):
+   - The spec file needs to use `APP` instead of `EXE` for macOS
+   - Icon file should be in `.icns` format (convert from `.ico` if needed)
+   - Example spec file structure for macOS:
+
+```python
+# -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_data_files
+
+block_cipher = None
+
+# Collect data files for geospatial libraries
+datas = []
+datas += collect_data_files('pyproj')
+datas += collect_data_files('fiona')
+datas += collect_data_files('shapely')
+datas += collect_data_files('rasterio')
+datas += collect_data_files('matplotlib')
+datas += [('media/CCOM.ico', 'media')]
+# Include CCOM.png if it exists
+import os
+if os.path.exists('media/CCOM.png'):
+    datas += [('media/CCOM.png', 'media')]
+
+a = Analysis(
+    ['SAT_Planner_PyQt.py'],
+    pathex=[],
+    binaries=[],
+    datas=datas,
+    hiddenimports=[
+        'fiona', 'shapely', 'pyproj', 'rasterio',
+        'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
+        'matplotlib.backends.backend_qtagg',
+        # ... (same hidden imports as Windows version)
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+app = BUNDLE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='SAT_Planner',
+    icon='media/CCOM.icns',  # Use .icns format for macOS
+    bundle_identifier='edu.unh.ccom.satplanner',
+)
+
+# Note: For macOS, PyInstaller creates an .app bundle instead of an executable
+```
+
+3. **Build the app bundle**:
+```bash
+pyinstaller Sat_Planner_macOS.spec
+```
+
+4. **The app bundle will be created** in the `dist` folder as `SAT_Planner.app`
+
+5. **Optional: Code signing** (recommended for distribution):
+```bash
+codesign --deep --force --verify --verbose --sign "Developer ID Application: Your Name" dist/SAT_Planner.app
+```
+
+6. **Optional: Create a DMG for distribution**:
+   - Use Disk Utility or a tool like `create-dmg` to create a disk image
+   - Example with create-dmg:
+```bash
+npm install -g create-dmg
+create-dmg dist/SAT_Planner.app dist/
+```
+
+**Notes for macOS builds:**
+- Use `.icns` format for icons (convert `.ico` files using `sips` or online converters)
+- The app bundle can be distributed as-is or packaged in a DMG
+- Code signing is optional but recommended to avoid macOS security warnings
+- Test the app bundle on a clean macOS system to ensure all dependencies are included
 
 ## Usage
 
@@ -275,5 +371,5 @@ For questions or issues, please contact:
 
 ## Acknowledgments
 
-Developed at the University of New Hampshire, Center for Coastal and Ocean Mapping - Joint Hydrographic Center (UNH/CCOM-JHC) under grant NA20NOS4000196 from the National Oceanic and Atmospheric Administration (NOAA).
+Developed at the University of New Hampshire, Center for Coastal and Ocean Mapping - Joint Hydrographic Center (UNH/CCOM-JHC) under grant NA25NOSX400C0001-T1-01 from the National Oceanic and Atmospheric Administration (NOAA).
 
