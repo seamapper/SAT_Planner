@@ -8,5 +8,6 @@ from .reference_mixin import ReferenceMixin
 from .calibration_mixin import CalibrationMixin
 from .line_planning_mixin import LinePlanningMixin
 from .profiles_mixin import ProfilesMixin
+from .map_interaction_mixin import MapInteractionMixin
 
-__all__ = ["GeoTIFFMixin", "PlottingMixin", "ReferenceMixin", "CalibrationMixin", "LinePlanningMixin", "ProfilesMixin"]
+__all__ = ["GeoTIFFMixin", "PlottingMixin", "ReferenceMixin", "CalibrationMixin", "LinePlanningMixin", "ProfilesMixin", "MapInteractionMixin"]
