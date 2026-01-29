@@ -4,19 +4,15 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar, QGroupBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat
-from PyQt6.QtGui import QFont, QPixmap
-
 # Ensure matplotlib is imported (for PyInstaller)
 import matplotlib
 matplotlib.use('QtAgg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.colors import LightSource
 from matplotlib.figure import Figure
 import numpy as np
 import os
-import sys
 import csv
 import traceback  # Added for more detailed error logging
 import json
@@ -25,16 +21,31 @@ import datetime
 import re
 import threading
 import time
-from urllib.request import urlopen, Request
-from urllib.error import URLError
-from io import BytesIO
-from PIL import Image
 
-# Import pyproj for coordinate transformations and heading calculations
-try:
-    import pyproj
-except ImportError:
-    pyproj = None
+# Constants, geospatial libs, and geo utils from sat_planner package
+from sat_planner import (
+    __version__,
+    CONFIG_FILENAME,
+    GEOSPATIAL_LIBS_AVAILABLE,
+    decimal_degrees_to_ddm,
+)
+from sat_planner.constants import (
+    rasterio,
+    transform,
+    RasterioIOError,
+    Window,
+    window_transform,
+    window_bounds,
+    rowcol,
+    reproject,
+    Resampling,
+    pyproj,
+    CRSError,
+    LineString,
+    fiona,
+)
+from sat_planner.mixins.geotiff_mixin import GeoTIFFMixin
+from sat_planner.mixins.plotting_mixin import PlottingMixin
 
 """
 UNH/CCOM-JHC Shipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) Planner
@@ -49,79 +60,12 @@ Center for Coastal and Ocean Mapping/Joint Hydrographic Center, University of Ne
 
 This program was developed at the University of New Hampshire, Center for Coastal and Ocean Mapping - Joint Hydrographic Center (UNH/CCOM-JHC) under the grant NA20NOS4000196 from the National Oceanic and Atmospheric Administration (NOAA).
 
-Copyright (c) 2025, University of New Hampshire Center for Coastal and Ocean Mapping / Joint Hydrographic Center (UNH/CCOM-JHC)
-All rights reserved.
-
-BSD 3-Clause License
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-1. Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer.
-
-2. Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
-
-3. Neither the name of the copyright holder nor the names of its
-   contributors may be used to endorse or promote products derived from
-   this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-For the full license text, see the LICENSE file in the project root.
+This software is released for general use under the BSD 3-Clause License.
 
 """
 
-# __version__ = "2025.01"  # 1st version of the app
-# __version__ = "2025.02"  # Added metadata file saving/loading, contour interval synchronization
-# __version__ = "2025.03"  # Added line planning, import/export of lines, and other improvements
-# __version__ = "2025.04"  # Converted to PyQt6
-# __version__ = "2025.05"  # Added ability to plan all tests (calibration, reference, and line planning) at the same time, fixed profile plot not updating when switching tabs, and other improvements
-# __version__ = "2025.06"  # Fixed labeling of waypoints in line planning tab, fixed preservation of lines when changing tabs, and other improvements
-# __version__ = "2025.07"  # Added ability to plan all tests (calibration, reference, and line planning) at the same time, fixed profile plot not updating when switching tabs, and other improvements
-# __version__ = "2025.08"  # Added About button to the profile plot, and other improvements
-# __version__ = "2025.09"  # Made the color of profiles coordinate with the survey plot, and other improvements
-# __version__ = "2025.10"  # Added Imagery Basemap and NOAA ENC Charts, and other improvements
-__version__ = "2025.11"  # Fixed dynamic resoltions and update the About this Program
-
-
-# --- Conditional Imports for Geospatial Libraries ---
-GEOSPATIAL_LIBS_AVAILABLE = True  # Assume true until an import fails
-try:
-    import rasterio
-    from rasterio import transform
-    from rasterio.errors import RasterioIOError
-    from rasterio.windows import Window
-    from rasterio.windows import transform as window_transform
-    from rasterio.windows import bounds as window_bounds
-    from rasterio.transform import rowcol
-    from rasterio.warp import reproject, Resampling
-    import pyproj
-    from pyproj.exceptions import CRSError
-    from shapely.geometry import LineString
-    import fiona
-except ImportError as e:
-    GEOSPATIAL_LIBS_AVAILABLE = False
-    print(f"Warning: A geospatial library not found: {e}. GeoTIFF/Shapefile features will be disabled.")
-    # Show warning only once on app startup if libs are missing
-    # This messagebox will appear after the Tkinter root is initialized
-    # so we'll save the message for later if this is a direct script execution.
-    # If run via __name__ == "__main__", it will be shown when app starts.
-
-
-class SurveyPlanApp(QMainWindow):
-    CONFIG_FILENAME = os.path.join(os.path.expanduser("~"), ".cal_ref_planner_config.json")
+class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, QMainWindow):
+    CONFIG_FILENAME = CONFIG_FILENAME  # from sat_planner
 
     def __init__(self):
         super().__init__()
@@ -454,16 +398,16 @@ class SurveyPlanApp(QMainWindow):
                     ddm_writer = csv.writer(ddmfile)
                     ddm_writer.writerow(['Line Number', 'Point Label', 'Latitude with Decimal Minutes', 'Longitude with Decimal Minutes'])
                     for i, (lat, lon) in enumerate(self.line_planning_points):
-                        lat_ddm = self._decimal_degrees_to_ddm(lat, is_latitude=True)
-                        lon_ddm = self._decimal_degrees_to_ddm(lon, is_latitude=False)
+                        lat_ddm = decimal_degrees_to_ddm(lat, is_latitude=True)
+                        lon_ddm = decimal_degrees_to_ddm(lon, is_latitude=False)
                         ddm_writer.writerow([1, i + 1, lat_ddm, lon_ddm])
                 
                 # --- Export to DDM text format (Decimal Minutes) ---
                 ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DM.txt")
                 with open(ddm_txt_file_path, 'w', encoding='utf-8') as ddm_txt_file:
                     for i, (lat, lon) in enumerate(self.line_planning_points):
-                        lat_ddm = self._decimal_degrees_to_ddm(lat, is_latitude=True)
-                        lon_ddm = self._decimal_degrees_to_ddm(lon, is_latitude=False)
+                        lat_ddm = decimal_degrees_to_ddm(lat, is_latitude=True)
+                        lon_ddm = decimal_degrees_to_ddm(lon, is_latitude=False)
                         ddm_txt_file.write(f"{i + 1}, {lat_ddm}, {lon_ddm}\n")
                 
                 # --- Export to ESRI Shapefile (.shp) ---
@@ -595,8 +539,8 @@ class SurveyPlanApp(QMainWindow):
                             f.write("-" * 10 + "\n")
                             for i, point in enumerate(self.line_planning_points):
                                 lat, lon = point
-                                lat_ddm = self._decimal_degrees_to_ddm(lat, is_latitude=True)
-                                lon_ddm = self._decimal_degrees_to_ddm(lon, is_latitude=False)
+                                lat_ddm = decimal_degrees_to_ddm(lat, is_latitude=True)
+                                lon_ddm = decimal_degrees_to_ddm(lon, is_latitude=False)
                                 f.write(f"WP{i+1}: {lat_ddm}, {lon_ddm} ({lat:.6f}, {lon:.6f})\n")
 
                 # Update success message to include all exports
@@ -899,39 +843,6 @@ class SurveyPlanApp(QMainWindow):
         self.slope_profile_checkbox = QCheckBox("Show Slope Profile")
         self.slope_profile_checkbox.setChecked(self.show_slope_profile_var)
         self.slope_profile_checkbox.stateChanged.connect(self._draw_current_profile)
-        
-        # Imagery Basemap checkbox
-        if not hasattr(self, 'imagery_basemap_checkbox'):
-            self.show_imagery_basemap_var = False
-            self.imagery_basemap_checkbox = QCheckBox("Imagery Basemap")
-            self.imagery_basemap_checkbox.setChecked(self.show_imagery_basemap_var)
-            self.imagery_basemap_checkbox.stateChanged.connect(self._toggle_imagery_basemap)
-            if not hasattr(self, 'basemap_image_plot'):
-                self.basemap_image_plot = None  # Store the basemap image plot
-        
-        # NOAA ENC Charts checkbox and opacity slider (only create once)
-        if not hasattr(self, 'noaa_charts_checkbox'):
-            self.show_noaa_charts_var = False
-            self.noaa_charts_checkbox = QCheckBox("NOAA ENC Charts")
-            self.noaa_charts_checkbox.setChecked(self.show_noaa_charts_var)
-            self.noaa_charts_checkbox.stateChanged.connect(self._toggle_noaa_charts)
-            self.noaa_charts_opacity = 50  # Default 50% opacity
-            self.noaa_charts_opacity_slider = QSlider(Qt.Orientation.Horizontal)
-            self.noaa_charts_opacity_slider.setMinimum(0)
-            self.noaa_charts_opacity_slider.setMaximum(100)
-            self.noaa_charts_opacity_slider.setValue(self.noaa_charts_opacity)
-            self.noaa_charts_opacity_slider.setMaximumWidth(100)  # Make slider narrower
-            self.noaa_charts_opacity_slider.setEnabled(False)  # Disabled until checkbox is checked
-            self.noaa_charts_opacity_slider.valueChanged.connect(self._update_noaa_charts_opacity)
-            self.noaa_charts_opacity_label = QLabel(f"Opacity: {self.noaa_charts_opacity}%")
-            self.noaa_charts_opacity_label.setEnabled(False)
-            if not hasattr(self, 'noaa_charts_image_plot'):
-                self.noaa_charts_image_plot = None  # Store the NOAA charts image plot
-        
-        # About button (only create once)
-        if not hasattr(self, 'about_btn'):
-            self.about_btn = QPushButton("About This Program")
-            self.about_btn.clicked.connect(self._show_about_dialog)
 
         self._setup_layout()
 
@@ -947,9 +858,6 @@ class SurveyPlanApp(QMainWindow):
         self.cid_middle_release = self.canvas.mpl_connect('button_release_event', self._on_middle_release)
         # Connect draw event for dynamic colormap scaling
         self.cid_draw = self.canvas.mpl_connect('draw_event', self._on_draw_event_update_colormap)
-        # Connect axis limit change events for Dynamic Resolution (toolbar zoom support)
-        self.cid_xlim_changed = self.ax.callbacks.connect('xlim_changed', self._on_axis_limits_changed)
-        self.cid_ylim_changed = self.ax.callbacks.connect('ylim_changed', self._on_axis_limits_changed)
 
         # Initialize buttons states based on library availability
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -1047,114 +955,6 @@ class SurveyPlanApp(QMainWindow):
         reply = QMessageBox.question(self, title, message,
                                      QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
         return reply == QMessageBox.StandardButton.Ok
-    
-    def _show_about_dialog(self):
-        """Show About dialog with program information"""
-        # Create dialog
-        dialog = QDialog(self)
-        dialog.setWindowTitle("About This Program")
-        dialog.setMinimumWidth(500)
-        dialog.setMinimumHeight(400)
-        
-        # Main layout
-        layout = QVBoxLayout(dialog)
-        layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Program name
-        program_name = QLabel(f"UNH/CCOM-JHC SAT PLanner v{__version__}")
-        program_name.setStyleSheet("font-size: 16pt; font-weight: bold;")
-        program_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(program_name)
-        
-        # Get compilation date
-        compile_date = "Unknown"
-        try:
-            if getattr(sys, 'frozen', False):
-                # Running as compiled exe
-                exe_path = sys.executable
-                if os.path.exists(exe_path):
-                    mod_time = os.path.getmtime(exe_path)
-                    compile_date = datetime.datetime.fromtimestamp(mod_time).strftime("%B %d, %Y")
-            else:
-                # Running as script - use script modification date
-                script_path = __file__
-                if os.path.exists(script_path):
-                    mod_time = os.path.getmtime(script_path)
-                    compile_date = datetime.datetime.fromtimestamp(mod_time).strftime("%B %d, %Y")
-        except Exception:
-            compile_date = "Unknown"
-        
-        # Compilation date
-        date_label = QLabel(f"Compiled: {compile_date}")
-        date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        date_label.setStyleSheet("font-size: 10pt; color: gray;")
-        layout.addWidget(date_label)
-        
-        # CCOM logo/image
-        logo_path = os.path.join(os.path.dirname(__file__), "media", "CCOM.png")
-        if os.path.exists(logo_path):
-            logo_label = QLabel()
-            pixmap = QPixmap(logo_path)
-            # Scale logo to reasonable size (max width 300px)
-            if pixmap.width() > 300:
-                pixmap = pixmap.scaledToWidth(300, Qt.TransformationMode.SmoothTransformation)
-            logo_label.setPixmap(pixmap)
-            logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            layout.addWidget(logo_label)
-        
-        # Author name
-        author_label = QLabel("Paul Johnson")
-        author_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        author_label.setStyleSheet("font-size: 12pt; font-weight: bold; margin-top: 10px;")
-        layout.addWidget(author_label)
-        
-        # Author email
-        email_label = QLabel("pjohnson@ccom.unh.edu")
-        email_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        email_label.setStyleSheet("font-size: 10pt; margin-top: 3px;")
-        layout.addWidget(email_label)
-        
-        # Institution
-        institution_label = QLabel("Center for Coastal and Ocean Mapping/Joint Hydrographic Center, University of New Hampshire")
-        institution_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        institution_label.setWordWrap(True)
-        institution_label.setStyleSheet("font-size: 10pt; margin-top: 5px;")
-        layout.addWidget(institution_label)
-        
-        # Grant information
-        grant_text = ("This program was developed at the University of New Hampshire, "
-                     "Center for Coastal and Ocean Mapping - Joint Hydrographic Center "
-                     "(UNH/CCOM-JHC) under the grant NA25NOSX400C0001-T1-01 from the National "
-                     "Oceanic and Atmospheric Administration (NOAA).")
-        grant_label = QLabel(grant_text)
-        grant_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        grant_label.setWordWrap(True)
-        grant_label.setStyleSheet("font-size: 9pt; margin-top: 15px;")
-        layout.addWidget(grant_label)
-        
-        # License information
-        license_label = QLabel("This software is released for general use under the BSD 3-Clause License.")
-        license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        license_label.setWordWrap(True)
-        license_label.setStyleSheet("font-size: 9pt; margin-top: 10px;")
-        layout.addWidget(license_label)
-        
-        # Add stretch to push everything up
-        layout.addStretch()
-        
-        # OK button
-        ok_button = QPushButton("OK")
-        ok_button.setMaximumWidth(100)
-        ok_button.clicked.connect(dialog.accept)
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        button_layout.addWidget(ok_button)
-        button_layout.addStretch()
-        layout.addLayout(button_layout)
-        
-        # Show dialog
-        dialog.exec()
 
     def set_cal_info_text(self, message, append=False):
         """Add a message to the Activity Log with [Calibration] prefix. Maintains up to 200 lines of history."""
@@ -1488,16 +1288,16 @@ class SurveyPlanApp(QMainWindow):
                     ddm_writer = csv.writer(ddmfile)
                     ddm_writer.writerow(['Line Number', 'Point Label', 'Latitude with Decimal Minutes', 'Longitude with Decimal Minutes'])
                     for i, (lat, lon) in enumerate(self.line_planning_points):
-                        lat_ddm = self._decimal_degrees_to_ddm(lat, is_latitude=True)
-                        lon_ddm = self._decimal_degrees_to_ddm(lon, is_latitude=False)
+                        lat_ddm = decimal_degrees_to_ddm(lat, is_latitude=True)
+                        lon_ddm = decimal_degrees_to_ddm(lon, is_latitude=False)
                         ddm_writer.writerow([1, i + 1, lat_ddm, lon_ddm])
                 
                 # --- Export to DDM text format (Decimal Minutes) ---
                 ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DM.txt")
                 with open(ddm_txt_file_path, 'w', encoding='utf-8') as ddm_txt_file:
                     for i, (lat, lon) in enumerate(self.line_planning_points):
-                        lat_ddm = self._decimal_degrees_to_ddm(lat, is_latitude=True)
-                        lon_ddm = self._decimal_degrees_to_ddm(lon, is_latitude=False)
+                        lat_ddm = decimal_degrees_to_ddm(lat, is_latitude=True)
+                        lon_ddm = decimal_degrees_to_ddm(lon, is_latitude=False)
                         ddm_txt_file.write(f"{i + 1}, {lat_ddm}, {lon_ddm}\n")
                 
                 # --- Export to ESRI Shapefile (.shp) ---
@@ -1629,8 +1429,8 @@ class SurveyPlanApp(QMainWindow):
                             f.write("-" * 10 + "\n")
                             for i, point in enumerate(self.line_planning_points):
                                 lat, lon = point
-                                lat_ddm = self._decimal_degrees_to_ddm(lat, is_latitude=True)
-                                lon_ddm = self._decimal_degrees_to_ddm(lon, is_latitude=False)
+                                lat_ddm = decimal_degrees_to_ddm(lat, is_latitude=True)
+                                lon_ddm = decimal_degrees_to_ddm(lon, is_latitude=False)
                                 f.write(f"WP{i+1}: {lat_ddm}, {lon_ddm} ({lat:.6f}, {lon:.6f})\n")
 
                 # Update success message to include all exports
@@ -1933,39 +1733,6 @@ class SurveyPlanApp(QMainWindow):
         self.slope_profile_checkbox = QCheckBox("Show Slope Profile")
         self.slope_profile_checkbox.setChecked(self.show_slope_profile_var)
         self.slope_profile_checkbox.stateChanged.connect(self._draw_current_profile)
-        
-        # Imagery Basemap checkbox
-        if not hasattr(self, 'imagery_basemap_checkbox'):
-            self.show_imagery_basemap_var = False
-            self.imagery_basemap_checkbox = QCheckBox("Imagery Basemap")
-            self.imagery_basemap_checkbox.setChecked(self.show_imagery_basemap_var)
-            self.imagery_basemap_checkbox.stateChanged.connect(self._toggle_imagery_basemap)
-            if not hasattr(self, 'basemap_image_plot'):
-                self.basemap_image_plot = None  # Store the basemap image plot
-        
-        # NOAA ENC Charts checkbox and opacity slider (only create once)
-        if not hasattr(self, 'noaa_charts_checkbox'):
-            self.show_noaa_charts_var = False
-            self.noaa_charts_checkbox = QCheckBox("NOAA ENC Charts")
-            self.noaa_charts_checkbox.setChecked(self.show_noaa_charts_var)
-            self.noaa_charts_checkbox.stateChanged.connect(self._toggle_noaa_charts)
-            self.noaa_charts_opacity = 50  # Default 50% opacity
-            self.noaa_charts_opacity_slider = QSlider(Qt.Orientation.Horizontal)
-            self.noaa_charts_opacity_slider.setMinimum(0)
-            self.noaa_charts_opacity_slider.setMaximum(100)
-            self.noaa_charts_opacity_slider.setValue(self.noaa_charts_opacity)
-            self.noaa_charts_opacity_slider.setMaximumWidth(100)  # Make slider narrower
-            self.noaa_charts_opacity_slider.setEnabled(False)  # Disabled until checkbox is checked
-            self.noaa_charts_opacity_slider.valueChanged.connect(self._update_noaa_charts_opacity)
-            self.noaa_charts_opacity_label = QLabel(f"Opacity: {self.noaa_charts_opacity}%")
-            self.noaa_charts_opacity_label.setEnabled(False)
-            if not hasattr(self, 'noaa_charts_image_plot'):
-                self.noaa_charts_image_plot = None  # Store the NOAA charts image plot
-        
-        # About button (only create once)
-        if not hasattr(self, 'about_btn'):
-            self.about_btn = QPushButton("About This Program")
-            self.about_btn.clicked.connect(self._show_about_dialog)
 
         self._setup_layout()
 
@@ -1981,9 +1748,6 @@ class SurveyPlanApp(QMainWindow):
         self.cid_middle_release = self.canvas.mpl_connect('button_release_event', self._on_middle_release)
         # Connect draw event for dynamic colormap scaling
         self.cid_draw = self.canvas.mpl_connect('draw_event', self._on_draw_event_update_colormap)
-        # Connect axis limit change events for Dynamic Resolution (toolbar zoom support)
-        self.cid_xlim_changed = self.ax.callbacks.connect('xlim_changed', self._on_axis_limits_changed)
-        self.cid_ylim_changed = self.ax.callbacks.connect('ylim_changed', self._on_axis_limits_changed)
 
         # Initialize buttons states based on library availability
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -2116,26 +1880,7 @@ class SurveyPlanApp(QMainWindow):
                 profile_layout = QVBoxLayout()
                 profile_layout.setContentsMargins(0, 0, 0, 0)
                 profile_layout.addWidget(self.profile_widget)
-                
-                # Create horizontal layout for checkbox and About button
-                checkbox_button_layout = QHBoxLayout()
-                checkbox_button_layout.setContentsMargins(0, 0, 0, 0)
-                checkbox_button_layout.addWidget(self.slope_profile_checkbox)
-                if hasattr(self, 'imagery_basemap_checkbox'):
-                    checkbox_button_layout.addWidget(self.imagery_basemap_checkbox)
-                if hasattr(self, 'noaa_charts_checkbox'):
-                    checkbox_button_layout.addWidget(self.noaa_charts_checkbox)
-                    # Add opacity slider and label next to NOAA charts checkbox
-                    if hasattr(self, 'noaa_charts_opacity_label'):
-                        checkbox_button_layout.addWidget(self.noaa_charts_opacity_label)
-                    if hasattr(self, 'noaa_charts_opacity_slider'):
-                        self.noaa_charts_opacity_slider.setMaximumWidth(100)  # Make slider narrower
-                        checkbox_button_layout.addWidget(self.noaa_charts_opacity_slider)
-                checkbox_button_layout.addStretch()  # Push button to the right
-                if hasattr(self, 'about_btn'):
-                    checkbox_button_layout.addWidget(self.about_btn)
-                profile_layout.addLayout(checkbox_button_layout)
-                
+                profile_layout.addWidget(self.slope_profile_checkbox)
                 profile_widget = QWidget()
                 profile_widget.setLayout(profile_layout)
                 profile_widget.setMaximumHeight(250)  # Limit profile height
@@ -2295,963 +2040,6 @@ class SurveyPlanApp(QMainWindow):
                 # Silently fail - don't show error dialog for auto-regeneration
                 print(f"Auto-regenerate failed: {e}")
 
-    def _generate_and_plot(self, show_success_dialog=True):
-        # Clear the elevation profile immediately when generating a new plan
-        self._draw_crossline_profile()
-        if not GEOSPATIAL_LIBS_AVAILABLE:
-            self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot generate plot.")
-            return
-
-        is_valid, values = self._validate_inputs()
-        if not is_valid:
-            return
-
-        # self._update_survey_time_display(values['line_length'], values['survey_speed'])  # Moved below
-        self._clear_plot(full_clear=False)  # Clear only plot data, keep geotiff if loaded
-
-        try:
-            central_lat = values['central_lat']
-            central_lon = values['central_lon']
-            line_length = values['line_length']
-            heading = values['heading']
-            dist_between_lines = values['dist_between_lines']
-            num_lines = values['num_lines']
-            bisect_lead = values['bisect_lead']
-            offset_direction = values['offset_direction']
-
-            self.central_point_coords = (central_lat, central_lon)
-
-            # 1. Define a local projected CRS (e.g., UTM zone) for calculations
-            # Determine UTM zone from central_lon
-            utm_zone = int((central_lon + 180) / 6) + 1
-            if central_lat >= 0:
-                utm_crs = f"EPSG:326{utm_zone}"  # Northern Hemisphere
-            else:
-                utm_crs = f"EPSG:327{utm_zone}"  # Southern Hemisphere
-
-            print(f"DEBUG: Using UTM CRS: {utm_crs}")
-
-            # Create a transformer from WGS84 (EPSG:4326) to the local UTM CRS
-            self.local_proj_transformer = pyproj.Transformer.from_crs(
-                "EPSG:4326", utm_crs, always_xy=True
-            )
-            # Create a transformer back from local UTM to WGS84
-            self.wgs84_transformer = pyproj.Transformer.from_crs(
-                utm_crs, "EPSG:4326", always_xy=True
-            )
-
-            # Convert central point to local projected coordinates (easting, northing)
-            central_easting, central_northing = self.local_proj_transformer.transform(central_lon, central_lat)
-            print(f"DEBUG: Central point in UTM coordinates: ({central_easting}, {central_northing})")
-
-            self.survey_lines_data = []
-            self.cross_line_data = []
-
-            geod = pyproj.Geod(ellps="WGS84")
-            # Calculate the index of the center line
-            center_index = (num_lines - 1) / 2
-            for i in range(num_lines):
-                # Calculate offset distance from the central point
-                offset_distance = (i - center_index) * dist_between_lines
-                # Calculate perpendicular azimuth for offset direction
-                if offset_direction == "North":
-                    perp_azimuth = heading + 90
-                else:  # "South"
-                    perp_azimuth = heading - 90
-                # Offset the center point geodetically
-                lon_center, lat_center, _ = geod.fwd(central_lon, central_lat, perp_azimuth, offset_distance)
-
-                # Use geod.fwd to get endpoints at correct heading
-                lon1, lat1, _ = geod.fwd(lon_center, lat_center, heading + 180, line_length / 2)
-                lon2, lat2, _ = geod.fwd(lon_center, lat_center, heading, line_length / 2)
-
-                self.survey_lines_data.append([(lat1, lon1), (lat2, lon2)])
-
-                # Debug: Print actual azimuth between endpoints (from start to end)
-                try:
-                    fwd_azimuth, back_azimuth, distance = geod.inv(lon1, lat1, lon2, lat2)
-                    print(f"DEBUG: Survey line {i+1}: Start=({lat1:.6f}, {lon1:.6f}), End=({lat2:.6f}, {lon2:.6f}), Calculated Azimuth: {fwd_azimuth:.2f} deg, Input Heading: {heading}")
-                except Exception as e:
-                    print(f"DEBUG: Could not calculate azimuth for line {i+1}: {e}")
-
-            # Calculate crossline (perpendicular to main lines, geodetic)
-            # Connect midpoints of first and last main survey lines, then extend by lead-in/out
-            if len(self.survey_lines_data) >= 2:
-                # Get first and last survey lines
-                first_line = self.survey_lines_data[0]
-                last_line = self.survey_lines_data[-1]
-                
-                # Calculate midpoints of first and last lines
-                first_mid_lat = (first_line[0][0] + first_line[1][0]) / 2
-                first_mid_lon = (first_line[0][1] + first_line[1][1]) / 2
-                last_mid_lat = (last_line[0][0] + last_line[1][0]) / 2
-                last_mid_lon = (last_line[0][1] + last_line[1][1]) / 2
-                
-                # Calculate the azimuth from first midpoint to last midpoint
-                _, _, crossline_distance = geod.inv(first_mid_lon, first_mid_lat, last_mid_lon, last_mid_lat)
-                crossline_azimuth, _, _ = geod.inv(first_mid_lon, first_mid_lat, last_mid_lon, last_mid_lat)
-                
-                # Extend the crossline by lead-in/out distance on each end
-                # Start point: extend from last midpoint in forward direction (closer to main survey area)
-                lon1, lat1, _ = geod.fwd(last_mid_lon, last_mid_lat, crossline_azimuth, bisect_lead)
-                # End point: extend from first midpoint in opposite direction (farther from main survey area)
-                lon2, lat2, _ = geod.fwd(first_mid_lon, first_mid_lat, crossline_azimuth + 180, bisect_lead)
-                
-                self.cross_line_data = [(lat1, lon1), (lat2, lon2)]
-            else:
-                # Fallback to original method if only one line
-                crossline_azimuth1 = (heading + 90) % 360
-                crossline_azimuth2 = (heading + 270) % 360  # Equivalent to heading - 90
-                cross_line_length_total = line_length + (2 * bisect_lead)
-
-                # Endpoint 1
-                lon1, lat1, _ = geod.fwd(central_lon, central_lat, crossline_azimuth1, cross_line_length_total / 2)
-                # Endpoint 2
-                lon2, lat2, _ = geod.fwd(central_lon, central_lat, crossline_azimuth2, cross_line_length_total / 2)
-
-                self.cross_line_data = [(lat1, lon1), (lat2, lon2)]
-
-            self._plot_survey_plan()
-            self._zoom_to_plan()  # Auto zoom after plotting
-
-            # --- Report Main Line and Crossline summary in info/error area ---
-            try:
-                geod = pyproj.Geod(ellps="WGS84")
-                # Main Line: use the center line (middle index)
-                center_index = (num_lines - 1) // 2
-                main_line = self.survey_lines_data[center_index]
-                (lat1, lon1), (lat2, lon2) = main_line
-                _, _, main_length_m = geod.inv(lon1, lat1, lon2, lat2)
-                main_length_km = main_length_m / 1000.0
-                main_length_nm = main_length_m / 1852.0
-                speed_knots = float(self.survey_speed_entry.text()) if self.survey_speed_entry.text() else 8.0
-                speed_m_per_h = speed_knots * 1852
-                main_time_h = main_length_m / speed_m_per_h if speed_m_per_h > 0 else 0
-                main_time_min = main_time_h * 60
-                # Crossline
-                (clat1, clon1), (clat2, clon2) = self.cross_line_data
-                _, _, cross_length_m = geod.inv(clon1, clat1, clon2, clat2)
-                cross_length_km = cross_length_m / 1000.0
-                cross_length_nm = cross_length_m / 1852.0
-                cross_time_h = cross_length_m / speed_m_per_h if speed_m_per_h > 0 else 0
-                cross_time_min = cross_time_h * 60
-                
-                # Get number of crossline passes
-                try:
-                    num_passes = int(self.crossline_passes_entry.text()) if self.crossline_passes_entry.text() else 1
-                except (ValueError, AttributeError):
-                    num_passes = 1
-                
-                # Calculate total survey time including travel between lines
-                total_survey_time = self._calculate_total_survey_time()
-                
-                # Calculate single line length and heading
-                num_main_lines = len(self.survey_lines_data) if self.survey_lines_data else 0
-                length_line = ""
-                heading_lines = ""
-                
-                if num_main_lines > 0:
-                    single_line_length_m = total_survey_time['main_lines_distance_m'] / num_main_lines
-                    single_line_length_km = single_line_length_m / 1000
-                    single_line_length_nm = single_line_length_m / 1852
-                    length_line = f"Length of Main Line: {single_line_length_m:.1f} m ({single_line_length_km:.3f} km, {single_line_length_nm:.3f} nm)\n"
-                    
-                    # Calculate heading for the first main line
-                    try:
-                        if pyproj is not None:
-                            geod = pyproj.Geod(ellps="WGS84")
-                            first_line = self.survey_lines_data[0]
-                            lat1, lon1 = first_line[0]
-                            lat2, lon2 = first_line[1]
-                            fwd_az, back_az, _ = geod.inv(lon1, lat1, lon2, lat2)
-                            
-                            heading = fwd_az % 360
-                            reciprocal_heading = back_az % 360
-                            
-                            heading_lines = f"Heading: {heading:.1f}°\nReciprocal Heading: {reciprocal_heading:.1f}°\n"
-                        else:
-                            heading_lines = "Heading: pyproj not available\n"
-                    except Exception:
-                        heading_lines = "Heading: Unable to calculate\n"
-                
-                summary = (
-                    f"=== SURVEY DISTANCE BREAKDOWN ===\n"
-                    f"{heading_lines}"
-                    f"{length_line}"
-                    f"Main Lines Total Distance: {total_survey_time['main_lines_distance_m']:.1f} m\n"
-                    f"Main Lines Total Distance: {total_survey_time['main_lines_distance_km']:.3f} km\n"
-                    f"Main Lines Total Distance: {total_survey_time['main_lines_distance_nm']:.3f} nm\n"
-                    f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_m']:.1f} m\n"
-                    f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_km']:.3f} km\n"
-                    f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_nm']:.3f} nm\n"
-                    f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_m']:.1f} m\n"
-                    f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_km']:.3f} km\n"
-                    f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_nm']:.3f} nm\n"
-                    f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_m']:.1f} m\n"
-                    f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_km']:.3f} km\n"
-                    f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_nm']:.3f} nm\n"
-                    f"Crossline Passes: {total_survey_time['num_crossline_passes']}\n"
-                    f"Crossline Total Distance: {total_survey_time['crossline_total_distance_m']:.1f} m\n"
-                    f"Crossline Total Distance: {total_survey_time['crossline_total_distance_km']:.3f} km\n"
-                    f"Crossline Total Distance: {total_survey_time['crossline_total_distance_nm']:.3f} nm\n"
-                    f"\n=== TOTAL SURVEY DISTANCE ===\n"
-                    f"Total Survey Distance: {total_survey_time['total_distance_m']:.1f} m\n"
-                    f"Total Survey Distance: {total_survey_time['total_distance_km']:.3f} km\n"
-                    f"Total Survey Distance: {total_survey_time['total_distance_nm']:.3f} nm\n"
-                    f"\n=== SURVEY TIME BREAKDOWN ===\n"
-                    f"Main Lines Survey: {total_survey_time['main_lines_minutes']:.1f} min\n"
-                    f"Crossline Survey: {total_survey_time['crossline_minutes']:.1f} min\n"
-                    f"Travel Between Lines: {total_survey_time['travel_minutes']:.1f} min\n"
-                    f"Travel to Crossline: {total_survey_time['travel_to_crossline_minutes']:.1f} min\n"
-                    f"\n=== TOTAL SURVEY TIME ===\n"
-                    f"Total Survey Time: {total_survey_time['total_minutes']:.1f} min\n"
-                    f"Total Survey Time: {total_survey_time['total_hours']:.2f} hr"
-                )
-                
-                # Add crossline heading information to summary
-                if self.cross_line_data and len(self.cross_line_data) >= 2:
-                    try:
-                        if pyproj is not None:
-                            geod = pyproj.Geod(ellps="WGS84")
-                            lat1, lon1 = self.cross_line_data[0]
-                            lat2, lon2 = self.cross_line_data[1]
-                            fwd_az, back_az, _ = geod.inv(lon1, lat1, lon2, lat2)
-                            
-                            crossline_heading = fwd_az % 360
-                            crossline_reciprocal_heading = back_az % 360
-                            
-                            summary += f"Crossline Heading: {crossline_heading:.1f}°\n"
-                            summary += f"Crossline Reciprocal Heading: {crossline_reciprocal_heading:.1f}°\n"
-                        else:
-                            summary += f"Crossline Heading: pyproj not available\n"
-                    except Exception:
-                        summary += f"Crossline Heading: Unable to calculate\n"
-                
-                self.set_ref_info_text(summary)
-            except Exception as e:
-                self.set_ref_info_text(f"Error calculating summary: {e}")
-
-            # Success dialog removed as requested
-            # if show_success_dialog:
-            #     self._show_message("info","Success", "Survey plan generated and plotted.")
-
-        except CRSError as e:
-            error_msg = f"Failed to set up projection: {str(e)}"
-            print(f"ERROR: {error_msg}")
-            self._show_message("error","Projection Error", error_msg)
-        except Exception as e:
-            error_msg = f"Failed to generate survey lines: {str(e)}"
-            print(f"ERROR: {error_msg}")
-            print("Full traceback:")
-            traceback.print_exc()
-            self._show_message("error","Calculation Error", error_msg)
-
-        # In _generate_and_plot and _load_geotiff, after plotting/plan generation, call:
-        # Use _draw_current_profile to draw the appropriate profile based on active tab
-        if hasattr(self, '_draw_current_profile'):
-            self._draw_current_profile()
-        else:
-            self._draw_crossline_profile()
-
-    def _remove_colorbar(self, colorbar_attr):
-        colorbar = getattr(self, colorbar_attr, None)
-        if colorbar is not None:
-            try:
-                if hasattr(colorbar, 'ax') and colorbar.ax is not None:
-                    # Only remove if the axes is still in the figure
-                    if colorbar.ax in self.figure.axes:
-                        self.figure.delaxes(colorbar.ax)
-            except Exception as e:
-                print(f"Warning: Error removing {colorbar_attr}: {e}")
-            setattr(self, colorbar_attr, None)
-            # Clear stored axes position if no colorbars remain
-            has_any_colorbar = (hasattr(self, 'elevation_colorbar') and self.elevation_colorbar is not None) or \
-                               (hasattr(self, 'slope_colorbar') and self.slope_colorbar is not None)
-            if not has_any_colorbar and hasattr(self, '_axes_pos_with_colorbar'):
-                delattr(self, '_axes_pos_with_colorbar')
-
-    def _calculate_adaptive_vert_exag(self, data_array):
-        """
-        Calculate adaptive vertical exaggeration based on elevation range.
-        Returns a vert_exag value that adapts to the relief in the data.
-        """
-        # Get valid (non-NaN) elevation values
-        valid_data = data_array[~np.isnan(data_array)]
-        if len(valid_data) == 0:
-            return 0.1  # Default if no valid data
-        
-        elevation_range = np.max(valid_data) - np.min(valid_data)
-        
-        # Adaptive vertical exaggeration based on elevation range
-        if elevation_range < 20:
-            # Very small relief: use high exaggeration (1.5-3.0)
-            vert_exag = 1.5 + (elevation_range / 20) * 1.5  # Linear interpolation: 1.5 at 0m, 3.0 at 20m
-        elif elevation_range < 50:
-            # Small relief: use moderate exaggeration (0.8-1.5)
-            vert_exag = 0.8 + ((elevation_range - 20) / 30) * 0.7  # Linear interpolation: 0.8 at 20m, 1.5 at 50m
-        elif elevation_range < 200:
-            # Medium relief: use higher exaggeration (0.4-0.8)
-            vert_exag = 0.4 + ((elevation_range - 50) / 150) * 0.4  # Linear interpolation: 0.4 at 50m, 0.8 at 200m
-        else:
-            # Large relief: use current or lower (0.05-0.1)
-            vert_exag = max(0.05, 0.1 - ((elevation_range - 200) / 800) * 0.05)  # Decrease from 0.1 to 0.05 as range increases
-        
-        return vert_exag
-
-    def _plot_survey_plan(self, preserve_view_limits=True):
-        print(f"[BASEMAP DEBUG] _plot_survey_plan() called (preserve_view_limits={preserve_view_limits})")
-        try:
-            # Remove all axes except the main one to prevent accumulation of colorbar axes
-            for ax in self.figure.axes[:]:
-                if ax is not self.ax:
-                    self.figure.delaxes(ax)
-
-            # Extra: fully clear the figure and recreate the main axes to guarantee no extra axes remain
-            self.figure.clear()
-            self.ax = self.figure.add_subplot(111)
-            # Always ensure axes fill the figure area
-            self.figure.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.08)
-            self.slope_colorbar = None
-            self.elevation_colorbar = None
-
-            # After clearing, reset image plot references (do not try to remove them)
-            self.geotiff_image_plot = None
-            self.geotiff_hillshade_plot = None
-            self.contour_plot = None
-            self.basemap_image_plot = None
-
-            # Calculate consistent plot limits before plotting
-            self.current_xlim, self.current_ylim = self._calculate_consistent_plot_limits()
-
-            # Patch: preserve user zoom if requested
-            prev_xlim = getattr(self, '_last_user_xlim', None)
-            prev_ylim = getattr(self, '_last_user_ylim', None)
-            if preserve_view_limits and prev_xlim is not None and prev_ylim is not None:
-                # Store the preserved limits - they will be set after aspect ratio calculation
-                # to ensure they're not overridden by the aspect ratio adjustment
-                preserved_xlim = prev_xlim
-                preserved_ylim = prev_ylim
-                # Set initial limits for aspect ratio calculation
-                self.ax.set_xlim(prev_xlim)
-                self.ax.set_ylim(prev_ylim)
-            else:
-                self.ax.set_xlim(self.current_xlim)
-                self.ax.set_ylim(self.current_ylim)
-                preserved_xlim = None
-                preserved_ylim = None
-
-            # Plot imagery basemap if enabled (plot first so it's in the background)
-            # Force reload since axes were just cleared
-            if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
-                self._load_and_plot_basemap(force_reload=True)
-            
-            # Plot GeoTIFF if loaded
-            if self.geotiff_data_array is not None and self.geotiff_extent is not None:
-                # Reset flag for logging vertical exaggeration (only log once per plot cycle)
-                self._vert_exag_logged_this_cycle = False
-                if self.hillshade_vs_slope_viz_mode == "hillshade":
-                    # Use multidirectional hillshade: average of 4 azimuths
-                    masked_data = np.ma.array(self.geotiff_data_array, mask=np.isnan(self.geotiff_data_array))
-                    data_for_hillshade = np.nan_to_num(masked_data.filled(np.nanmin(self.geotiff_data_array)))
-                    # Calculate adaptive vertical exaggeration based on elevation range
-                    vert_exag = self._calculate_adaptive_vert_exag(self.geotiff_data_array)
-                    # Log vertical exaggeration to activity log
-                    if hasattr(self, 'param_notebook'):
-                        current_tab = self.param_notebook.currentIndex()
-                        if current_tab == 0 and hasattr(self, 'set_cal_info_text'):
-                            self.set_cal_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
-                        elif current_tab == 1 and hasattr(self, 'set_ref_info_text'):
-                            self.set_ref_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
-                        elif current_tab == 2 and hasattr(self, 'set_line_info_text'):
-                            self.set_line_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
-                    azimuths = [45, 135, 225, 315]
-                    altitude = 45
-                    hillshades = []
-                    for az in azimuths:
-                        ls = LightSource(azdeg=az, altdeg=altitude)
-                        hillshade = ls.hillshade(data_for_hillshade, vert_exag=vert_exag)
-                        hillshades.append(hillshade)
-                    # Average the hillshades
-                    hillshade_array = np.mean(hillshades, axis=0)
-                    # Mask NaN values to make them transparent
-                    masked_hillshade = np.ma.masked_where(np.isnan(self.geotiff_data_array), hillshade_array)
-                    self.geotiff_hillshade_plot = self.ax.imshow(masked_hillshade, extent=tuple(self.geotiff_extent),
-                                                                 cmap='gray', origin='upper',
-                                                                 zorder=-2)  # Plot beneath everything
-
-                    # Restored: Conditional plotting for elevation or slope overlay
-                    if self.geotiff_display_mode == "elevation":
-                        display_data = self.geotiff_data_array
-                        cmap = 'rainbow'  # Change to rainbow
-
-                        # Calculate min/max for the displayed elevation data (ignoring NaNs) in the current plot window
-                        xlim = self.ax.get_xlim()
-                        ylim = self.ax.get_ylim()
-                        left, right, bottom, top = tuple(self.geotiff_extent)
-                        nrows, ncols = display_data.shape
-                        # Find the pixel indices that correspond to the current axes limits
-                        col_min = int(np.clip((min(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
-                        col_max = int(np.clip((max(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
-                        row_min = int(np.clip((top - max(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
-                        row_max = int(np.clip((top - min(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
-                        # Ensure min <= max
-                        r0, r1 = sorted([row_min, row_max])
-                        c0, c1 = sorted([col_min, col_max])
-                        visible_region = display_data[r0:r1+1, c0:c1+1]
-                        if visible_region.size > 0 and not np.all(np.isnan(visible_region)):
-                            vmin_elev = np.nanmin(visible_region)
-                            vmax_elev = np.nanmax(visible_region)
-                        else:
-                            vmin_elev = np.nanmin(display_data) if not np.all(np.isnan(display_data)) else None
-                            vmax_elev = np.nanmax(display_data) if not np.all(np.isnan(display_data)) else None
-
-                        # Only set vmin/vmax if valid range exists
-                        if vmin_elev is not None and vmax_elev is not None and vmin_elev != vmax_elev:
-                            self.geotiff_image_plot = self.ax.imshow(display_data, extent=tuple(self.geotiff_extent),
-                                                                     cmap=cmap, origin='upper', alpha=0.5, zorder=-1,
-                                                                     vmin=vmin_elev,
-                                                                     vmax=vmax_elev)
-                        else:
-                            self.geotiff_image_plot = self.ax.imshow(display_data, extent=tuple(self.geotiff_extent),
-                                                                     cmap=cmap, origin='upper', alpha=0.5, zorder=-1)
-
-                        # Add colorbar for elevation
-                        # Let matplotlib automatically adjust the axes position (like original Tkinter version)
-                        self.elevation_colorbar = self.figure.colorbar(self.geotiff_image_plot, ax=self.ax,
-                                                                       orientation='vertical', label='Elevation (m)',
-                                                                       pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
-
-                    elif self.geotiff_display_mode == "hillshade_only":
-                        # Hillshade only mode - use same elevation overlay code but with alpha=0
-                        # This ensures matplotlib calculates data limits the same way as Shaded Relief mode
-                        display_data = self.geotiff_data_array
-                        cmap = 'rainbow'  # Same as elevation mode
-
-                        # Calculate min/max for the displayed elevation data (ignoring NaNs) in the current plot window
-                        xlim = self.ax.get_xlim()
-                        ylim = self.ax.get_ylim()
-                        left, right, bottom, top = tuple(self.geotiff_extent)
-                        nrows, ncols = display_data.shape
-                        # Find the pixel indices that correspond to the current axes limits
-                        col_min = int(np.clip((min(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
-                        col_max = int(np.clip((max(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
-                        row_min = int(np.clip((top - max(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
-                        row_max = int(np.clip((top - min(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
-                        # Ensure min <= max
-                        r0, r1 = sorted([row_min, row_max])
-                        c0, c1 = sorted([col_min, col_max])
-                        visible_region = display_data[r0:r1+1, c0:c1+1]
-                        if visible_region.size > 0 and not np.all(np.isnan(visible_region)):
-                            vmin_elev = np.nanmin(visible_region)
-                            vmax_elev = np.nanmax(visible_region)
-                        else:
-                            vmin_elev = np.nanmin(display_data) if not np.all(np.isnan(display_data)) else None
-                            vmax_elev = np.nanmax(display_data) if not np.all(np.isnan(display_data)) else None
-
-                        # Only set vmin/vmax if valid range exists
-                        if vmin_elev is not None and vmax_elev is not None and vmin_elev != vmax_elev:
-                            self.geotiff_image_plot = self.ax.imshow(display_data, extent=tuple(self.geotiff_extent),
-                                                                     cmap=cmap, origin='upper', alpha=0, zorder=-1,
-                                                                     vmin=vmin_elev,
-                                                                     vmax=vmax_elev)
-                        else:
-                            self.geotiff_image_plot = self.ax.imshow(display_data, extent=tuple(self.geotiff_extent),
-                                                                     cmap=cmap, origin='upper', alpha=0, zorder=-1)
-
-                        # Remove any existing colorbars
-                        if hasattr(self, 'elevation_colorbar') and self.elevation_colorbar is not None:
-                            self.elevation_colorbar.remove()
-                            self.elevation_colorbar = None
-                        if hasattr(self, 'slope_colorbar') and self.slope_colorbar is not None:
-                            self.slope_colorbar.remove()
-                            self.slope_colorbar = None
-                        
-                        # Add colorbar for hillshade intensity to match layout of other modes
-                        if hasattr(self, 'geotiff_hillshade_plot') and self.geotiff_hillshade_plot is not None:
-                            self.elevation_colorbar = self.figure.colorbar(self.geotiff_hillshade_plot, ax=self.ax,
-                                                                           orientation='vertical', label='Multidirectional Hillshade Intensity',
-                                                                           pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
-
-                    elif self.geotiff_display_mode == "slope":
-                        # Calculate slope in degrees for overlay
-                        center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
-                        m_per_deg_lat = 111320.0
-                        m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat_geotiff))
-
-                        res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / self.geotiff_data_array.shape[0]
-                        res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / self.geotiff_data_array.shape[1]
-
-                        dx_m = res_lon_deg * m_per_deg_lon
-                        dy_m = res_lat_deg * m_per_deg_lat
-
-                        temp_data = np.nan_to_num(self.geotiff_data_array, nan=0.0)
-                        dz_dy_grid, dz_dx_grid = np.gradient(temp_data, dy_m, dx_m)
-
-                        slope_rad = np.arctan(np.sqrt(dz_dx_grid ** 2 + dz_dy_grid ** 2))
-                        slope_degrees = np.degrees(slope_rad)
-                        slope_degrees[np.isnan(self.geotiff_data_array)] = np.nan
-
-                        max_slope_for_cmap = 30.0
-                        display_data = np.clip(slope_degrees, 0, max_slope_for_cmap)
-
-                        # Add hillshade underlay from a single direction (315, 45)
-                        # Calculate adaptive vertical exaggeration based on elevation range
-                        vert_exag = self._calculate_adaptive_vert_exag(self.geotiff_data_array)
-                        # Log vertical exaggeration to activity log (only if not already logged in this plot cycle)
-                        if not hasattr(self, '_vert_exag_logged_this_cycle') or not self._vert_exag_logged_this_cycle:
-                            if hasattr(self, 'param_notebook'):
-                                current_tab = self.param_notebook.currentIndex()
-                                if current_tab == 0 and hasattr(self, 'set_cal_info_text'):
-                                    self.set_cal_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
-                                elif current_tab == 1 and hasattr(self, 'set_ref_info_text'):
-                                    self.set_ref_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
-                                elif current_tab == 2 and hasattr(self, 'set_line_info_text'):
-                                    self.set_line_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
-                            self._vert_exag_logged_this_cycle = True
-                        ls = LightSource(azdeg=315, altdeg=45)
-                        hillshade = ls.hillshade(temp_data, vert_exag=vert_exag)
-                        # Mask NaN values to make them transparent
-                        masked_hillshade = np.ma.masked_where(np.isnan(self.geotiff_data_array), hillshade)
-                        self.ax.imshow(masked_hillshade, extent=tuple(self.geotiff_extent), cmap='gray', origin='upper', alpha=0.5, zorder=-2)
-
-                        cmap = 'plasma'
-                        self.geotiff_image_plot = self.ax.imshow(display_data, extent=tuple(self.geotiff_extent),
-                                                                 cmap=cmap, origin='upper', alpha=0.5,
-                                                                 vmin=0, vmax=max_slope_for_cmap,
-                                                                 zorder=-1)
-
-                        self.slope_colorbar = self.figure.colorbar(self.geotiff_image_plot, ax=self.ax,
-                                                                   orientation='vertical', label='Slope (degrees)',
-                                                                   pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
-
-                        num_ticks = 7
-                        tick_values = np.linspace(0, max_slope_for_cmap, num_ticks)
-                        self.slope_colorbar.set_ticks(tick_values.tolist())
-
-                        tick_labels = [f"{t:.0f}" for t in tick_values]
-                        if np.nanmax(slope_degrees) > max_slope_for_cmap:
-                            tick_labels[-1] = f"> {max_slope_for_cmap:.0f}"
-                        self.slope_colorbar.set_ticklabels(tick_labels)
-
-                else:  # slope_viz mode
-                    # Calculate slope visualization (similar to above but without overlay)
-                    center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
-                    m_per_deg_lat = 111320.0
-                    m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat_geotiff))
-
-                    res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / self.geotiff_data_array.shape[0]
-                    res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / self.geotiff_data_array.shape[1]
-
-                    dx_m = res_lon_deg * m_per_deg_lon
-                    dy_m = res_lat_deg * m_per_deg_lat
-
-                    temp_data = np.nan_to_num(self.geotiff_data_array, nan=0.0)
-                    dz_dy_grid, dz_dx_grid = np.gradient(temp_data, dy_m, dx_m)
-
-                    slope_rad = np.arctan(np.sqrt(dz_dx_grid ** 2 + dz_dy_grid ** 2))
-                    slope_degrees = np.degrees(slope_rad)
-                    slope_degrees[np.isnan(self.geotiff_data_array)] = np.nan
-
-                    max_slope_for_cmap = 30.0
-                    display_slope_data = np.clip(slope_degrees, 0, max_slope_for_cmap)
-
-                    self.geotiff_image_plot = self.ax.imshow(display_slope_data, extent=tuple(self.geotiff_extent),
-                                                             cmap='inferno', origin='upper', vmin=0,
-                                                             vmax=max_slope_for_cmap, zorder=-1)
-
-                    self.slope_colorbar = self.figure.colorbar(self.geotiff_image_plot, ax=self.ax,
-                                                               orientation='vertical', label='Slope (degrees)',
-                                                               pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
-
-                    num_ticks = 7
-                    tick_values = np.linspace(0, max_slope_for_cmap, num_ticks)
-                    self.slope_colorbar.set_ticks(tick_values.tolist())
-
-                    tick_labels = [f"{t:.0f}" for t in tick_values]
-                    if np.nanmax(slope_degrees) > max_slope_for_cmap:
-                        tick_labels[-1] = f"> {max_slope_for_cmap:.0f}"
-                    self.slope_colorbar.set_ticklabels(tick_labels)
-
-            # Plot contours if enabled
-            if (self.geotiff_data_array is not None and self.geotiff_extent is not None and 
-                hasattr(self, 'show_contours_var') and self.show_contours_var):
-                try:
-                    # Get contour interval from entry field (check both tabs)
-                    contour_interval = 200.0  # Default
-                    try:
-                        if hasattr(self, 'contour_interval_entry') and self.contour_interval_entry:
-                            contour_interval = float(self.contour_interval_entry.text())
-                        if contour_interval <= 0:
-                            contour_interval = 200.0  # Default to 200 meters if invalid
-                    except (ValueError, AttributeError):
-                        contour_interval = 200.0  # Default to 200 meters if invalid
-                    
-                    # Remove previous contour plot if it exists
-                    if hasattr(self, 'contour_plot') and self.contour_plot is not None:
-                        for collection in self.contour_plot.collections:
-                            collection.remove()
-                        self.contour_plot = None
-                    
-                    # Get bathymetry data (always use elevation data, not slope)
-                    bathymetry_data = self.geotiff_data_array
-                    
-                    # Create coordinate grids for contour plotting
-                    left, right, bottom, top = tuple(self.geotiff_extent)
-                    nrows, ncols = bathymetry_data.shape
-                    lon_grid = np.linspace(left, right, ncols)
-                    lat_grid = np.linspace(bottom, top, nrows)
-                    lon_mesh, lat_mesh = np.meshgrid(lon_grid, lat_grid)
-                    
-                    # Flip data vertically because imshow uses origin='upper' (row 0 = top)
-                    # but contour expects origin='lower' (row 0 = bottom)
-                    bathymetry_data_flipped = np.flipud(bathymetry_data)
-                    
-                    # Calculate contour levels based on data range and interval
-                    valid_data = bathymetry_data[~np.isnan(bathymetry_data)]
-                    if len(valid_data) > 0:
-                        min_elev = np.nanmin(valid_data)
-                        max_elev = np.nanmax(valid_data)
-                        
-                        # Generate contour levels
-                        # Start from the first level above min_elev that's a multiple of interval
-                        start_level = np.ceil(min_elev / contour_interval) * contour_interval
-                        end_level = np.floor(max_elev / contour_interval) * contour_interval
-                        contour_levels = np.arange(start_level, end_level + contour_interval, contour_interval)
-                        
-                        if len(contour_levels) > 0:
-                            # Plot contours using matplotlib contour
-                            # Use cyan color when in shaded slope, hillshade, or slope mode, black for shaded relief
-                            if hasattr(self, 'geotiff_display_mode'):
-                                contour_color = 'cyan' if self.geotiff_display_mode in ["slope", "hillshade_only", "slope_viz"] else 'black'
-                            else:
-                                contour_color = 'black'
-                            self.contour_plot = self.ax.contour(lon_mesh, lat_mesh, bathymetry_data_flipped, 
-                                                                 levels=contour_levels, 
-                                                                 colors=contour_color, 
-                                                                 linewidths=0.5, 
-                                                                 alpha=0.7,
-                                                                 zorder=0)  # Above background but below other features
-                except Exception as e:
-                    # Silently fail if contour plotting fails (e.g., invalid data, etc.)
-                    if hasattr(self, 'contour_plot') and self.contour_plot is not None:
-                        try:
-                            for collection in self.contour_plot.collections:
-                                collection.remove()
-                        except:
-                            pass
-                        self.contour_plot = None
-            else:
-                # Remove contours if checkbox is disabled or no GeoTIFF loaded
-                if hasattr(self, 'contour_plot') and self.contour_plot is not None:
-                    try:
-                        for collection in self.contour_plot.collections:
-                            collection.remove()
-                    except:
-                        pass
-                    self.contour_plot = None
-
-            # Plot main survey lines
-            for i, line in enumerate(self.survey_lines_data):
-                latitudes = [p[0] for p in line]
-                longitudes = [p[1] for p in line]
-                label = "Reference Line" if i == 0 else "_nolegend_"
-                self.ax.plot(longitudes, latitudes, color='blue', linewidth=1.5, linestyle='--', label=label)
-                
-                # For alternating lines, flip the start/end points to show survey order
-                # Even lines (0, 2, 4...) use normal order, odd lines (1, 3, 5...) use flipped order
-                if i % 2 == 0:  # Even lines - normal order
-                    start_lon, start_lat = longitudes[0], latitudes[0]
-                    end_lon, end_lat = longitudes[1], latitudes[1]
-                    start_label = f'L{i+1}S'
-                    end_label = f'L{i+1}E'
-                else:  # Odd lines - flipped order to show zigzag survey pattern
-                    start_lon, start_lat = longitudes[1], latitudes[1]
-                    end_lon, end_lat = longitudes[0], latitudes[0]
-                    start_label = f'L{i+1}S'
-                    end_label = f'L{i+1}E'
-                
-                # Add labels for start and end points
-                self.ax.annotate(start_label, (start_lon, start_lat), 
-                                xytext=(5, 5), textcoords='offset points', 
-                                fontsize=8, color='blue', weight='bold',
-                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-                self.ax.annotate(end_label, (end_lon, end_lat), 
-                                xytext=(5, 5), textcoords='offset points', 
-                                fontsize=8, color='blue', weight='bold',
-                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-
-            # Plot crossline
-            if self.cross_line_data:
-                latitudes = [p[0] for p in self.cross_line_data]
-                longitudes = [p[1] for p in self.cross_line_data]
-                self.ax.plot(longitudes, latitudes, color='darkorchid', linestyle='-', linewidth=1.5,
-                             label='Crossline')
-                
-                # Add labels for crossline points
-                self.ax.annotate('CLS', (longitudes[0], latitudes[0]), 
-                                xytext=(5, 5), textcoords='offset points', 
-                                fontsize=8, color='darkorchid', weight='bold',
-                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-                self.ax.annotate('CLE', (longitudes[1], latitudes[1]), 
-                                xytext=(5, 5), textcoords='offset points', 
-                                fontsize=8, color='darkorchid', weight='bold',
-                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-
-            # Plot central point
-            if self.central_point_coords[0] is not None:
-                self.ax.plot(self.central_point_coords[1], self.central_point_coords[0],
-                             'o', color='green', markersize=5, label='Central Point')
-                self.ax.annotate('CP', (self.central_point_coords[1], self.central_point_coords[0]), 
-                                xytext=(5, 5), textcoords='offset points', 
-                                fontsize=8, color='green', weight='bold',
-                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-
-            # Plot pitch line if defined
-            if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
-                latitudes = [p[0] for p in self.pitch_line_points]
-                longitudes = [p[1] for p in self.pitch_line_points]
-                self.ax.plot(longitudes, latitudes, color='red', linewidth=2.5, linestyle='-', marker='o', label='Pitch Line')
-                
-                # Add labels for pitch line points
-                self.ax.annotate('PLS', (longitudes[0], latitudes[0]), 
-                                xytext=(5, 5), textcoords='offset points', 
-                                fontsize=8, color='red', weight='bold',
-                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-                self.ax.annotate('PLE', (longitudes[1], latitudes[1]), 
-                                xytext=(5, 5), textcoords='offset points', 
-                                fontsize=8, color='red', weight='bold',
-                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-            
-            # Plot roll line if defined
-            if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
-                latitudes = [p[0] for p in self.roll_line_points]
-                longitudes = [p[1] for p in self.roll_line_points]
-                self.ax.plot(longitudes, latitudes, color='purple', linewidth=2.5, linestyle='-', marker='o', label='Roll')
-                
-                # Add labels for roll line points
-                self.ax.annotate('RLS', (longitudes[0], latitudes[0]), 
-                                xytext=(5, 5), textcoords='offset points', 
-                                fontsize=8, color='purple', weight='bold',
-                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-                self.ax.annotate('RLE', (longitudes[1], latitudes[1]), 
-                                xytext=(5, 5), textcoords='offset points', 
-                                fontsize=8, color='purple', weight='bold',
-                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-
-            # Plot heading lines if present
-            if hasattr(self, 'heading_lines') and len(self.heading_lines) == 2:
-                for i, line in enumerate(self.heading_lines):
-                    latitudes = [p[0] for p in line]
-                    longitudes = [p[1] for p in line]
-                    label = 'Heading1' if i == 0 else 'Heading2'
-                    self.ax.plot(longitudes, latitudes, color='deeppink', linewidth=2, linestyle='--', marker='x', label=label)
-                    
-                    # Add labels for heading line points
-                    prefix = 'H1' if i == 0 else 'H2'
-                    self.ax.annotate(f'{prefix}S', (longitudes[0], latitudes[0]), 
-                                    xytext=(5, 5), textcoords='offset points', 
-                                    fontsize=8, color='deeppink', weight='bold',
-                                    bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-                    self.ax.annotate(f'{prefix}E', (longitudes[1], latitudes[1]), 
-                                    xytext=(5, 5), textcoords='offset points', 
-                                    fontsize=8, color='deeppink', weight='bold',
-                                    bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-
-            # --- Plot the drawn line in Line Planning tab if it exists ---
-            if hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 2:
-                lats = [p[0] for p in self.line_planning_points]
-                lons = [p[1] for p in self.line_planning_points]
-                self.ax.plot(lons, lats, color='orange', linewidth=2, marker='o', label='Line Planning')
-                
-                # Add labels for line planning waypoints
-                for i, (lon, lat) in enumerate(zip(lons, lats)):
-                    self.ax.annotate(f'WP{i+1}', (lon, lat), 
-                                    xytext=(5, 5), textcoords='offset points', 
-                                    fontsize=8, color='orange', weight='bold',
-                                    bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
-
-            # Standard plot elements
-            self.ax.set_xlabel("Longitude")
-            self.ax.set_ylabel("Latitude")
-            self.ax.set_title("Survey Plan")
-            self.ax.grid(True)
-            
-            # Calculate aspect ratio based on center latitude for equal scaling
-            # Longitude degrees get shorter as you move away from equator
-            # Aspect ratio = 1 / cos(latitude) to maintain equal distance scaling
-            try:
-                # Get initial limits for center calculation
-                xlim = self.ax.get_xlim()
-                ylim = self.ax.get_ylim()
-                center_lat = (ylim[0] + ylim[1]) / 2.0
-                center_x = (xlim[0] + xlim[1]) / 2.0
-                center_y = (ylim[0] + ylim[1]) / 2.0
-                
-                # Convert to radians and calculate aspect ratio
-                center_lat_rad = np.radians(center_lat)
-                aspect_ratio = 1.0 / np.cos(center_lat_rad)
-                # Clamp aspect ratio to reasonable bounds to avoid extreme values at poles
-                aspect_ratio = np.clip(aspect_ratio, 0.1, 10.0)
-                
-                # Get figure size
-                fig_width, fig_height = self.figure.get_size_inches()
-                # Use subplot_adjust margins: left=0.08, right=0.95, top=0.95, bottom=0.08
-                # This gives us the actual plotable area
-                plot_width = fig_width * (0.95 - 0.08)  # right - left
-                plot_height = fig_height * (0.95 - 0.08)  # top - bottom
-                figure_aspect = plot_width / plot_height
-                
-                # Calculate current data extent
-                data_width = xlim[1] - xlim[0]
-                data_height = ylim[1] - ylim[0]
-                
-                # Calculate how the data would display with the geographic aspect ratio
-                # With aspect_ratio applied, longitude is stretched, so display aspect is:
-                data_display_aspect = (data_width * aspect_ratio) / data_height
-                
-                # Only adjust limits to fill the figure if we're not preserving user's zoom level
-                # When preserve_view_limits=True, skip this adjustment to maintain user's zoom
-                if not preserve_view_limits:
-                    # Adjust limits to fill the figure while maintaining geographic aspect
-                    if data_display_aspect > figure_aspect:
-                        # Data would appear wider than figure - expand height (latitude) to fill
-                        new_height = (data_width * aspect_ratio) / figure_aspect
-                        ylim_new = (center_y - new_height / 2.0, center_y + new_height / 2.0)
-                        self.ax.set_ylim(ylim_new)
-                        # Update xlim to match the new center in case it shifted
-                        self.ax.set_xlim(xlim)
-                    elif data_display_aspect < figure_aspect:
-                        # Data would appear taller than figure - expand width (longitude) to fill
-                        new_width = (data_height * figure_aspect) / aspect_ratio
-                        xlim_new = (center_x - new_width / 2.0, center_x + new_width / 2.0)
-                        self.ax.set_xlim(xlim_new)
-                        # Update ylim to match the new center in case it shifted
-                        self.ax.set_ylim(ylim)
-                    # If equal, no adjustment needed
-                
-                # Now set the aspect ratio with 'datalim' so the axes box stays fixed
-                # This matches the original Tkinter version - let matplotlib handle positioning automatically
-                self.ax.set_aspect(aspect_ratio, adjustable='datalim')
-                
-                # If preserving view limits, restore them after setting aspect
-                if preserve_view_limits and 'preserved_xlim' in locals() and preserved_xlim is not None:
-                    # Restore the exact limits
-                    self.ax.set_xlim(preserved_xlim)
-                    self.ax.set_ylim(preserved_ylim)
-                
-            except Exception:
-                # Fallback to auto if calculation fails
-                self.ax.set_aspect('auto')
-
-            # Remove any existing legend before adding a new one to prevent shrinking
-            handles, labels = self.ax.get_legend_handles_labels()
-            if handles and any(label and not label.startswith('_') for label in labels):
-                self.ax.legend()
-            else:
-                if self.ax.get_legend() is not None:
-                    self.ax.get_legend().remove()
-            
-            # Plot NOAA ENC Charts overlay if enabled (plot last so it overlays everything)
-            # Force reload since axes were just cleared
-            if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
-                self._load_and_plot_noaa_charts(force_reload=True)
-
-            self.canvas.draw_idle()
-
-        except Exception as e:
-            print(f"Error in _plot_survey_plan: {str(e)}")
-            traceback.print_exc()
-            self._show_message("error","Plot Error", f"Failed to generate plot: {str(e)}")
-            # Attempt to recover by reinitializing the plot
-            self._clear_plot(full_clear=True)
-            self.ax = self.figure.add_subplot(111)
-            self.figure.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.08)
-            self.canvas.draw_idle()
-
-    def _clear_plot(self, full_clear=True):
-        """Clear the plot and optionally reset all data."""
-        # Clear the axes
-        if self.ax:
-            self.ax.clear()
-        
-        # Reset to fixed plot limits
-        self.current_xlim = self.fixed_xlim
-        self.current_ylim = self.fixed_ylim
-        self.ax.set_xlim(self.current_xlim)
-        self.ax.set_ylim(self.current_ylim)
-        
-        # Reset data
-        self.survey_lines_data = []
-        self.cross_line_data = []
-        self.central_point_coords = (None, None)
-
-        # Clear GeoTIFF related data only if full_clear is True
-        if full_clear:
-            if self.geotiff_dataset_original:
-                self.geotiff_dataset_original.close()
-                self.geotiff_dataset_original = None
-            self.geotiff_data_array = None
-            self.geotiff_extent = None
-            self.geotiff_original_extent = None
-            self.initial_geotiff_xlim = None
-            self.initial_geotiff_ylim = None
-            self.geotiff_image_plot = None
-            self.geotiff_hillshade_plot = None
-            # Robustly remove colorbars
-            self._remove_colorbar('slope_colorbar')
-            self._remove_colorbar('elevation_colorbar')
-
-            # Restored: geotiff_display_mode reset
-            self.geotiff_display_mode = "elevation"
-            # Update combo box if it exists
-            if hasattr(self, 'elevation_slope_combo'):
-                self._update_display_mode_combo()
-
-            self.hillshade_vs_slope_viz_mode = "hillshade"
-            # Remove all .config() calls for self.slope_viz_btn
-            # Remove: self.slope_viz_btn.config(text="Display Slope Visualization")
-            # Remove: self.slope_viz_btn.config(text="Display Shaded Relief")
-
-            # Reset transformers
-            self.geotiff_to_wgs84_transformer = None
-            self.wgs84_to_geotiff_transformer = None
-            
-            # Disable Remove GeoTIFF button and Pick Center button
-            if hasattr(self, 'remove_geotiff_btn'):
-                self.remove_geotiff_btn.setEnabled(False)
-            if hasattr(self, 'pick_center_btn'):
-                self.pick_center_btn.setEnabled(False)
-                self.pick_center_btn.setStyleSheet("")  # Reset to normal style when GeoTIFF is removed
-            # Reset "Start Drawing Line" button to normal style when GeoTIFF is removed
-            if hasattr(self, 'line_start_draw_btn'):
-                self.line_start_draw_btn.setStyleSheet("")
-            # Reset Load GeoTIFF button to orange and bold when GeoTIFF is removed
-            if hasattr(self, 'load_geotiff_btn'):
-                self.load_geotiff_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
-
-        # Reset plot elements
-        if self.ax:
-            self.ax.set_xlabel("")
-            self.ax.set_ylabel("")
-            self.ax.set_title("")
-            if self.ax.legend_ is not None:  # Check if legend exists before trying to remove
-                self.ax.legend().remove()
-        
-        # Redraw the canvas
-        if hasattr(self, 'canvas'):
-            self.canvas.draw_idle()
-
-        # Also clear the crossline elevation profile
-        self._draw_crossline_profile()
-
-    def _cancel_geotiff_loading(self):
-        """Cancel the current GeoTIFF loading operation."""
-        self.loading_cancelled = True
-        if hasattr(self, 'set_cal_info_text'):
-            self.set_cal_info_text("GeoTIFF loading cancelled.")
-        elif hasattr(self, 'set_ref_info_text'):
-            self.set_ref_info_text("GeoTIFF loading cancelled.")
-
     def _load_geotiff_at_resolution(self, zoom_level=None):
         """Load GeoTIFF data at the specified resolution based on zoom level."""
         if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_dataset_original is None:
@@ -3382,7 +2170,7 @@ class SurveyPlanApp(QMainWindow):
             
             # Filter Z-values
             data[data < -11000] = np.nan
-            data[data >= 0] = np.nan
+            data[data > 0] = np.nan
             
             # Validate the extent to prevent flipping
             if region_extent[1] <= region_extent[0] or region_extent[3] <= region_extent[2]:
@@ -3498,975 +2286,6 @@ class SurveyPlanApp(QMainWindow):
             self._zoom_timer.start(100)
         else:
             print(f"DEBUG: Dynamic resolution toggled to {status}, but no GeoTIFF loaded")
-
-    def _load_geotiff(self):
-        if not GEOSPATIAL_LIBS_AVAILABLE:
-            self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot load GeoTIFF.")
-            return
-
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select GeoTIFF File",
-            self.last_geotiff_dir,
-            "GeoTIFF files (*.tif *.tiff);;All files (*.*)"
-        )
-        if not file_path:
-            return
-        self.last_geotiff_dir = os.path.dirname(file_path)
-        self._save_last_geotiff_dir()
-
-        # Check file size before loading
-        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
-        use_background_loading = False
-        
-        if file_size_mb > 1000:  # 1GB threshold - use background loading
-            response = self._ask_yes_no(
-                "Very Large File Warning", 
-                f"GeoTIFF file is {file_size_mb:.1f} MB. This is a very large file that may take several minutes to load.\n\n"
-                "Would you like to load it in the background? (Recommended)\n"
-                "Or cancel and use a smaller file for better performance."
-            )
-            if not response:
-                return
-            use_background_loading = True
-        elif file_size_mb > 500:  # 500MB threshold
-            response = self._ask_yes_no(
-                "Large File Warning", 
-                f"GeoTIFF file is {file_size_mb:.1f} MB. Large files may take a long time to load and could cause the application to freeze.\n\n"
-                "Would you like to continue? Consider using a smaller or downsampled file for better performance."
-            )
-            if not response:
-                return
-
-        # Show loading progress
-        progress_window = QDialog(self)
-        progress_window.setWindowTitle("Loading GeoTIFF")
-        progress_window.setModal(True)
-        progress_layout = QVBoxLayout(progress_window)
-        
-        progress_label = QLabel("Opening GeoTIFF file...")
-        progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        progress_layout.addWidget(progress_label)
-        
-        progress_bar = QProgressBar()
-        progress_bar.setRange(0, 0)  # Indeterminate mode
-        progress_layout.addWidget(progress_bar)
-        
-        # Add cancel button for background loading
-        if use_background_loading:
-            cancel_button = QPushButton("Cancel Loading")
-            cancel_button.clicked.connect(lambda: setattr(self, 'loading_cancelled', True))
-            cancel_button.clicked.connect(progress_window.reject)
-            progress_layout.addWidget(cancel_button)
-            self.loading_cancelled = False
-        
-        progress_window.show()
-        QApplication.processEvents()
-
-        try:
-            if self.geotiff_dataset_original:  # Close previously opened dataset
-                self.geotiff_dataset_original.close()
-
-            # Update progress
-            progress_label.setText("Opening raster dataset...")
-            QApplication.processEvents()
-            
-            # Add timeout for opening large files
-            timeout_seconds = 30 if file_size_mb > 500 else 10
-            
-            # For very large files, just proceed with normal loading but show progress
-            # The timeout will be handled by the progress window and user can cancel
-            self.geotiff_dataset_original = rasterio.open(file_path)
-
-            # Check if we need to downsample for large files
-            total_pixels = self.geotiff_dataset_original.width * self.geotiff_dataset_original.height
-            downsample_factor = 1
-            
-            if total_pixels > 10000000:  # 10 million pixels threshold
-                downsample_factor = 4
-                progress_label.setText(f"Large file detected. Downsampling by factor {downsample_factor} for performance...")
-                QApplication.processEvents()
-            elif total_pixels > 5000000:  # 5 million pixels threshold
-                downsample_factor = 2
-                progress_label.setText(f"Downsampling by factor {downsample_factor} for performance...")
-                QApplication.processEvents()
-            
-            # Check if loading was cancelled
-            if hasattr(self, 'loading_cancelled') and self.loading_cancelled:
-                progress_window.close()
-                return
-
-            # Reproject GeoTIFF data to WGS84 (EPSG:4326) for consistent plotting
-            src_crs = self.geotiff_dataset_original.crs
-            dst_crs = "EPSG:4326"
-
-            if src_crs != dst_crs:
-                progress_label.setText(f"Reprojecting from {src_crs} to {dst_crs}...")
-                QApplication.processEvents()
-
-                # Calculate destination transform and dimensions
-                left, bottom, right, top = self.geotiff_dataset_original.bounds.left, self.geotiff_dataset_original.bounds.bottom, \
-                    self.geotiff_dataset_original.bounds.right, self.geotiff_dataset_original.bounds.top
-
-                # Transform bounds to destination CRS
-                transformer_bounds = pyproj.Transformer.from_crs(src_crs, dst_crs, always_xy=True)
-                dst_left, dst_bottom = transformer_bounds.transform(left, bottom)
-                dst_right, dst_top = transformer_bounds.transform(right, top)
-
-                # Apply downsampling if needed
-                target_height = self.geotiff_dataset_original.height // downsample_factor
-                target_width = self.geotiff_dataset_original.width // downsample_factor
-
-                # Create a new array for the reprojected data
-                reprojected_data = np.empty((target_height, target_width),
-                                            dtype=self.geotiff_dataset_original.dtypes[0])
-
-                # Perform the reprojection with downsampling
-                if downsample_factor > 1:
-                    # Read with downsampling
-                    window = Window.from_slices((0, self.geotiff_dataset_original.height), (0, self.geotiff_dataset_original.width))
-                    data = self.geotiff_dataset_original.read(1, window=window)
-                    # Simple downsampling by taking every nth pixel
-                    data = data[::downsample_factor, ::downsample_factor]
-                    source_data = data
-                else:
-                    source_data = rasterio.band(self.geotiff_dataset_original, 1)
-
-                # Check if loading was cancelled before reprojection
-                if hasattr(self, 'loading_cancelled') and self.loading_cancelled:
-                    progress_window.close()
-                    return
-                
-                reproject(
-                    source=source_data,
-                    destination=reprojected_data,
-                    src_transform=self.geotiff_dataset_original.transform,
-                    src_crs=src_crs,
-                    dst_transform=transform.from_bounds(dst_left, dst_bottom, dst_right, dst_top, target_width, target_height),
-                    dst_crs=dst_crs,
-                    resampling=Resampling.bilinear
-                )
-                self.geotiff_data_array = reprojected_data.astype(float)
-                self.geotiff_extent = [dst_left, dst_right, dst_bottom, dst_top]
-                # Store original full extent for profile calculations (always use full extent for profiles)
-                self.geotiff_original_extent = [dst_left, dst_right, dst_bottom, dst_top]
-
-                # Create transformers for picking if reprojection happened
-                self.wgs84_to_geotiff_transformer = pyproj.Transformer.from_crs(dst_crs, src_crs, always_xy=True)
-                self.geotiff_to_wgs84_transformer = pyproj.Transformer.from_crs(src_crs, dst_crs, always_xy=True)
-
-            else:  # Already WGS84
-                progress_label.setText("Reading GeoTIFF data...")
-                QApplication.processEvents()
-                
-                if downsample_factor > 1:
-                    # Read with downsampling
-                    window = Window.from_slices((0, self.geotiff_dataset_original.height), (0, self.geotiff_dataset_original.width))
-                    data = self.geotiff_dataset_original.read(1, window=window)
-                    # Simple downsampling
-                    data = data[::downsample_factor, ::downsample_factor]
-                    self.geotiff_data_array = data.astype(float)
-                else:
-                    self.geotiff_data_array = self.geotiff_dataset_original.read(1).astype(float)
-                
-                bounds = self.geotiff_dataset_original.bounds
-                self.geotiff_extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
-                # Store original full extent for profile calculations (always use full extent for profiles)
-                self.geotiff_original_extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
-                self.wgs84_to_geotiff_transformer = None
-                self.geotiff_to_wgs84_transformer = None
-
-            # Filter Z-values: values < -11000 or >= 0 are set to NaN
-            progress_label.setText("Processing elevation data...")
-            QApplication.processEvents()
-            
-            self.geotiff_data_array[self.geotiff_data_array < -11000] = np.nan
-            self.geotiff_data_array[self.geotiff_data_array >= 0] = np.nan
-
-            # Store the full resolution data for dynamic loading
-            self.geotiff_full_resolution = self.geotiff_data_array.copy()
-            self.geotiff_current_resolution = downsample_factor
-            self.geotiff_zoom_level = 1.0  # Start at full resolution
-
-            # Close progress window
-            progress_window.close()
-
-            # Enable Remove GeoTIFF button and Pick Center button
-            if hasattr(self, 'remove_geotiff_btn'):
-                self.remove_geotiff_btn.setEnabled(True)
-            if hasattr(self, 'pick_center_btn'):
-                self.pick_center_btn.setEnabled(True)
-                # Make "Pick Center from GeoTIFF" button bold and orange after loading GeoTIFF
-                self.pick_center_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
-            # Reset Load GeoTIFF button to normal style after successful loading
-            if hasattr(self, 'load_geotiff_btn'):
-                self.load_geotiff_btn.setStyleSheet("")  # Reset to default style
-            # Make "Draw a Pitch Line" button bold and orange after loading GeoTIFF
-            if hasattr(self, 'pick_pitch_line_btn'):
-                self.pick_pitch_line_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
-            # Make "Start Drawing Line" button bold and orange after loading GeoTIFF
-            if hasattr(self, 'line_start_draw_btn'):
-                self.line_start_draw_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
-
-            # Show success message
-            filename = os.path.basename(file_path)
-            if downsample_factor > 1:
-                success_msg = f"GeoTIFF '{filename}' loaded successfully (downsampled {downsample_factor}x for performance). Dynamic resolution enabled - zoom in for higher detail."
-            else:
-                success_msg = f"GeoTIFF '{filename}' loaded successfully. Dynamic resolution enabled - zoom in for higher detail."
-                
-            # Show message in activity log based on current tab
-            current_tab = self.param_notebook.currentIndex() if hasattr(self, 'param_notebook') else 0
-            if current_tab == 0 and hasattr(self, 'set_cal_info_text'):
-                self.set_cal_info_text(success_msg)
-            elif current_tab == 1 and hasattr(self, 'set_ref_info_text'):
-                self.set_ref_info_text(success_msg)
-            elif current_tab == 2 and hasattr(self, 'set_line_info_text'):
-                self.set_line_info_text(success_msg)
-            else:
-                # Fallback: try to use any available method
-                if hasattr(self, 'set_cal_info_text'):
-                    self.set_cal_info_text(success_msg)
-                elif hasattr(self, 'set_ref_info_text'):
-                    self.set_ref_info_text(success_msg)
-                elif hasattr(self, 'set_line_info_text'):
-                    self.set_line_info_text(success_msg)
-            
-            
-            # Update the plot and zoom after loading
-            self._plot_survey_plan()
-            # Store the initial limits after first plot
-            self.initial_geotiff_xlim = self.current_xlim
-            self.initial_geotiff_ylim = self.current_ylim
-            self._zoom_to_geotiff()
-
-        except RasterioIOError as e:
-            progress_window.destroy()
-            self._show_message("error","GeoTIFF Error", f"Could not open GeoTIFF file: {e}")
-            self._clear_plot(full_clear=True)
-        except Exception as e:
-            progress_window.destroy()
-            self._show_message("error","GeoTIFF Error", f"An unexpected error occurred while loading GeoTIFF: {e}")
-            self._clear_plot(full_clear=True)
-
-        # Draw crossline profile
-        self._draw_crossline_profile()
-
-    def _on_geotiff_display_mode_changed(self, mode_text):
-        """Handle display mode selection from combo box."""
-        if not GEOSPATIAL_LIBS_AVAILABLE:
-            self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot change display mode.")
-            # Reset to previous mode
-            if hasattr(self, 'elevation_slope_combo'):
-                self._update_display_mode_combo()
-            return
-
-        if self.geotiff_data_array is None:
-            self._show_message("warning","No GeoTIFF", "Load a GeoTIFF first to change display mode.")
-            # Reset to previous mode
-            if hasattr(self, 'elevation_slope_combo'):
-                self._update_display_mode_combo()
-            return
-
-        # Map combo box text to internal display modes
-        if mode_text == "Shaded Relief":
-            self.geotiff_display_mode = "elevation"
-            self.hillshade_vs_slope_viz_mode = "hillshade"
-        elif mode_text == "Shaded Slope":
-            self.geotiff_display_mode = "slope"
-            self.hillshade_vs_slope_viz_mode = "hillshade"
-        elif mode_text == "Hillshade":
-            self.geotiff_display_mode = "hillshade_only"
-            self.hillshade_vs_slope_viz_mode = "hillshade"
-        elif mode_text == "Slope":
-            self.geotiff_display_mode = "slope_viz"
-            self.hillshade_vs_slope_viz_mode = "slope_viz"
-
-        # --- Preserve current plot area ---
-        xlim = self.ax.get_xlim()
-        ylim = self.ax.get_ylim()
-        # Store the limits so _plot_survey_plan() can preserve them properly
-        self._last_user_xlim = xlim
-        self._last_user_ylim = ylim
-        self._plot_survey_plan(preserve_view_limits=True)  # Re-plot with new display mode, preserving view
-        self.canvas.draw_idle()
-
-        # Report the current layer in the info/error box
-        msg = f"Layer shown: {mode_text}"
-        if hasattr(self, 'set_cal_info_text') and self.param_notebook.currentIndex() == 0:
-            self.set_cal_info_text(msg)
-        elif hasattr(self, 'set_ref_info_text') and self.param_notebook.currentIndex() == 1:
-            self.set_ref_info_text(msg)
-    
-    def _update_display_mode_combo(self):
-        """Update the combo box to reflect the current display mode."""
-        if not hasattr(self, 'elevation_slope_combo'):
-            return
-        
-        # Map internal display mode to combo box text
-        if self.geotiff_display_mode == "elevation":
-            mode_text = "Shaded Relief"
-        elif self.geotiff_display_mode == "slope":
-            mode_text = "Shaded Slope"
-        elif self.geotiff_display_mode == "hillshade_only":
-            mode_text = "Hillshade"
-        elif self.geotiff_display_mode == "slope_viz":
-            mode_text = "Slope"
-        else:
-            mode_text = "Shaded Relief"  # Default
-        
-        # Block signals to prevent triggering the change handler
-        self.elevation_slope_combo.blockSignals(True)
-        self.elevation_slope_combo.setCurrentText(mode_text)
-        self.elevation_slope_combo.blockSignals(False)
-
-    def _on_contour_checkbox_changed(self):
-        """Handle checkbox change for showing/hiding contours."""
-        # Get the checkbox state
-        if hasattr(self, 'show_contours_checkbox'):
-            is_checked = self.show_contours_checkbox.isChecked()
-        else:
-            is_checked = False
-        
-        if not GEOSPATIAL_LIBS_AVAILABLE:
-            self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot show contours.")
-            self.show_contours_var = False
-            if hasattr(self, 'show_contours_checkbox'):
-                self.show_contours_checkbox.setChecked(False)
-            return
-
-        if self.geotiff_data_array is None:
-            self._show_message("warning","No GeoTIFF", "Load a GeoTIFF first to show contours.")
-            self.show_contours_var = False
-            if hasattr(self, 'show_contours_checkbox'):
-                self.show_contours_checkbox.setChecked(False)
-            return
-
-        # Update the variable based on checkbox state
-        self.show_contours_var = is_checked
-
-        # Preserve current plot area
-        try:
-            xlim = self.ax.get_xlim()
-            ylim = self.ax.get_ylim()
-            self._plot_survey_plan(preserve_view_limits=True)
-            # Restore previous plot area if valid
-            if xlim and ylim:
-                self.ax.set_xlim(xlim)
-                self.ax.set_ylim(ylim)
-            self.canvas.draw_idle()
-        except Exception:
-            pass  # Silently handle errors
-
-    def _on_contour_interval_changed(self):
-        """Handle contour interval entry change. Keeps all entry fields synchronized."""
-        # Sync all entry fields (calibration, reference, and line planning)
-        try:
-            if hasattr(self, '_syncing_contour_interval'):
-                return  # Prevent infinite loop
-            self._syncing_contour_interval = True
-            try:
-                # Try to get the value from whichever entry field exists and was changed
-                val = None
-                if hasattr(self, 'contour_interval_entry') and self.contour_interval_entry is not None:
-                    val = self.contour_interval_entry.text()
-            except:
-                pass
-            finally:
-                self._syncing_contour_interval = False
-        except:
-            pass
-
-        if not (hasattr(self, 'show_contours_var') and self.show_contours_var):
-            return  # Don't update if contours are not enabled
-
-        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
-            return
-
-        # Preserve current plot area
-        try:
-            xlim = self.ax.get_xlim()
-            ylim = self.ax.get_ylim()
-            self._plot_survey_plan(preserve_view_limits=True)
-            # Restore previous plot area if valid
-            if xlim and ylim:
-                self.ax.set_xlim(xlim)
-                self.ax.set_ylim(ylim)
-            self.canvas.draw_idle()
-        except Exception:
-            pass  # Silently handle errors
-
-    def _toggle_imagery_basemap(self):
-        """Toggle imagery basemap on/off."""
-        if hasattr(self, 'imagery_basemap_checkbox'):
-            self.show_imagery_basemap_var = self.imagery_basemap_checkbox.isChecked()
-            # Initialize basemap zoom tracking
-            if not hasattr(self, '_last_basemap_zoom_level'):
-                self._last_basemap_zoom_level = None
-            if not hasattr(self, '_last_basemap_extent'):
-                self._last_basemap_extent = None
-            # Redraw the plot to show/hide basemap
-            self._plot_survey_plan(preserve_view_limits=True)
-    
-    def _toggle_noaa_charts(self):
-        """Toggle NOAA ENC Charts overlay on/off."""
-        if hasattr(self, 'noaa_charts_checkbox'):
-            self.show_noaa_charts_var = self.noaa_charts_checkbox.isChecked()
-            # Enable/disable opacity slider and label
-            if hasattr(self, 'noaa_charts_opacity_slider'):
-                self.noaa_charts_opacity_slider.setEnabled(self.show_noaa_charts_var)
-            if hasattr(self, 'noaa_charts_opacity_label'):
-                self.noaa_charts_opacity_label.setEnabled(self.show_noaa_charts_var)
-            
-            # Remove chart overlay if disabling
-            if not self.show_noaa_charts_var:
-                if hasattr(self, 'noaa_charts_image_plot') and self.noaa_charts_image_plot is not None:
-                    try:
-                        self.noaa_charts_image_plot.remove()
-                    except:
-                        pass
-                    self.noaa_charts_image_plot = None
-                self.canvas.draw_idle()
-            else:
-                # Load and plot NOAA charts if enabling
-                self._load_and_plot_noaa_charts()
-    
-    def _update_noaa_charts_opacity(self, value):
-        """Update the opacity of NOAA charts overlay."""
-        self.noaa_charts_opacity = value
-        if hasattr(self, 'noaa_charts_opacity_label'):
-            self.noaa_charts_opacity_label.setText(f"Opacity: {value}%")
-        
-        # Update the existing plot if it exists
-        if hasattr(self, 'noaa_charts_image_plot') and self.noaa_charts_image_plot is not None:
-            try:
-                # Update alpha value
-                alpha = value / 100.0
-                self.noaa_charts_image_plot.set_alpha(alpha)
-                self.canvas.draw_idle()
-            except Exception as e:
-                print(f"Error updating NOAA charts opacity: {e}")
-    
-    def _load_and_plot_basemap(self, force_reload=False):
-        """Load and display ArcGIS World Imagery basemap tiles.
-        
-        Args:
-            force_reload: If True, bypass the early return check and always reload.
-                         Use this when the axes have been cleared and the basemap needs to be restored.
-        """
-        print(f"[BASEMAP DEBUG] _load_and_plot_basemap() called (force_reload={force_reload})")
-        try:
-            # Get current plot limits
-            xlim = self.ax.get_xlim()
-            ylim = self.ax.get_ylim()
-            print(f"[BASEMAP DEBUG] Current plot limits: xlim={xlim}, ylim={ylim}")
-            
-            if not xlim or not ylim or xlim[0] >= xlim[1] or ylim[0] >= ylim[1]:
-                print("[BASEMAP DEBUG] Invalid plot limits, returning early")
-                return
-            
-            # Check if we need to reload (zoom level or extent changed significantly)
-            # Calculate current zoom level
-            extent_width = xlim[1] - xlim[0]
-            extent_height = ylim[1] - ylim[0]
-            current_extent = (xlim[0], xlim[1], ylim[0], ylim[1])
-            
-            # Only reload if zoom level or extent changed significantly (unless force_reload is True)
-            if not force_reload:
-                if hasattr(self, '_last_basemap_extent'):
-                    if self._last_basemap_extent is not None:
-                        last_extent = self._last_basemap_extent
-                        # Check if extent changed significantly (more than 15% change in width or height)
-                        last_width = last_extent[1] - last_extent[0]
-                        last_height = last_extent[3] - last_extent[2]
-                        width_change = abs(extent_width - last_width) / max(extent_width, last_width) if max(extent_width, last_width) > 0 else 1.0
-                        height_change = abs(extent_height - last_height) / max(extent_height, last_height) if max(extent_height, last_height) > 0 else 1.0
-                        # Check if center moved significantly (more than 25% of current extent)
-                        center_x = (xlim[0] + xlim[1]) / 2
-                        center_y = (ylim[0] + ylim[1]) / 2
-                        last_center_x = (last_extent[0] + last_extent[1]) / 2
-                        last_center_y = (last_extent[2] + last_extent[3]) / 2
-                        center_x_change = abs(center_x - last_center_x) / extent_width if extent_width > 0 else 0
-                        center_y_change = abs(center_y - last_center_y) / extent_height if extent_height > 0 else 0
-                        
-                        print(f"[BASEMAP DEBUG] Extent change check: width_change={width_change:.3f}, height_change={height_change:.3f}, "
-                              f"center_x_change={center_x_change:.3f}, center_y_change={center_y_change:.3f}")
-                        
-                        # Only reload if change is significant
-                        if width_change < 0.15 and height_change < 0.15 and center_x_change < 0.25 and center_y_change < 0.25:
-                            print("[BASEMAP DEBUG] No significant change detected, skipping reload (early return)")
-                            return  # No significant change, skip reload
-                    else:
-                        print("[BASEMAP DEBUG] No previous basemap extent stored, proceeding with reload")
-                else:
-                    print("[BASEMAP DEBUG] _last_basemap_extent not set, proceeding with reload")
-            else:
-                print("[BASEMAP DEBUG] force_reload=True, bypassing early return check")
-            
-            # Store current extent for next comparison
-            self._last_basemap_extent = current_extent
-            print(f"[BASEMAP DEBUG] Stored new basemap extent: {current_extent}")
-            
-            # Convert WGS84 bounds to Web Mercator (EPSG:3857)
-            if not GEOSPATIAL_LIBS_AVAILABLE:
-                print("[BASEMAP DEBUG] Geospatial libraries not available, returning")
-                return
-            
-            try:
-                # Create transformer from WGS84 to Web Mercator
-                wgs84_to_mercator = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
-                
-                # Transform bounds
-                x_min_merc, y_min_merc = wgs84_to_mercator.transform(xlim[0], ylim[0])
-                x_max_merc, y_max_merc = wgs84_to_mercator.transform(xlim[1], ylim[1])
-                
-                # Calculate appropriate zoom level based on extent
-                # Web Mercator uses meters, tile size is 256 pixels
-                # Resolution at zoom level z = 156543.03392 / (2^z) meters per pixel
-                extent_width_m = abs(x_max_merc - x_min_merc)
-                extent_height_m = abs(y_max_merc - y_min_merc)
-                
-                # Estimate zoom level (aim for higher resolution - use smaller dimension to ensure detail)
-                # Use the smaller dimension to ensure we get enough resolution
-                min_extent = min(extent_width_m, extent_height_m)
-                # Target: aim for ~512-768 pixels to get higher resolution tiles
-                # Higher target pixels = higher zoom level = more detail
-                target_resolution = min_extent / 512  # Aim for ~512 pixels on the smaller dimension
-                # Resolution = 156543.03392 / (2^z), so 2^z = 156543.03392 / resolution
-                # Use round() instead of int() to get better zoom level transitions
-                zoom_level = int(np.round(np.clip(np.log2(156543.03392 / target_resolution), 0, 19)))
-                print(f"[BASEMAP DEBUG] Calculated zoom level: {zoom_level} (extent_width_m={extent_width_m:.1f}, extent_height_m={extent_height_m:.1f}, min_extent={min_extent:.1f}, target_resolution={target_resolution:.1f})")
-                
-                # Calculate tile coordinates
-                # Web Mercator origin is at (-20037508.34, 20037508.34)
-                origin_x = -20037508.34
-                origin_y = 20037508.34
-                tile_size = 256
-                resolution = 156543.03392 / (2 ** zoom_level)
-                
-                # Calculate tile indices
-                tile_x_min = int(np.floor((x_min_merc - origin_x) / (tile_size * resolution)))
-                tile_x_max = int(np.ceil((x_max_merc - origin_x) / (tile_size * resolution)))
-                tile_y_min = int(np.floor((origin_y - y_max_merc) / (tile_size * resolution)))
-                tile_y_max = int(np.ceil((origin_y - y_min_merc) / (tile_size * resolution)))
-                
-                # Limit tile range
-                max_tile = 2 ** zoom_level
-                tile_x_min = max(0, min(tile_x_min, max_tile - 1))
-                tile_x_max = max(0, min(tile_x_max, max_tile - 1))
-                tile_y_min = max(0, min(tile_y_min, max_tile - 1))
-                tile_y_max = max(0, min(tile_y_max, max_tile - 1))
-                
-                # Fetch and composite tiles
-                tiles = []
-                tile_coords = []
-                base_url = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-                print(f"[BASEMAP DEBUG] Fetching tiles: tile_x_range=({tile_x_min}, {tile_x_max}), tile_y_range=({tile_y_min}, {tile_y_max})")
-                
-                tiles_requested = 0
-                tiles_failed = 0
-                for ty in range(tile_y_min, tile_y_max + 1):
-                    for tx in range(tile_x_min, tile_x_max + 1):
-                        tiles_requested += 1
-                        try:
-                            url = base_url.format(z=zoom_level, y=ty, x=tx)
-                            req = Request(url, headers={'User-Agent': 'SAT_Planner'})
-                            with urlopen(req, timeout=5) as response:
-                                img_data = response.read()
-                                img = Image.open(BytesIO(img_data))
-                                tiles.append((tx, ty, img))
-                                tile_coords.append((tx, ty))
-                        except Exception as e:
-                            # Skip failed tiles
-                            tiles_failed += 1
-                            print(f"[BASEMAP DEBUG] Failed to fetch tile ({tx}, {ty}): {e}")
-                            continue
-                
-                print(f"[BASEMAP DEBUG] Tile fetch complete: {len(tiles)}/{tiles_requested} tiles fetched successfully ({tiles_failed} failed)")
-                
-                if not tiles:
-                    print("[BASEMAP DEBUG] No tiles fetched, returning early")
-                    return
-                
-                # Composite tiles into single image
-                # Calculate composite image bounds
-                tile_x_coords = [tx for tx, ty, _ in tiles]
-                tile_y_coords = [ty for tx, ty, _ in tiles]
-                min_tx, max_tx = min(tile_x_coords), max(tile_x_coords)
-                min_ty, max_ty = min(tile_y_coords), max(tile_y_coords)
-                
-                composite_width = (max_tx - min_tx + 1) * tile_size
-                composite_height = (max_ty - min_ty + 1) * tile_size
-                composite = Image.new('RGB', (composite_width, composite_height))
-                
-                for tx, ty, img in tiles:
-                    x_offset = (tx - min_tx) * tile_size
-                    y_offset = (ty - min_ty) * tile_size
-                    composite.paste(img, (x_offset, y_offset))
-                
-                # Convert to numpy array
-                composite_array = np.array(composite)
-                
-                # Calculate extent in WGS84 for the composite
-                # Tile bounds in Web Mercator
-                tile_x_min_merc = origin_x + min_tx * tile_size * resolution
-                tile_x_max_merc = origin_x + (max_tx + 1) * tile_size * resolution
-                tile_y_max_merc = origin_y - min_ty * tile_size * resolution
-                tile_y_min_merc = origin_y - (max_ty + 1) * tile_size * resolution
-                
-                # Transform back to WGS84
-                mercator_to_wgs84 = pyproj.Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
-                lon_min, lat_max = mercator_to_wgs84.transform(tile_x_min_merc, tile_y_max_merc)
-                lon_max, lat_min = mercator_to_wgs84.transform(tile_x_max_merc, tile_y_min_merc)
-                
-                # Remove old basemap if it exists
-                if hasattr(self, 'basemap_image_plot') and self.basemap_image_plot is not None:
-                    try:
-                        print("[BASEMAP DEBUG] Removing old basemap plot")
-                        self.basemap_image_plot.remove()
-                        self.basemap_image_plot = None
-                    except Exception as e:
-                        print(f"[BASEMAP DEBUG] Error removing old basemap: {e}")
-                        pass
-                
-                # Plot the basemap
-                print(f"[BASEMAP DEBUG] Plotting basemap with extent: lon=[{lon_min:.6f}, {lon_max:.6f}], lat=[{lat_min:.6f}, {lat_max:.6f}]")
-                print(f"[BASEMAP DEBUG] Composite array shape: {composite_array.shape}")
-                try:
-                    self.basemap_image_plot = self.ax.imshow(composite_array, 
-                                                             extent=[lon_min, lon_max, lat_min, lat_max],
-                                                             origin='upper', 
-                                                             zorder=-3,  # Behind everything
-                                                             interpolation='bilinear')
-                    print("[BASEMAP DEBUG] Basemap imshow() completed successfully")
-                except Exception as e:
-                    print(f"[BASEMAP DEBUG] Error in imshow(): {e}")
-                    traceback.print_exc()
-                    raise
-                
-                # Force a redraw to show the basemap
-                print("[BASEMAP DEBUG] Calling canvas.draw_idle()")
-                self.canvas.draw_idle()
-                print("[BASEMAP DEBUG] Basemap reload complete")
-                
-            except Exception as e:
-                print(f"Error loading basemap: {e}")
-                traceback.print_exc()
-                
-        except Exception as e:
-            print(f"Error in _load_and_plot_basemap: {e}")
-            traceback.print_exc()
-
-    def _load_and_plot_noaa_charts(self, force_reload=False):
-        """Load and display NOAA ENC Charts using ESRI REST MapServer export endpoint."""
-        try:
-            # Get current plot limits
-            xlim = self.ax.get_xlim()
-            ylim = self.ax.get_ylim()
-            
-            if not xlim or not ylim or xlim[0] >= xlim[1] or ylim[0] >= ylim[1]:
-                return
-            
-            # Check if we need to reload (unless force_reload is True)
-            extent_width = xlim[1] - xlim[0]
-            extent_height = ylim[1] - ylim[0]
-            current_extent = (xlim[0], xlim[1], ylim[0], ylim[1])
-            
-            if not force_reload:
-                if hasattr(self, '_last_noaa_charts_extent'):
-                    if self._last_noaa_charts_extent is not None:
-                        last_extent = self._last_noaa_charts_extent
-                        last_width = last_extent[1] - last_extent[0]
-                        last_height = last_extent[3] - last_extent[2]
-                        width_change = abs(extent_width - last_width) / max(extent_width, last_width) if max(extent_width, last_width) > 0 else 1.0
-                        height_change = abs(extent_height - last_height) / max(extent_height, last_height) if max(extent_height, last_height) > 0 else 1.0
-                        center_x = (xlim[0] + xlim[1]) / 2
-                        center_y = (ylim[0] + ylim[1]) / 2
-                        last_center_x = (last_extent[0] + last_extent[1]) / 2
-                        last_center_y = (last_extent[2] + last_extent[3]) / 2
-                        center_x_change = abs(center_x - last_center_x) / extent_width if extent_width > 0 else 0
-                        center_y_change = abs(center_y - last_center_y) / extent_height if extent_height > 0 else 0
-                        
-                        # Only reload if change is significant (15% width/height or 25% center movement)
-                        if width_change < 0.15 and height_change < 0.15 and center_x_change < 0.25 and center_y_change < 0.25:
-                            return  # No significant change, skip reload
-            
-            # Store current extent for next comparison
-            self._last_noaa_charts_extent = current_extent
-            
-            # Build ESRI REST export URL
-            # Request in EPSG:3857 (Web Mercator) for equal cell size in meters, then reproject to EPSG:4326 for display
-            if not GEOSPATIAL_LIBS_AVAILABLE:
-                return
-            
-            try:
-                # Create transformer from WGS84 to Web Mercator
-                wgs84_to_mercator = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
-                
-                # Add padding to ensure full coverage
-                width = xlim[1] - xlim[0]
-                height = ylim[1] - ylim[0]
-                
-                # Add padding to ensure full coverage
-                base_padding = 0.15  # 15% padding on all sides
-                padded_xlim = (xlim[0] - width * base_padding, xlim[1] + width * base_padding)
-                padded_ylim = (ylim[0] - height * base_padding, ylim[1] + height * base_padding)
-                
-                # Transform bounds to Web Mercator (EPSG:3857) for the request
-                x_min_merc, y_min_merc = wgs84_to_mercator.transform(padded_xlim[0], padded_ylim[0])
-                x_max_merc, y_max_merc = wgs84_to_mercator.transform(padded_xlim[1], padded_ylim[1])
-                
-                # Calculate bbox dimensions in meters (Web Mercator uses meters)
-                bbox_width_merc = x_max_merc - x_min_merc
-                bbox_height_merc = y_max_merc - y_min_merc
-                
-                # Determine image size to ensure equal cell size (meters per pixel) for x and y
-                # Cell size = bbox_width / image_width = bbox_height / image_height
-                # We'll use the larger dimension to determine the base resolution, then scale both accordingly
-                max_dimension_pixels = 2048  # Maximum dimension for performance
-                
-                # Calculate cell size based on the larger bbox dimension
-                # Use the larger dimension to ensure we get sufficient detail
-                if bbox_width_merc >= bbox_height_merc:
-                    # Width is larger - use it to determine cell size
-                    cell_size = bbox_width_merc / max_dimension_pixels
-                    image_width = max_dimension_pixels
-                    image_height = int(bbox_height_merc / cell_size)
-                else:
-                    # Height is larger - use it to determine cell size
-                    cell_size = bbox_height_merc / max_dimension_pixels
-                    image_height = max_dimension_pixels
-                    image_width = int(bbox_width_merc / cell_size)
-                
-                # Ensure we don't exceed max dimensions and maintain minimum size
-                if image_width > max_dimension_pixels:
-                    image_width = max_dimension_pixels
-                    cell_size = bbox_width_merc / image_width
-                    image_height = int(bbox_height_merc / cell_size)
-                if image_height > max_dimension_pixels:
-                    image_height = max_dimension_pixels
-                    cell_size = bbox_height_merc / image_height
-                    image_width = int(bbox_width_merc / cell_size)
-                
-                # Ensure minimum dimensions
-                image_width = max(image_width, 256)
-                image_height = max(image_height, 256)
-                
-                # Verify cell sizes are equal (within rounding tolerance)
-                cell_size_x = bbox_width_merc / image_width
-                cell_size_y = bbox_height_merc / image_height
-                
-                print(f"[NOAA CHARTS DEBUG] Bbox (EPSG:3857): width={bbox_width_merc:.2f}m, height={bbox_height_merc:.2f}m")
-                print(f"[NOAA CHARTS DEBUG] Image size: {image_width}x{image_height}, Cell size: x={cell_size_x:.2f}m/pixel, y={cell_size_y:.2f}m/pixel")
-                print(f"[NOAA CHARTS DEBUG] Padding: {base_padding:.2%} on all sides")
-                
-                # Build the export URL
-                # ESRI REST export format: /export?bbox=xmin,ymin,xmax,ymax&bboxSR=...&imageSR=...&size=...&format=...&transparent=...&f=image
-                # Note: ESRI REST API expects bbox in format: xmin,ymin,xmax,ymax
-                bbox_3857 = f"{x_min_merc},{y_min_merc},{x_max_merc},{y_max_merc}"
-                base_url = "https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/MapServer/export"
-                params = {
-                    'bbox': bbox_3857,
-                    'bboxSR': '3857',  # Web Mercator
-                    'imageSR': '3857',  # Web Mercator
-                    'size': f"{image_width},{image_height}",
-                    'format': 'png',
-                    'transparent': 'true',
-                    'f': 'image',
-                    'layers': 'show:0,1,2,3,4,5,6,7'  # Show visible layers (exclude hidden ones like data quality, low accuracy, etc.)
-                }
-                
-                # Build query string
-                query_string = '&'.join([f"{k}={v}" for k, v in params.items()])
-                url = f"{base_url}?{query_string}"
-                
-                print(f"[NOAA CHARTS DEBUG] Requesting charts from ESRI REST endpoint: {url}")
-                print(f"[NOAA CHARTS DEBUG] Bbox (EPSG:3857): {bbox_3857}, Size: {image_width}x{image_height}")
-                
-                # Fetch the image
-                req = Request(url, headers={'User-Agent': 'SAT_Planner'})
-                with urlopen(req, timeout=10) as response:
-                    img_data = response.read()
-                    print(f"[NOAA CHARTS DEBUG] Received {len(img_data)} bytes")
-                    
-                    # Check if response is actually an image (PNG starts with specific bytes)
-                    if len(img_data) < 8 or img_data[:8] != b'\x89PNG\r\n\x1a\n':
-                        print(f"[NOAA CHARTS DEBUG] Warning: Response doesn't appear to be a PNG image")
-                        print(f"[NOAA CHARTS DEBUG] First 100 bytes: {img_data[:100]}")
-                        # Try to decode as text to see error message
-                        try:
-                            error_text = img_data.decode('utf-8')
-                            print(f"[NOAA CHARTS DEBUG] Response text: {error_text[:500]}")
-                        except:
-                            pass
-                        return
-                    
-                    img = Image.open(BytesIO(img_data))
-                    print(f"[NOAA CHARTS DEBUG] Image format: {img.format}, Mode: {img.mode}, Size: {img.size}")
-                    
-                    # Convert to numpy array
-                    img_array_3857 = np.array(img)
-                    print(f"[NOAA CHARTS DEBUG] Array shape (EPSG:3857): {img_array_3857.shape}, dtype: {img_array_3857.dtype}")
-                    print(f"[NOAA CHARTS DEBUG] Array min: {img_array_3857.min()}, max: {img_array_3857.max()}")
-                    
-                    # Ensure the array is in the right format for reprojection
-                    # Handle different image formats
-                    has_alpha = False
-                    if len(img_array_3857.shape) == 2:
-                        # Grayscale - convert to RGB for reprojection
-                        img_array_3857 = np.stack([img_array_3857] * 3, axis=-1)
-                        print(f"[NOAA CHARTS DEBUG] Converted grayscale to RGB, new shape: {img_array_3857.shape}")
-                    elif len(img_array_3857.shape) == 3 and img_array_3857.shape[2] == 4:
-                        # RGBA - keep alpha channel
-                        has_alpha = True
-                        if img_array_3857.dtype != np.uint8:
-                            img_array_3857 = (img_array_3857 * 255).astype(np.uint8) if img_array_3857.max() <= 1.0 else img_array_3857.astype(np.uint8)
-                    elif len(img_array_3857.shape) == 3 and img_array_3857.shape[2] == 3:
-                        # RGB - ensure values are in 0-255 range
-                        if img_array_3857.dtype != np.uint8:
-                            img_array_3857 = (img_array_3857 * 255).astype(np.uint8) if img_array_3857.max() <= 1.0 else img_array_3857.astype(np.uint8)
-                    
-                    # Reproject image from EPSG:3857 to EPSG:4326
-                    # Calculate output dimensions to maintain similar resolution
-                    # Use the padded extent in EPSG:4326 for output
-                    output_width = image_width
-                    output_height = image_height
-                    
-                    # Source transform (EPSG:3857)
-                    src_transform = transform.from_bounds(
-                        x_min_merc, y_min_merc, x_max_merc, y_max_merc,
-                        image_width, image_height
-                    )
-                    
-                    # Destination transform (EPSG:4326) - use padded extent
-                    dst_transform = transform.from_bounds(
-                        padded_xlim[0], padded_ylim[0], padded_xlim[1], padded_ylim[1],
-                        output_width, output_height
-                    )
-                    
-                    # Reproject each band separately (RGB or RGBA)
-                    num_bands = img_array_3857.shape[2] if len(img_array_3857.shape) == 3 else 1
-                    reprojected_bands = []
-                    
-                    for band_idx in range(num_bands):
-                        if len(img_array_3857.shape) == 3:
-                            source_band = img_array_3857[:, :, band_idx]
-                        else:
-                            source_band = img_array_3857
-                        
-                        # Create destination array for this band
-                        destination_band = np.zeros((output_height, output_width), dtype=source_band.dtype)
-                        
-                        # Reproject this band
-                        reproject(
-                            source=source_band,
-                            destination=destination_band,
-                            src_transform=src_transform,
-                            src_crs='EPSG:3857',
-                            dst_transform=dst_transform,
-                            dst_crs='EPSG:4326',
-                            resampling=Resampling.bilinear
-                        )
-                        
-                        reprojected_bands.append(destination_band)
-                    
-                    # Stack bands back together
-                    if len(reprojected_bands) == 1:
-                        img_array = reprojected_bands[0]
-                    else:
-                        img_array = np.stack(reprojected_bands, axis=-1)
-                    
-                    print(f"[NOAA CHARTS DEBUG] Reprojected image shape (EPSG:4326): {img_array.shape}")
-                    
-                    # Convert back to uint8 if needed
-                    if img_array.dtype != np.uint8:
-                        img_array = img_array.astype(np.uint8)
-                    
-                    # Remove old chart overlay if it exists
-                    if hasattr(self, 'noaa_charts_image_plot') and self.noaa_charts_image_plot is not None:
-                        try:
-                            self.noaa_charts_image_plot.remove()
-                        except:
-                            pass
-                    
-                    # Preserve current aspect ratio and limits to prevent map area from changing
-                    current_aspect = self.ax.get_aspect()
-                    current_xlim_before = self.ax.get_xlim()
-                    current_ylim_before = self.ax.get_ylim()
-                    
-                    # Calculate opacity
-                    alpha = self.noaa_charts_opacity / 100.0 if hasattr(self, 'noaa_charts_opacity') else 0.5
-                    
-                    # Use the padded extent for the reprojected image (EPSG:4326)
-                    # The image was reprojected to cover the padded area, so we use padded extent for display
-                    print(f"[NOAA CHARTS DEBUG] Plotting reprojected image with extent: [{padded_xlim[0]:.6f}, {padded_xlim[1]:.6f}, {padded_ylim[0]:.6f}, {padded_ylim[1]:.6f}], alpha: {alpha}")
-                    print(f"[NOAA CHARTS DEBUG] Reprojected image size: {img_array.shape[1]}x{img_array.shape[0]}")
-                    
-                    # Plot the NOAA charts overlay
-                    # Use the padded extent since the image covers that area after reprojection
-                    self.noaa_charts_image_plot = self.ax.imshow(img_array,
-                                                                 extent=[padded_xlim[0], padded_xlim[1], padded_ylim[0], padded_ylim[1]],
-                                                                 origin='upper',
-                                                                 zorder=10,  # High zorder to overlay other layers
-                                                                 alpha=alpha,
-                                                                 interpolation='bilinear')
-                    
-                    # Restore aspect ratio and limits if they were changed by imshow
-                    # This ensures the map area in the GUI stays the same size
-                    current_xlim_after = self.ax.get_xlim()
-                    current_ylim_after = self.ax.get_ylim()
-                    current_aspect_after = self.ax.get_aspect()
-                    
-                    if (current_xlim_before != current_xlim_after or 
-                        current_ylim_before != current_ylim_after or
-                        current_aspect != current_aspect_after):
-                        print(f"[NOAA CHARTS DEBUG] Restoring aspect ratio and limits to prevent map area change")
-                        self.ax.set_xlim(current_xlim_before)
-                        self.ax.set_ylim(current_ylim_before)
-                        if current_aspect != 'auto':
-                            self.ax.set_aspect(current_aspect, adjustable='datalim')
-                    
-                    print(f"[NOAA CHARTS DEBUG] Successfully plotted NOAA charts overlay")
-                    
-                    # Force a redraw
-                    self.canvas.draw_idle()
-                
-            except Exception as e:
-                print(f"Error loading NOAA charts: {e}")
-                traceback.print_exc()
-                
-        except Exception as e:
-            print(f"Error in _load_and_plot_noaa_charts: {e}")
-            traceback.print_exc()
-
-    def _toggle_slope_visualization(self):
-        if not GEOSPATIAL_LIBS_AVAILABLE:
-            self._show_message("warning","Disabled Feature",
-                                   "Geospatial libraries not loaded. Cannot toggle slope visualization.")
-            return
-
-        if self.geotiff_data_array is None:
-            self._show_message("warning","No GeoTIFF", "Load a GeoTIFF first to toggle slope visualization.")
-            return
-
-        # When toggling slope visualization, if we were in the "elevation" overlay mode,
-        # we don't need to change anything specifically because we're not toggling *overlay* anymore.
-        # The relevant part is just switching the main hillshade vs. slope_viz mode.
-
-        if self.hillshade_vs_slope_viz_mode == "hillshade":
-            self.hillshade_vs_slope_viz_mode = "slope_viz"
-            # Disable combo box in this mode
-            if hasattr(self, 'elevation_slope_combo'):
-                self.elevation_slope_combo.setEnabled(False)
-        else:
-            self.hillshade_vs_slope_viz_mode = "hillshade"
-            # Re-enable combo box
-            self.geotiff_display_mode = "elevation"  # Reset to elevation when going back to hillshade view
-            if hasattr(self, 'elevation_slope_combo'):
-                self.elevation_slope_combo.setEnabled(True)
-                self._update_display_mode_combo()
-
-        self._plot_survey_plan()
 
     def _toggle_pick_center_mode(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -5033,32 +2852,6 @@ class SurveyPlanApp(QMainWindow):
         except:
             pass
         
-        # Reload basemap if enabled (to get higher resolution when zooming in/out)
-        # Do this after setting aspect ratio so limits are finalized
-        # The throttling in _load_and_plot_basemap() will prevent excessive reloads
-        if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
-            print(f"[BASEMAP DEBUG] Zoom event detected, basemap enabled. Setting up reload timer. New limits: xlim={new_xlim}, ylim={new_ylim}")
-            # Use QTimer to reload basemap after a short delay to avoid reloading on every scroll event
-            # This ensures the limits are stable before reloading
-            if not hasattr(self, '_basemap_reload_timer'):
-                self._basemap_reload_timer = QTimer()
-                self._basemap_reload_timer.setSingleShot(True)
-                self._basemap_reload_timer.timeout.connect(self._load_and_plot_basemap)
-            self._basemap_reload_timer.stop()  # Cancel any pending reload
-            self._basemap_reload_timer.start(150)  # Reload after 150ms delay
-            print("[BASEMAP DEBUG] Basemap reload timer started (150ms delay)")
-        else:
-            print("[BASEMAP DEBUG] Basemap not enabled, skipping reload")
-        
-        # Reload NOAA charts if enabled (similar to basemap)
-        if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
-            if not hasattr(self, '_noaa_charts_reload_timer'):
-                self._noaa_charts_reload_timer = QTimer()
-                self._noaa_charts_reload_timer.setSingleShot(True)
-                self._noaa_charts_reload_timer.timeout.connect(self._load_and_plot_noaa_charts)
-            self._noaa_charts_reload_timer.stop()
-            self._noaa_charts_reload_timer.start(150)  # Reload after 150ms delay
-        
         # Update zoom level for dynamic resolution loading (only if GeoTIFF is loaded and dynamic resolution enabled)
         if (old_zoom_level is not None and 
             self.geotiff_dataset_original is not None and 
@@ -5101,103 +2894,6 @@ class SurveyPlanApp(QMainWindow):
 
         # Use draw_idle() for non-blocking updates during zoom
         self.canvas.draw_idle()
-
-    def _on_axis_limits_changed(self, ax):
-        """Callback for axis limit changes (e.g., from toolbar zoom/pan)."""
-        print(f"[DYNAMIC RES DEBUG] _on_axis_limits_changed called, ax={ax}, self.ax={self.ax}")
-        # Only process if this is the main axes
-        if ax != self.ax:
-            print(f"[DYNAMIC RES DEBUG] Not main axes, returning")
-            return
-        
-        # Skip if during rapid zoom mode (scroll wheel zoom)
-        if hasattr(self, '_rapid_zoom_mode') and self._rapid_zoom_mode:
-            return
-        
-        # Skip if limits are being set programmatically (e.g., during GeoTIFF loading)
-        if hasattr(self, '_setting_limits_programmatically') and self._setting_limits_programmatically:
-            return
-        
-        # Debounce: only process once per change event (both xlim and ylim will trigger)
-        # Use a flag to track if we're already processing this change
-        if not hasattr(self, '_processing_limit_change'):
-            self._processing_limit_change = False
-        
-        if self._processing_limit_change:
-            return
-        
-        self._processing_limit_change = True
-        # Clear the flag after a short delay
-        if not hasattr(self, '_limit_change_flag_timer'):
-            self._limit_change_flag_timer = QTimer()
-            self._limit_change_flag_timer.setSingleShot(True)
-            self._limit_change_flag_timer.timeout.connect(lambda: setattr(self, '_processing_limit_change', False))
-        self._limit_change_flag_timer.stop()
-        self._limit_change_flag_timer.start(100)
-        
-        print(f"[DYNAMIC RES DEBUG] Axis limits changed callback triggered")
-        
-        # Get current limits
-        current_xlim = self.ax.get_xlim()
-        current_ylim = self.ax.get_ylim()
-        
-        # Update Dynamic Resolution if GeoTIFF is loaded and dynamic resolution is enabled
-        if (self.geotiff_dataset_original is not None and 
-            self.dynamic_resolution_enabled and
-            hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None):
-            
-            # Calculate zoom level based on the updated view
-            full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
-            full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
-            new_width = current_xlim[1] - current_xlim[0]
-            new_height = current_ylim[1] - current_ylim[0]
-            
-            # New zoom level is the ratio of current view to full extent
-            width_ratio = new_width / full_width if full_width > 0 else 1.0
-            height_ratio = new_height / full_height if full_height > 0 else 1.0
-            new_zoom_level = min(width_ratio, height_ratio)
-            new_zoom_level = max(0.01, min(10.0, new_zoom_level))
-            
-            # Update zoom level and reload GeoTIFF
-            old_zoom_level = getattr(self, 'geotiff_zoom_level', 1.0)
-            zoom_change = abs(new_zoom_level - old_zoom_level)
-            
-            print(f"[DYNAMIC RES DEBUG] Axis limits changed - old_zoom: {old_zoom_level:.4f}, new_zoom: {new_zoom_level:.4f}, change: {zoom_change:.4f}")
-            
-            # Only reload if zoom change is significant (to avoid excessive reloads)
-            if zoom_change > 0.05:  # 5% change threshold
-                print(f"[DYNAMIC RES DEBUG] Significant zoom change detected, updating resolution")
-                self.geotiff_zoom_level = new_zoom_level
-                self._last_user_xlim = current_xlim
-                self._last_user_ylim = current_ylim
-                
-                # Use a timer to debounce rapid limit changes
-                if not hasattr(self, '_limit_change_timer'):
-                    self._limit_change_timer = QTimer()
-                    self._limit_change_timer.setSingleShot(True)
-                    self._limit_change_timer.timeout.connect(self._reload_geotiff_at_current_zoom)
-                self._limit_change_timer.stop()
-                self._limit_change_timer.start(500)  # Wait 500ms for limit changes to stabilize
-            else:
-                print(f"[DYNAMIC RES DEBUG] Zoom change too small ({zoom_change:.4f}), skipping reload")
-        
-        # Reload basemap if enabled
-        if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
-            if not hasattr(self, '_basemap_reload_timer'):
-                self._basemap_reload_timer = QTimer()
-                self._basemap_reload_timer.setSingleShot(True)
-                self._basemap_reload_timer.timeout.connect(self._load_and_plot_basemap)
-            self._basemap_reload_timer.stop()
-            self._basemap_reload_timer.start(150)
-        
-        # Reload NOAA charts if enabled
-        if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
-            if not hasattr(self, '_noaa_charts_reload_timer'):
-                self._noaa_charts_reload_timer = QTimer()
-                self._noaa_charts_reload_timer.setSingleShot(True)
-                self._noaa_charts_reload_timer.timeout.connect(self._load_and_plot_noaa_charts)
-            self._noaa_charts_reload_timer.stop()
-            self._noaa_charts_reload_timer.start(150)
 
     def _zoom_to_plan(self):
         all_lats = []
@@ -5283,99 +2979,6 @@ class SurveyPlanApp(QMainWindow):
             self.ax.autoscale_view()
             self.canvas.draw_idle()
 
-    def _remove_geotiff(self):
-        """Remove the loaded GeoTIFF and clear it from the plot."""
-        if not GEOSPATIAL_LIBS_AVAILABLE:
-            self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded.")
-            return
-
-        if self.geotiff_dataset_original is None:
-            self._show_message("warning","No GeoTIFF", "No GeoTIFF is currently loaded.")
-            return
-
-        # Clear the GeoTIFF using the existing clear plot method with full_clear=True
-        self._clear_plot(full_clear=True)
-        
-        # Re-plot without GeoTIFF
-        self._plot_survey_plan(preserve_view_limits=False)
-        
-        # Show message in activity log
-        if hasattr(self, 'set_cal_info_text'):
-            self.set_cal_info_text("GeoTIFF removed.")
-        elif hasattr(self, 'set_ref_info_text'):
-            self.set_ref_info_text("GeoTIFF removed.")
-
-    def _zoom_to_geotiff(self):
-        """Zooms the plot to the initial GeoTIFF bounds (same as when first loaded)."""
-        if not GEOSPATIAL_LIBS_AVAILABLE:
-            self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot zoom to GeoTIFF.")
-            return
-
-        if self.geotiff_extent is None:
-            self._show_message("warning","No GeoTIFF", "No GeoTIFF underlay is loaded to zoom to.")
-            return
-
-        # Use stored initial limits if available, otherwise calculate them
-        if hasattr(self, 'initial_geotiff_xlim') and self.initial_geotiff_xlim is not None and \
-           hasattr(self, 'initial_geotiff_ylim') and self.initial_geotiff_ylim is not None:
-            # Restore to the exact initial limits when GeoTIFF was first loaded
-            self.current_xlim = self.initial_geotiff_xlim
-            self.current_ylim = self.initial_geotiff_ylim
-        else:
-            # Fallback: calculate consistent plot limits (same method used when GeoTIFF is first loaded)
-            self.current_xlim, self.current_ylim = self._calculate_consistent_plot_limits()
-            # Store them for future use
-            self.initial_geotiff_xlim = self.current_xlim
-            self.initial_geotiff_ylim = self.current_ylim
-        
-        # Store these as the user's intended view limits BEFORE setting axes
-        self._last_user_xlim = self.current_xlim
-        self._last_user_ylim = self.current_ylim
-        
-        # Set axis limits FIRST so _load_geotiff_at_resolution can see them
-        self.ax.set_xlim(self.current_xlim)
-        self.ax.set_ylim(self.current_ylim)
-        
-        # Calculate zoom level based on the view extent vs original full GeoTIFF extent
-        if self.dynamic_resolution_enabled:
-            # Use original extent for comparison, not current extent (which may be a subset)
-            if hasattr(self, 'geotiff_original_extent') and self.geotiff_original_extent is not None:
-                full_extent = self.geotiff_original_extent
-            elif hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None:
-                full_extent = self.geotiff_extent
-            else:
-                full_extent = None
-            
-            if full_extent is not None:
-                full_width = full_extent[1] - full_extent[0]
-                full_height = full_extent[3] - full_extent[2]
-                current_width = self.current_xlim[1] - self.current_xlim[0]
-                current_height = self.current_ylim[1] - self.current_ylim[0]
-                
-                width_ratio = current_width / full_width if full_width > 0 else 1.0
-                height_ratio = current_height / full_height if full_height > 0 else 1.0
-                # Use the larger ratio (more zoomed in) to determine resolution
-                new_zoom_level = max(width_ratio, height_ratio)
-                new_zoom_level = max(0.01, min(10.0, new_zoom_level))
-                self.geotiff_zoom_level = new_zoom_level
-            else:
-                # If no extent available, use full resolution
-                self.geotiff_zoom_level = 1.0
-        else:
-            # If dynamic resolution is disabled, use full resolution
-            self.geotiff_zoom_level = 1.0
-        
-        # Reload GeoTIFF data at appropriate resolution for the view
-        # This now uses the axis limits we just set
-        if self.geotiff_dataset_original is not None:
-            success = self._load_geotiff_at_resolution()
-            if not success:
-                self._show_message("warning","GeoTIFF Reload", "Could not reload GeoTIFF data for the new view.")
-        
-        # Replot everything with preserve_view_limits=True to keep our limits
-        # This will properly display the GeoTIFF and preserve all existing lines
-        self._plot_survey_plan(preserve_view_limits=True)
-
     def _reset_to_consistent_view(self):
         """Reset the plot view to the consistent limits that maintain window size."""
         if self.geotiff_extent is None:
@@ -5444,18 +3047,18 @@ class SurveyPlanApp(QMainWindow):
                         start, end = line[1], line[0]
                     start_label = f'L{i+1}S'
                     end_label = f'L{i+1}E'
-                    start_lat_ddm = self._decimal_degrees_to_ddm(start[0], is_latitude=True)
-                    start_lon_ddm = self._decimal_degrees_to_ddm(start[1], is_latitude=False)
-                    end_lat_ddm = self._decimal_degrees_to_ddm(end[0], is_latitude=True)
-                    end_lon_ddm = self._decimal_degrees_to_ddm(end[1], is_latitude=False)
+                    start_lat_ddm = decimal_degrees_to_ddm(start[0], is_latitude=True)
+                    start_lon_ddm = decimal_degrees_to_ddm(start[1], is_latitude=False)
+                    end_lat_ddm = decimal_degrees_to_ddm(end[0], is_latitude=True)
+                    end_lon_ddm = decimal_degrees_to_ddm(end[1], is_latitude=False)
                     ddm_writer.writerow([i + 1, start_label, start_lat_ddm, start_lon_ddm])
                     ddm_writer.writerow([i + 1, end_label, end_lat_ddm, end_lon_ddm])
                 # Crossline
                 if self.cross_line_data:
-                    cls_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
-                    cls_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
-                    cle_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
-                    cle_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
+                    cls_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
+                    cls_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
+                    cle_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
+                    cle_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
                     ddm_writer.writerow([0, 'CLS', cls_lat_ddm, cls_lon_ddm])
                     ddm_writer.writerow([0, 'CLE', cle_lat_ddm, cle_lon_ddm])
             
@@ -5470,18 +3073,18 @@ class SurveyPlanApp(QMainWindow):
                         start, end = line[1], line[0]
                     start_label = f'L{i+1}S'
                     end_label = f'L{i+1}E'
-                    start_lat_ddm = self._decimal_degrees_to_ddm(start[0], is_latitude=True)
-                    start_lon_ddm = self._decimal_degrees_to_ddm(start[1], is_latitude=False)
-                    end_lat_ddm = self._decimal_degrees_to_ddm(end[0], is_latitude=True)
-                    end_lon_ddm = self._decimal_degrees_to_ddm(end[1], is_latitude=False)
+                    start_lat_ddm = decimal_degrees_to_ddm(start[0], is_latitude=True)
+                    start_lon_ddm = decimal_degrees_to_ddm(start[1], is_latitude=False)
+                    end_lat_ddm = decimal_degrees_to_ddm(end[0], is_latitude=True)
+                    end_lon_ddm = decimal_degrees_to_ddm(end[1], is_latitude=False)
                     ddm_txt_file.write(f"{start_label}, {start_lat_ddm}, {start_lon_ddm}\n")
                     ddm_txt_file.write(f"{end_label}, {end_lat_ddm}, {end_lon_ddm}\n")
                 # Crossline
                 if self.cross_line_data:
-                    cls_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
-                    cls_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
-                    cle_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
-                    cle_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
+                    cls_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
+                    cls_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
+                    cle_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
+                    cle_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
                     ddm_txt_file.write(f"CLS, {cls_lat_ddm}, {cls_lon_ddm}\n")
                     ddm_txt_file.write(f"CLE, {cle_lat_ddm}, {cle_lon_ddm}\n")
 
@@ -5737,12 +3340,6 @@ class SurveyPlanApp(QMainWindow):
         self.canvas.draw_idle()
 
     def _on_middle_release(self, event):
-        # Reload basemap if enabled (after panning)
-        if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
-            self._load_and_plot_basemap()
-        # Reload NOAA charts if enabled (after panning)
-        if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
-            self._load_and_plot_noaa_charts()
         # Only handle middle button (button 2)
         if event.button != 2:
             return
@@ -5755,13 +3352,6 @@ class SurveyPlanApp(QMainWindow):
             current_xlim = self.ax.get_xlim()
             current_ylim = self.ax.get_ylim()
             self._current_view_limits = (current_xlim, current_ylim)
-            
-            # Reload basemap if enabled (after panning to update tiles for new location)
-            if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
-                self._load_and_plot_basemap()
-            # Reload NOAA charts if enabled (after panning to update charts for new location)
-            if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
-                self._load_and_plot_noaa_charts()
             
             # Clear panning mode and timeout
             if hasattr(self, '_panning_mode'):
@@ -5909,7 +3499,7 @@ class SurveyPlanApp(QMainWindow):
             
             # Filter Z-values
             data[data < -11000] = np.nan
-            data[data >= 0] = np.nan
+            data[data > 0] = np.nan
             
             # Sample elevations and slopes along the line
             left, right, bottom, top = extent
@@ -6024,10 +3614,10 @@ class SurveyPlanApp(QMainWindow):
         self._profile_dists = dists
         self._profile_elevations = elevations
         self._profile_slopes = slopes
-        self.profile_ax.plot(dists, elevations, color='darkorchid', lw=1, label='Elevation')
+        self.profile_ax.plot(dists, elevations, color='purple', lw=1, label='Elevation')
         if self.show_slope_profile_var:
             slope_ax = self.profile_ax.twinx()
-            slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
+            slope_ax.plot(dists, slopes, color='blue', lw=1, linestyle='--', label='Slope (deg)')
             slope_ax.set_ylabel('Slope (deg)', fontsize=8)
             slope_ax.tick_params(axis='y', labelsize=7)
             slope_ax.grid(False)
@@ -6154,10 +3744,10 @@ class SurveyPlanApp(QMainWindow):
                 dists = np.array(dists)
             except Exception:
                 dists = np.linspace(0, 1, 100)
-            self.profile_ax.plot(dists, elevations, color='red', lw=1, label='Elevation')
+            self.profile_ax.plot(dists, elevations, color='orange', lw=1, label='Elevation')
             if self.show_slope_profile_var:
                 slope_ax = self.profile_ax.twinx()
-                slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
+                slope_ax.plot(dists, slopes, color='blue', lw=1, linestyle='--', label='Slope (deg)')
                 slope_ax.set_ylabel('Slope (deg)', fontsize=8)
                 slope_ax.tick_params(axis='y', labelsize=7)
                 slope_ax.grid(False)
@@ -6269,18 +3859,18 @@ class SurveyPlanApp(QMainWindow):
                         start, end = line[1], line[0]
                     start_label = f'L{i+1}S'
                     end_label = f'L{i+1}E'
-                    start_lat_ddm = self._decimal_degrees_to_ddm(start[0], is_latitude=True)
-                    start_lon_ddm = self._decimal_degrees_to_ddm(start[1], is_latitude=False)
-                    end_lat_ddm = self._decimal_degrees_to_ddm(end[0], is_latitude=True)
-                    end_lon_ddm = self._decimal_degrees_to_ddm(end[1], is_latitude=False)
+                    start_lat_ddm = decimal_degrees_to_ddm(start[0], is_latitude=True)
+                    start_lon_ddm = decimal_degrees_to_ddm(start[1], is_latitude=False)
+                    end_lat_ddm = decimal_degrees_to_ddm(end[0], is_latitude=True)
+                    end_lon_ddm = decimal_degrees_to_ddm(end[1], is_latitude=False)
                     ddm_writer.writerow([i + 1, start_label, start_lat_ddm, start_lon_ddm])
                     ddm_writer.writerow([i + 1, end_label, end_lat_ddm, end_lon_ddm])
                 # Crossline
                 if self.cross_line_data:
-                    cls_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
-                    cls_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
-                    cle_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
-                    cle_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
+                    cls_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
+                    cls_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
+                    cle_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
+                    cle_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
                     ddm_writer.writerow([0, 'CLS', cls_lat_ddm, cls_lon_ddm])
                     ddm_writer.writerow([0, 'CLE', cle_lat_ddm, cle_lon_ddm])
             
@@ -6295,18 +3885,18 @@ class SurveyPlanApp(QMainWindow):
                         start, end = line[1], line[0]
                     start_label = f'L{i+1}S'
                     end_label = f'L{i+1}E'
-                    start_lat_ddm = self._decimal_degrees_to_ddm(start[0], is_latitude=True)
-                    start_lon_ddm = self._decimal_degrees_to_ddm(start[1], is_latitude=False)
-                    end_lat_ddm = self._decimal_degrees_to_ddm(end[0], is_latitude=True)
-                    end_lon_ddm = self._decimal_degrees_to_ddm(end[1], is_latitude=False)
+                    start_lat_ddm = decimal_degrees_to_ddm(start[0], is_latitude=True)
+                    start_lon_ddm = decimal_degrees_to_ddm(start[1], is_latitude=False)
+                    end_lat_ddm = decimal_degrees_to_ddm(end[0], is_latitude=True)
+                    end_lon_ddm = decimal_degrees_to_ddm(end[1], is_latitude=False)
                     ddm_txt_file.write(f"{start_label}, {start_lat_ddm}, {start_lon_ddm}\n")
                     ddm_txt_file.write(f"{end_label}, {end_lat_ddm}, {end_lon_ddm}\n")
                 # Crossline
                 if self.cross_line_data:
-                    cls_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
-                    cls_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
-                    cle_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
-                    cle_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
+                    cls_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
+                    cls_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
+                    cle_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
+                    cle_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
                     ddm_txt_file.write(f"CLS, {cls_lat_ddm}, {cls_lon_ddm}\n")
                     ddm_txt_file.write(f"CLE, {cle_lat_ddm}, {cle_lon_ddm}\n")
 
@@ -6598,17 +4188,17 @@ class SurveyPlanApp(QMainWindow):
                             start, end = line[1], line[0]
                         start_label = f'L{i+1}S'
                         end_label = f'L{i+1}E'
-                        start_lat_ddm = self._decimal_degrees_to_ddm(start[0], is_latitude=True)
-                        start_lon_ddm = self._decimal_degrees_to_ddm(start[1], is_latitude=False)
-                        end_lat_ddm = self._decimal_degrees_to_ddm(end[0], is_latitude=True)
-                        end_lon_ddm = self._decimal_degrees_to_ddm(end[1], is_latitude=False)
+                        start_lat_ddm = decimal_degrees_to_ddm(start[0], is_latitude=True)
+                        start_lon_ddm = decimal_degrees_to_ddm(start[1], is_latitude=False)
+                        end_lat_ddm = decimal_degrees_to_ddm(end[0], is_latitude=True)
+                        end_lon_ddm = decimal_degrees_to_ddm(end[1], is_latitude=False)
                         f.write(f"{start_label}: {start_lat_ddm}, {start_lon_ddm} ({start[0]:.6f}, {start[1]:.6f})\n")
                         f.write(f"{end_label}: {end_lat_ddm}, {end_lon_ddm} ({end[0]:.6f}, {end[1]:.6f})\n")
                 if self.cross_line_data:
-                    cls_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
-                    cls_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
-                    cle_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
-                    cle_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
+                    cls_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
+                    cls_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
+                    cle_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
+                    cle_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
                     f.write(f"CLS: {cls_lat_ddm}, {cls_lon_ddm} ({self.cross_line_data[0][0]:.6f}, {self.cross_line_data[0][1]:.6f})\n")
                     f.write(f"CLE: {cle_lat_ddm}, {cle_lon_ddm} ({self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f})\n")
                 f.write("\n")
@@ -7408,10 +4998,10 @@ class SurveyPlanApp(QMainWindow):
                     else:
                         start_label, end_label = 'START', 'END'
                     # Convert to DDM format
-                    start_lat_ddm = self._decimal_degrees_to_ddm(pts[0][0], is_latitude=True)
-                    start_lon_ddm = self._decimal_degrees_to_ddm(pts[0][1], is_latitude=False)
-                    end_lat_ddm = self._decimal_degrees_to_ddm(pts[1][0], is_latitude=True)
-                    end_lon_ddm = self._decimal_degrees_to_ddm(pts[1][1], is_latitude=False)
+                    start_lat_ddm = decimal_degrees_to_ddm(pts[0][0], is_latitude=True)
+                    start_lon_ddm = decimal_degrees_to_ddm(pts[0][1], is_latitude=False)
+                    end_lat_ddm = decimal_degrees_to_ddm(pts[1][0], is_latitude=True)
+                    end_lon_ddm = decimal_degrees_to_ddm(pts[1][1], is_latitude=False)
                     ddm_writer.writerow([num, start_label, start_lat_ddm, start_lon_ddm])
                     ddm_writer.writerow([num, end_label, end_lat_ddm, end_lon_ddm])
             
@@ -7433,10 +5023,10 @@ class SurveyPlanApp(QMainWindow):
                     else:
                         start_label, end_label = 'START', 'END'
                     # Convert to DDM format
-                    start_lat_ddm = self._decimal_degrees_to_ddm(pts[0][0], is_latitude=True)
-                    start_lon_ddm = self._decimal_degrees_to_ddm(pts[0][1], is_latitude=False)
-                    end_lat_ddm = self._decimal_degrees_to_ddm(pts[1][0], is_latitude=True)
-                    end_lon_ddm = self._decimal_degrees_to_ddm(pts[1][1], is_latitude=False)
+                    start_lat_ddm = decimal_degrees_to_ddm(pts[0][0], is_latitude=True)
+                    start_lon_ddm = decimal_degrees_to_ddm(pts[0][1], is_latitude=False)
+                    end_lat_ddm = decimal_degrees_to_ddm(pts[1][0], is_latitude=True)
+                    end_lon_ddm = decimal_degrees_to_ddm(pts[1][1], is_latitude=False)
                     ddm_txt_file.write(f"{start_label}, {start_lat_ddm}, {start_lon_ddm}\n")
                     ddm_txt_file.write(f"{end_label}, {end_lat_ddm}, {end_lon_ddm}\n")
             
@@ -7741,37 +5331,37 @@ class SurveyPlanApp(QMainWindow):
                     if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
                         pitch_start = self.pitch_line_points[0]
                         pitch_end = self.pitch_line_points[1]
-                        pitch_start_lat_ddm = self._decimal_degrees_to_ddm(pitch_start[0], is_latitude=True)
-                        pitch_start_lon_ddm = self._decimal_degrees_to_ddm(pitch_start[1], is_latitude=False)
-                        pitch_end_lat_ddm = self._decimal_degrees_to_ddm(pitch_end[0], is_latitude=True)
-                        pitch_end_lon_ddm = self._decimal_degrees_to_ddm(pitch_end[1], is_latitude=False)
+                        pitch_start_lat_ddm = decimal_degrees_to_ddm(pitch_start[0], is_latitude=True)
+                        pitch_start_lon_ddm = decimal_degrees_to_ddm(pitch_start[1], is_latitude=False)
+                        pitch_end_lat_ddm = decimal_degrees_to_ddm(pitch_end[0], is_latitude=True)
+                        pitch_end_lon_ddm = decimal_degrees_to_ddm(pitch_end[1], is_latitude=False)
                         f.write(f"Pitch Start: {pitch_start_lat_ddm}, {pitch_start_lon_ddm} ({pitch_start[0]:.6f}, {pitch_start[1]:.6f})\n")
                         f.write(f"Pitch End: {pitch_end_lat_ddm}, {pitch_end_lon_ddm} ({pitch_end[0]:.6f}, {pitch_end[1]:.6f})\n")
                     if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
                         roll_start = self.roll_line_points[0]
                         roll_end = self.roll_line_points[1]
-                        roll_start_lat_ddm = self._decimal_degrees_to_ddm(roll_start[0], is_latitude=True)
-                        roll_start_lon_ddm = self._decimal_degrees_to_ddm(roll_start[1], is_latitude=False)
-                        roll_end_lat_ddm = self._decimal_degrees_to_ddm(roll_end[0], is_latitude=True)
-                        roll_end_lon_ddm = self._decimal_degrees_to_ddm(roll_end[1], is_latitude=False)
+                        roll_start_lat_ddm = decimal_degrees_to_ddm(roll_start[0], is_latitude=True)
+                        roll_start_lon_ddm = decimal_degrees_to_ddm(roll_start[1], is_latitude=False)
+                        roll_end_lat_ddm = decimal_degrees_to_ddm(roll_end[0], is_latitude=True)
+                        roll_end_lon_ddm = decimal_degrees_to_ddm(roll_end[1], is_latitude=False)
                         f.write(f"Roll Start: {roll_start_lat_ddm}, {roll_start_lon_ddm} ({roll_start[0]:.6f}, {roll_start[1]:.6f})\n")
                         f.write(f"Roll End: {roll_end_lat_ddm}, {roll_end_lon_ddm} ({roll_end[0]:.6f}, {roll_end[1]:.6f})\n")
                     if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 1 and len(self.heading_lines[0]) == 2:
                         heading1_start = self.heading_lines[0][0]
                         heading1_end = self.heading_lines[0][1]
-                        heading1_start_lat_ddm = self._decimal_degrees_to_ddm(heading1_start[0], is_latitude=True)
-                        heading1_start_lon_ddm = self._decimal_degrees_to_ddm(heading1_start[1], is_latitude=False)
-                        heading1_end_lat_ddm = self._decimal_degrees_to_ddm(heading1_end[0], is_latitude=True)
-                        heading1_end_lon_ddm = self._decimal_degrees_to_ddm(heading1_end[1], is_latitude=False)
+                        heading1_start_lat_ddm = decimal_degrees_to_ddm(heading1_start[0], is_latitude=True)
+                        heading1_start_lon_ddm = decimal_degrees_to_ddm(heading1_start[1], is_latitude=False)
+                        heading1_end_lat_ddm = decimal_degrees_to_ddm(heading1_end[0], is_latitude=True)
+                        heading1_end_lon_ddm = decimal_degrees_to_ddm(heading1_end[1], is_latitude=False)
                         f.write(f"Heading 1 Start: {heading1_start_lat_ddm}, {heading1_start_lon_ddm} ({heading1_start[0]:.6f}, {heading1_start[1]:.6f})\n")
                         f.write(f"Heading 1 End: {heading1_end_lat_ddm}, {heading1_end_lon_ddm} ({heading1_end[0]:.6f}, {heading1_end[1]:.6f})\n")
                     if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 2 and len(self.heading_lines[1]) == 2:
                         heading2_start = self.heading_lines[1][0]
                         heading2_end = self.heading_lines[1][1]
-                        heading2_start_lat_ddm = self._decimal_degrees_to_ddm(heading2_start[0], is_latitude=True)
-                        heading2_start_lon_ddm = self._decimal_degrees_to_ddm(heading2_start[1], is_latitude=False)
-                        heading2_end_lat_ddm = self._decimal_degrees_to_ddm(heading2_end[0], is_latitude=True)
-                        heading2_end_lon_ddm = self._decimal_degrees_to_ddm(heading2_end[1], is_latitude=False)
+                        heading2_start_lat_ddm = decimal_degrees_to_ddm(heading2_start[0], is_latitude=True)
+                        heading2_start_lon_ddm = decimal_degrees_to_ddm(heading2_start[1], is_latitude=False)
+                        heading2_end_lat_ddm = decimal_degrees_to_ddm(heading2_end[0], is_latitude=True)
+                        heading2_end_lon_ddm = decimal_degrees_to_ddm(heading2_end[1], is_latitude=False)
                         f.write(f"Heading 2 Start: {heading2_start_lat_ddm}, {heading2_start_lon_ddm} ({heading2_start[0]:.6f}, {heading2_start[1]:.6f})\n")
                         f.write(f"Heading 2 End: {heading2_end_lat_ddm}, {heading2_end_lon_ddm} ({heading2_end[0]:.6f}, {heading2_end[1]:.6f})\n")
                 
@@ -8084,54 +5674,6 @@ class SurveyPlanApp(QMainWindow):
             traceback.print_exc()
 
     def _on_draw_event_update_colormap(self, event=None):
-        # Check for Dynamic Resolution updates (toolbar zoom/pan support)
-        # Track previous limits to detect changes
-        current_xlim = self.ax.get_xlim()
-        current_ylim = self.ax.get_ylim()
-        
-        # Check if limits have changed significantly (for Dynamic Resolution)
-        if (hasattr(self, '_last_draw_xlim') and hasattr(self, '_last_draw_ylim')):
-            xlim_changed = abs(current_xlim[0] - self._last_draw_xlim[0]) > 1e-6 or abs(current_xlim[1] - self._last_draw_xlim[1]) > 1e-6
-            ylim_changed = abs(current_ylim[0] - self._last_draw_ylim[0]) > 1e-6 or abs(current_ylim[1] - self._last_draw_ylim[1]) > 1e-6
-            
-            if xlim_changed or ylim_changed:
-                # Limits changed - check Dynamic Resolution
-                if (self.geotiff_dataset_original is not None and 
-                    self.dynamic_resolution_enabled and
-                    hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None and
-                    not (hasattr(self, '_rapid_zoom_mode') and self._rapid_zoom_mode)):
-                    
-                    # Calculate zoom level
-                    full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
-                    full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
-                    new_width = current_xlim[1] - current_xlim[0]
-                    new_height = current_ylim[1] - current_ylim[0]
-                    
-                    width_ratio = new_width / full_width if full_width > 0 else 1.0
-                    height_ratio = new_height / full_height if full_height > 0 else 1.0
-                    new_zoom_level = min(width_ratio, height_ratio)
-                    new_zoom_level = max(0.01, min(10.0, new_zoom_level))
-                    
-                    old_zoom_level = getattr(self, 'geotiff_zoom_level', 1.0)
-                    zoom_change = abs(new_zoom_level - old_zoom_level)
-                    
-                    if zoom_change > 0.05:  # 5% change threshold
-                        self.geotiff_zoom_level = new_zoom_level
-                        self._last_user_xlim = current_xlim
-                        self._last_user_ylim = current_ylim
-                        
-                        # Use a timer to debounce rapid limit changes
-                        if not hasattr(self, '_limit_change_timer'):
-                            self._limit_change_timer = QTimer()
-                            self._limit_change_timer.setSingleShot(True)
-                            self._limit_change_timer.timeout.connect(self._reload_geotiff_at_current_zoom)
-                        self._limit_change_timer.stop()
-                        self._limit_change_timer.start(500)
-        
-        # Store current limits for next comparison
-        self._last_draw_xlim = current_xlim
-        self._last_draw_ylim = current_ylim
-        
         # Only update if elevation overlay is active and geotiff is loaded
         if not hasattr(self, 'geotiff_data_array') or self.geotiff_data_array is None:
             return
@@ -8142,8 +5684,8 @@ class SurveyPlanApp(QMainWindow):
         if not hasattr(self, 'geotiff_image_plot') or self.geotiff_image_plot is None:
             return
         display_data = self.geotiff_data_array
-        xlim = current_xlim
-        ylim = current_ylim
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
         left, right, bottom, top = tuple(self.geotiff_extent)
         nrows, ncols = display_data.shape
         col_min = int(np.clip((min(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
@@ -10110,9 +7652,6 @@ class SurveyPlanApp(QMainWindow):
         self.canvas = FigureCanvas(self.figure)
         plot_layout.addWidget(self.canvas)
         self.canvas_widget = self.canvas  # For compatibility
-        # Add navigation toolbar at the bottom
-        self.toolbar = NavigationToolbar(self.canvas, self.plot_frame)
-        plot_layout.addWidget(self.toolbar)
         
         print(f"Widgets created - param_scroll: {self.param_scroll is not None}, plot_frame: {self.plot_frame is not None}, canvas: {self.canvas is not None}")
 
@@ -10222,10 +7761,10 @@ class SurveyPlanApp(QMainWindow):
                 # Find the closest point in the interpolated profile
                 _, idx = min((abs(lat - lats[j]) + abs(lon - lons[j]), j) for j in range(len(lats)))
                 waypoint_elevations.append(elevations[idx])
-            self.profile_ax.plot(waypoint_distances, waypoint_elevations, 'o', color='orange', markersize=6, label='Waypoints')
+            self.profile_ax.plot(waypoint_distances, waypoint_elevations, 'o', color='red', markersize=6, label='Waypoints')
             if np.any(~np.isnan(slopes)):
                 slope_ax = self.profile_ax.twinx()
-                slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
+                slope_ax.plot(dists, slopes, color='blue', lw=1, linestyle='--', label='Slope (deg)')
                 slope_ax.set_ylabel('Slope (deg)', fontsize=8)
                 slope_ax.tick_params(axis='y', labelsize=7)
                 slope_ax.grid(False)
@@ -10852,37 +8391,37 @@ class SurveyPlanApp(QMainWindow):
         if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
             pitch_start = self.pitch_line_points[0]
             pitch_end = self.pitch_line_points[1]
-            pitch_start_lat_ddm = self._decimal_degrees_to_ddm(pitch_start[0], is_latitude=True)
-            pitch_start_lon_ddm = self._decimal_degrees_to_ddm(pitch_start[1], is_latitude=False)
-            pitch_end_lat_ddm = self._decimal_degrees_to_ddm(pitch_end[0], is_latitude=True)
-            pitch_end_lon_ddm = self._decimal_degrees_to_ddm(pitch_end[1], is_latitude=False)
+            pitch_start_lat_ddm = decimal_degrees_to_ddm(pitch_start[0], is_latitude=True)
+            pitch_start_lon_ddm = decimal_degrees_to_ddm(pitch_start[1], is_latitude=False)
+            pitch_end_lat_ddm = decimal_degrees_to_ddm(pitch_end[0], is_latitude=True)
+            pitch_end_lon_ddm = decimal_degrees_to_ddm(pitch_end[1], is_latitude=False)
             stats_text += f"Pitch Start: {pitch_start_lat_ddm}, {pitch_start_lon_ddm} ({pitch_start[0]:.6f}, {pitch_start[1]:.6f})\n"
             stats_text += f"Pitch End: {pitch_end_lat_ddm}, {pitch_end_lon_ddm} ({pitch_end[0]:.6f}, {pitch_end[1]:.6f})\n"
         if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
             roll_start = self.roll_line_points[0]
             roll_end = self.roll_line_points[1]
-            roll_start_lat_ddm = self._decimal_degrees_to_ddm(roll_start[0], is_latitude=True)
-            roll_start_lon_ddm = self._decimal_degrees_to_ddm(roll_start[1], is_latitude=False)
-            roll_end_lat_ddm = self._decimal_degrees_to_ddm(roll_end[0], is_latitude=True)
-            roll_end_lon_ddm = self._decimal_degrees_to_ddm(roll_end[1], is_latitude=False)
+            roll_start_lat_ddm = decimal_degrees_to_ddm(roll_start[0], is_latitude=True)
+            roll_start_lon_ddm = decimal_degrees_to_ddm(roll_start[1], is_latitude=False)
+            roll_end_lat_ddm = decimal_degrees_to_ddm(roll_end[0], is_latitude=True)
+            roll_end_lon_ddm = decimal_degrees_to_ddm(roll_end[1], is_latitude=False)
             stats_text += f"Roll Start: {roll_start_lat_ddm}, {roll_start_lon_ddm} ({roll_start[0]:.6f}, {roll_start[1]:.6f})\n"
             stats_text += f"Roll End: {roll_end_lat_ddm}, {roll_end_lon_ddm} ({roll_end[0]:.6f}, {roll_end[1]:.6f})\n"
         if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 1:
             heading1_start = self.heading_lines[0][0]
             heading1_end = self.heading_lines[0][1]
-            heading1_start_lat_ddm = self._decimal_degrees_to_ddm(heading1_start[0], is_latitude=True)
-            heading1_start_lon_ddm = self._decimal_degrees_to_ddm(heading1_start[1], is_latitude=False)
-            heading1_end_lat_ddm = self._decimal_degrees_to_ddm(heading1_end[0], is_latitude=True)
-            heading1_end_lon_ddm = self._decimal_degrees_to_ddm(heading1_end[1], is_latitude=False)
+            heading1_start_lat_ddm = decimal_degrees_to_ddm(heading1_start[0], is_latitude=True)
+            heading1_start_lon_ddm = decimal_degrees_to_ddm(heading1_start[1], is_latitude=False)
+            heading1_end_lat_ddm = decimal_degrees_to_ddm(heading1_end[0], is_latitude=True)
+            heading1_end_lon_ddm = decimal_degrees_to_ddm(heading1_end[1], is_latitude=False)
             stats_text += f"Heading 1 Start: {heading1_start_lat_ddm}, {heading1_start_lon_ddm} ({heading1_start[0]:.6f}, {heading1_start[1]:.6f})\n"
             stats_text += f"Heading 1 End: {heading1_end_lat_ddm}, {heading1_end_lon_ddm} ({heading1_end[0]:.6f}, {heading1_end[1]:.6f})\n"
         if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 2:
             heading2_start = self.heading_lines[1][0]
             heading2_end = self.heading_lines[1][1]
-            heading2_start_lat_ddm = self._decimal_degrees_to_ddm(heading2_start[0], is_latitude=True)
-            heading2_start_lon_ddm = self._decimal_degrees_to_ddm(heading2_start[1], is_latitude=False)
-            heading2_end_lat_ddm = self._decimal_degrees_to_ddm(heading2_end[0], is_latitude=True)
-            heading2_end_lon_ddm = self._decimal_degrees_to_ddm(heading2_end[1], is_latitude=False)
+            heading2_start_lat_ddm = decimal_degrees_to_ddm(heading2_start[0], is_latitude=True)
+            heading2_start_lon_ddm = decimal_degrees_to_ddm(heading2_start[1], is_latitude=False)
+            heading2_end_lat_ddm = decimal_degrees_to_ddm(heading2_end[0], is_latitude=True)
+            heading2_end_lon_ddm = decimal_degrees_to_ddm(heading2_end[1], is_latitude=False)
             stats_text += f"Heading 2 Start: {heading2_start_lat_ddm}, {heading2_start_lon_ddm} ({heading2_start[0]:.6f}, {heading2_start[1]:.6f})\n"
             stats_text += f"Heading 2 End: {heading2_end_lat_ddm}, {heading2_end_lon_ddm} ({heading2_end[0]:.6f}, {heading2_end[1]:.6f})\n"
         
@@ -11005,44 +8544,12 @@ class SurveyPlanApp(QMainWindow):
             stats_text += "-" * 10 + "\n"
             for i, point in enumerate(self.line_planning_points):
                 lat, lon = point
-                lat_ddm = self._decimal_degrees_to_ddm(lat, is_latitude=True)
-                lon_ddm = self._decimal_degrees_to_ddm(lon, is_latitude=False)
+                lat_ddm = decimal_degrees_to_ddm(lat, is_latitude=True)
+                lon_ddm = decimal_degrees_to_ddm(lon, is_latitude=False)
                 stats_text += f"WP{i+1}: {lat_ddm}, {lon_ddm} ({lat:.6f}, {lon:.6f})\n"
         
         # Create custom dialog window with copy functionality
         self._show_statistics_dialog("Line Planning Statistics", stats_text)
-
-
-    def _decimal_degrees_to_ddm(self, decimal_deg, is_latitude=True):
-        """Convert decimal degrees to degrees and decimal minutes format.
-        
-        Args:
-            decimal_deg: Decimal degrees value
-            is_latitude: True for latitude, False for longitude
-        
-        Returns:
-            Formatted string like "DD°MM.mmm'N" or "DDD°MM.mmm'E"
-        """
-        try:
-            # Determine sign and direction
-            if is_latitude:
-                direction = 'N' if decimal_deg >= 0 else 'S'
-                degrees_width = 2
-            else:
-                direction = 'E' if decimal_deg >= 0 else 'W'
-                degrees_width = 3
-            
-            # Work with absolute value
-            abs_deg = abs(decimal_deg)
-            
-            # Extract degrees and minutes
-            degrees = int(abs_deg)
-            decimal_minutes = (abs_deg - degrees) * 60.0
-            
-            # Format with leading zeros for degrees, 3 decimal places for minutes
-            return f"{degrees:0{degrees_width}d}°{decimal_minutes:06.3f}'{direction}"
-        except:
-            return f"{decimal_deg:.6f}"
 
     def _calculate_reference_survey_statistics(self):
         """Calculate comprehensive reference planning survey statistics using the existing calculation function."""
@@ -11181,17 +8688,17 @@ class SurveyPlanApp(QMainWindow):
                     start, end = line[1], line[0]
                 start_label = f'L{i+1}S'
                 end_label = f'L{i+1}E'
-                start_lat_ddm = self._decimal_degrees_to_ddm(start[0], is_latitude=True)
-                start_lon_ddm = self._decimal_degrees_to_ddm(start[1], is_latitude=False)
-                end_lat_ddm = self._decimal_degrees_to_ddm(end[0], is_latitude=True)
-                end_lon_ddm = self._decimal_degrees_to_ddm(end[1], is_latitude=False)
+                start_lat_ddm = decimal_degrees_to_ddm(start[0], is_latitude=True)
+                start_lon_ddm = decimal_degrees_to_ddm(start[1], is_latitude=False)
+                end_lat_ddm = decimal_degrees_to_ddm(end[0], is_latitude=True)
+                end_lon_ddm = decimal_degrees_to_ddm(end[1], is_latitude=False)
                 stats_text += f"{start_label}: {start_lat_ddm}, {start_lon_ddm} ({start[0]:.6f}, {start[1]:.6f})\n"
                 stats_text += f"{end_label}: {end_lat_ddm}, {end_lon_ddm} ({end[0]:.6f}, {end[1]:.6f})\n"
         if self.cross_line_data:
-            cls_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
-            cls_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
-            cle_lat_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
-            cle_lon_ddm = self._decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
+            cls_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
+            cls_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
+            cle_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
+            cle_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
             stats_text += f"CLS: {cls_lat_ddm}, {cls_lon_ddm} ({self.cross_line_data[0][0]:.6f}, {self.cross_line_data[0][1]:.6f})\n"
             stats_text += f"CLE: {cle_lat_ddm}, {cle_lon_ddm} ({self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f})\n"
         

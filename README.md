@@ -15,8 +15,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ### Core Functionality
 - **Multi-tab Interface**: Separate tabs for Calibration, Reference, and Line planning
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
-- **Dynamic Resolution**: Automatically adjust GeoTIFF resolution based on zoom level (works with mouse wheel, toolbar zoom, and pan)
-- **Navigation Toolbar**: Built-in matplotlib navigation toolbar at bottom of map window
+- **Dynamic Resolution**: Automatically adjust GeoTIFF resolution based on zoom level
 - **Interactive Plotting**: Pan, zoom, and interact with survey plans on the map
 - **Real-time Statistics**: Calculate survey distances, times, and comprehensive statistics
 - **Elevation Profiles**: View elevation and slope profiles for drawn lines
@@ -49,12 +48,6 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Hillshade rendering for better terrain visualization
 - Dynamic resolution loading for performance
 - Support for various coordinate reference systems (CRS)
-
-### Map Overlays
-- **Imagery Basemap**: Toggle satellite imagery basemap overlay with adjustable opacity
-- **NOAA ENC Charts**: Display NOAA Electronic Navigational Charts overlay with adjustable opacity
-- Both overlays support real-time updates as you pan and zoom
-- Overlays are properly reprojected to match your plot coordinate system
 
 ## Requirements
 
