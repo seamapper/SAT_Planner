@@ -286,6 +286,28 @@ class PlottingMixin:
             if not has_any_colorbar and hasattr(self, '_axes_pos_with_colorbar'):
                 delattr(self, '_axes_pos_with_colorbar')
 
+    def _calculate_adaptive_vert_exag(self, data_array):
+        """
+        Calculate adaptive vertical exaggeration based on elevation range.
+        Returns a vert_exag value that adapts to the relief in the data.
+        """
+        valid_data = data_array[~np.isnan(data_array)]
+        if len(valid_data) == 0:
+            return 0.1  # Default if no valid data
+
+        elevation_range = np.max(valid_data) - np.min(valid_data)
+
+        if elevation_range < 20:
+            vert_exag = 1.5 + (elevation_range / 20) * 1.5  # 1.5 at 0m, 3.0 at 20m
+        elif elevation_range < 50:
+            vert_exag = 0.8 + ((elevation_range - 20) / 30) * 0.7  # 0.8 at 20m, 1.5 at 50m
+        elif elevation_range < 200:
+            vert_exag = 0.4 + ((elevation_range - 50) / 150) * 0.4  # 0.4 at 50m, 0.8 at 200m
+        else:
+            vert_exag = max(0.05, 0.1 - ((elevation_range - 200) / 800) * 0.05)  # 0.1 down to 0.05
+
+        return vert_exag
+
     def _plot_survey_plan(self, preserve_view_limits=True):
         try:
             # Remove all axes except the main one to prevent accumulation of colorbar axes
@@ -305,6 +327,7 @@ class PlottingMixin:
             self.geotiff_image_plot = None
             self.geotiff_hillshade_plot = None
             self.contour_plot = None
+            self.basemap_image_plot = None
 
             # Calculate consistent plot limits before plotting
             self.current_xlim, self.current_ylim = self._calculate_consistent_plot_limits()
@@ -326,22 +349,42 @@ class PlottingMixin:
                 preserved_xlim = None
                 preserved_ylim = None
 
+            # Plot imagery basemap if enabled (plot first so it's in the background)
+            if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
+                self._load_and_plot_basemap(force_reload=True)
+
             # Plot GeoTIFF if loaded
             if self.geotiff_data_array is not None and self.geotiff_extent is not None:
+                # Reset flag for logging vertical exaggeration (only log once per plot cycle)
+                self._vert_exag_logged_this_cycle = False
                 if self.hillshade_vs_slope_viz_mode == "hillshade":
                     # Use multidirectional hillshade: average of 4 azimuths
                     masked_data = np.ma.array(self.geotiff_data_array, mask=np.isnan(self.geotiff_data_array))
                     data_for_hillshade = np.nan_to_num(masked_data.filled(np.nanmin(self.geotiff_data_array)))
+                    # Calculate adaptive vertical exaggeration based on elevation range
+                    vert_exag = self._calculate_adaptive_vert_exag(self.geotiff_data_array)
+                    # Log vertical exaggeration to activity log (once per plot cycle)
+                    if hasattr(self, 'param_notebook'):
+                        current_tab = self.param_notebook.currentIndex()
+                        if current_tab == 0 and hasattr(self, 'set_cal_info_text'):
+                            self.set_cal_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                        elif current_tab == 1 and hasattr(self, 'set_ref_info_text'):
+                            self.set_ref_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                        elif current_tab == 2 and hasattr(self, 'set_line_info_text'):
+                            self.set_line_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                    self._vert_exag_logged_this_cycle = True
                     azimuths = [45, 135, 225, 315]
                     altitude = 45
                     hillshades = []
                     for az in azimuths:
                         ls = LightSource(azdeg=az, altdeg=altitude)
-                        hillshade = ls.hillshade(data_for_hillshade, vert_exag=0.1)
+                        hillshade = ls.hillshade(data_for_hillshade, vert_exag=vert_exag)
                         hillshades.append(hillshade)
                     # Average the hillshades
                     hillshade_array = np.mean(hillshades, axis=0)
-                    self.geotiff_hillshade_plot = self.ax.imshow(hillshade_array, extent=tuple(self.geotiff_extent),
+                    # Mask NaN values to make them transparent
+                    masked_hillshade = np.ma.masked_where(np.isnan(self.geotiff_data_array), hillshade_array)
+                    self.geotiff_hillshade_plot = self.ax.imshow(masked_hillshade, extent=tuple(self.geotiff_extent),
                                                                 cmap='gray', origin='upper',
                                                                 zorder=-2)  # Plot beneath everything
 
@@ -421,9 +464,21 @@ class PlottingMixin:
                         display_data = np.clip(slope_degrees, 0, max_slope_for_cmap)
 
                         # Add hillshade underlay from a single direction (315, 45)
+                        vert_exag = self._calculate_adaptive_vert_exag(self.geotiff_data_array)
+                        if not getattr(self, '_vert_exag_logged_this_cycle', True):
+                            if hasattr(self, 'param_notebook'):
+                                current_tab = self.param_notebook.currentIndex()
+                                if current_tab == 0 and hasattr(self, 'set_cal_info_text'):
+                                    self.set_cal_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                                elif current_tab == 1 and hasattr(self, 'set_ref_info_text'):
+                                    self.set_ref_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                                elif current_tab == 2 and hasattr(self, 'set_line_info_text'):
+                                    self.set_line_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                            self._vert_exag_logged_this_cycle = True
                         ls = LightSource(azdeg=315, altdeg=45)
-                        hillshade = ls.hillshade(temp_data)
-                        self.ax.imshow(hillshade, extent=tuple(self.geotiff_extent), cmap='gray', origin='upper', alpha=0.5, zorder=-2)
+                        hillshade = ls.hillshade(temp_data, vert_exag=vert_exag)
+                        masked_hillshade = np.ma.masked_where(np.isnan(self.geotiff_data_array), hillshade)
+                        self.ax.imshow(masked_hillshade, extent=tuple(self.geotiff_extent), cmap='gray', origin='upper', alpha=0.5, zorder=-2)
 
                         cmap = 'plasma'
                         self.geotiff_image_plot = self.ax.imshow(display_data, extent=tuple(self.geotiff_extent),
@@ -566,7 +621,7 @@ class PlottingMixin:
                 latitudes = [p[0] for p in line]
                 longitudes = [p[1] for p in line]
                 label = "Reference Line" if i == 0 else "_nolegend_"
-                self.ax.plot(longitudes, latitudes, color='blue', linewidth=1.5, label=label)
+                self.ax.plot(longitudes, latitudes, color='blue', linewidth=1.5, linestyle='--', label=label)
 
                 # For alternating lines, flip the start/end points to show survey order
                 # Even lines (0, 2, 4...) use normal order, odd lines (1, 3, 5...) use flipped order
@@ -595,17 +650,17 @@ class PlottingMixin:
             if self.cross_line_data:
                 latitudes = [p[0] for p in self.cross_line_data]
                 longitudes = [p[1] for p in self.cross_line_data]
-                self.ax.plot(longitudes, latitudes, color='red', linestyle='--', linewidth=1.5,
+                self.ax.plot(longitudes, latitudes, color='darkorchid', linestyle='-', linewidth=1.5,
                              label='Crossline')
 
                 # Add labels for crossline points
                 self.ax.annotate('CLS', (longitudes[0], latitudes[0]),
                                 xytext=(5, 5), textcoords='offset points',
-                                fontsize=8, color='red', weight='bold',
+                                fontsize=8, color='darkorchid', weight='bold',
                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
                 self.ax.annotate('CLE', (longitudes[1], latitudes[1]),
                                 xytext=(5, 5), textcoords='offset points',
-                                fontsize=8, color='red', weight='bold',
+                                fontsize=8, color='darkorchid', weight='bold',
                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
             # Plot central point
@@ -655,17 +710,17 @@ class PlottingMixin:
                     latitudes = [p[0] for p in line]
                     longitudes = [p[1] for p in line]
                     label = 'Heading1' if i == 0 else 'Heading2'
-                    self.ax.plot(longitudes, latitudes, color='orange', linewidth=2, linestyle='--', marker='x', label=label)
+                    self.ax.plot(longitudes, latitudes, color='deeppink', linewidth=2, linestyle='--', marker='x', label=label)
 
                     # Add labels for heading line points
                     prefix = 'H1' if i == 0 else 'H2'
                     self.ax.annotate(f'{prefix}S', (longitudes[0], latitudes[0]),
                                     xytext=(5, 5), textcoords='offset points',
-                                    fontsize=8, color='orange', weight='bold',
+                                    fontsize=8, color='deeppink', weight='bold',
                                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
                     self.ax.annotate(f'{prefix}E', (longitudes[1], latitudes[1]),
                                     xytext=(5, 5), textcoords='offset points',
-                                    fontsize=8, color='orange', weight='bold',
+                                    fontsize=8, color='deeppink', weight='bold',
                                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
             # --- Plot the drawn line in Line Planning tab if it exists ---
@@ -761,6 +816,10 @@ class PlottingMixin:
             else:
                 if self.ax.get_legend() is not None:
                     self.ax.get_legend().remove()
+
+            # Plot NOAA ENC Charts overlay if enabled (plot last so it overlays everything)
+            if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
+                self._load_and_plot_noaa_charts(force_reload=True)
 
             self.canvas.draw_idle()
 

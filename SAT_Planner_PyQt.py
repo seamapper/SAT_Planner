@@ -3,16 +3,18 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QScrollArea, QTabWidget, QFileDialog, QMessageBox, QDialog,
                              QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar, QGroupBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat
+from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat, QPixmap
 # Ensure matplotlib is imported (for PyInstaller)
 import matplotlib
 matplotlib.use('QtAgg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.colors import LightSource
 from matplotlib.figure import Figure
 import numpy as np
 import os
+import sys
 import csv
 import traceback  # Added for more detailed error logging
 import json
@@ -21,14 +23,19 @@ import datetime
 import re
 import threading
 import time
+from urllib.request import urlopen, Request
+from urllib.error import URLError
+from io import BytesIO
+from PIL import Image
 
-# Constants, geospatial libs, and geo utils from sat_planner package
+# Constants, geospatial libs, and utils from sat_planner package
 from sat_planner import (
     __version__,
     CONFIG_FILENAME,
     GEOSPATIAL_LIBS_AVAILABLE,
     decimal_degrees_to_ddm,
 )
+from sat_planner.utils_ui import show_message as _show_message_fn, ask_yes_no as _ask_yes_no_fn, ask_ok_cancel as _ask_ok_cancel_fn
 from sat_planner.constants import (
     rasterio,
     transform,
@@ -294,6 +301,39 @@ class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixi
         self.slope_profile_checkbox.setChecked(self.show_slope_profile_var)
         self.slope_profile_checkbox.stateChanged.connect(self._draw_current_profile)
 
+        # Imagery Basemap checkbox
+        if not hasattr(self, 'imagery_basemap_checkbox'):
+            self.show_imagery_basemap_var = False
+            self.imagery_basemap_checkbox = QCheckBox("Imagery Basemap")
+            self.imagery_basemap_checkbox.setChecked(self.show_imagery_basemap_var)
+            self.imagery_basemap_checkbox.stateChanged.connect(self._toggle_imagery_basemap)
+            if not hasattr(self, 'basemap_image_plot'):
+                self.basemap_image_plot = None
+
+        # NOAA ENC Charts checkbox and opacity slider
+        if not hasattr(self, 'noaa_charts_checkbox'):
+            self.show_noaa_charts_var = False
+            self.noaa_charts_checkbox = QCheckBox("NOAA ENC Charts")
+            self.noaa_charts_checkbox.setChecked(self.show_noaa_charts_var)
+            self.noaa_charts_checkbox.stateChanged.connect(self._toggle_noaa_charts)
+            self.noaa_charts_opacity = 50
+            self.noaa_charts_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+            self.noaa_charts_opacity_slider.setMinimum(0)
+            self.noaa_charts_opacity_slider.setMaximum(100)
+            self.noaa_charts_opacity_slider.setValue(self.noaa_charts_opacity)
+            self.noaa_charts_opacity_slider.setMaximumWidth(100)
+            self.noaa_charts_opacity_slider.setEnabled(False)
+            self.noaa_charts_opacity_slider.valueChanged.connect(self._update_noaa_charts_opacity)
+            self.noaa_charts_opacity_label = QLabel(f"Opacity: {self.noaa_charts_opacity}%")
+            self.noaa_charts_opacity_label.setEnabled(False)
+            if not hasattr(self, 'noaa_charts_image_plot'):
+                self.noaa_charts_image_plot = None
+
+        # About button (only create once)
+        if not hasattr(self, 'about_btn'):
+            self.about_btn = QPushButton("About This Program")
+            self.about_btn.clicked.connect(self._show_about_dialog)
+
         self._setup_layout()
 
         # Connect Matplotlib click event for 'Pick Center from GeoTIFF'
@@ -308,6 +348,9 @@ class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixi
         self.cid_middle_release = self.canvas.mpl_connect('button_release_event', self._on_middle_release)
         # Connect draw event for dynamic colormap scaling
         self.cid_draw = self.canvas.mpl_connect('draw_event', self._on_draw_event_update_colormap)
+        # Connect axis limit change events for dynamic resolution (toolbar zoom/pan support)
+        self.cid_xlim_changed = self.ax.callbacks.connect('xlim_changed', self._on_axis_limits_changed)
+        self.cid_ylim_changed = self.ax.callbacks.connect('ylim_changed', self._on_axis_limits_changed)
 
         # Initialize buttons states based on library availability
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -377,34 +420,369 @@ class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixi
         self.resize(1600, 1150)
         print("Initialization complete, window should be visible")
         
-    # Helper methods for dialog conversions
+    # Helper methods for dialog conversions (delegate to sat_planner.utils_ui)
     def _show_message(self, msg_type, title, message):
-        """Helper method to show message boxes."""
-        msg = QMessageBox(self)
-        msg.setWindowTitle(title)
-        msg.setText(message)
-        if msg_type == "error":
-            msg.setIcon(QMessageBox.Icon.Critical)
-        elif msg_type == "warning":
-            msg.setIcon(QMessageBox.Icon.Warning)
-        elif msg_type == "info":
-            msg.setIcon(QMessageBox.Icon.Information)
-        elif msg_type == "question":
-            msg.setIcon(QMessageBox.Icon.Question)
-        msg.exec()
-        return msg
-        
+        return _show_message_fn(self, msg_type, title, message)
+
     def _ask_yes_no(self, title, message):
-        """Helper method for yes/no dialogs."""
-        reply = QMessageBox.question(self, title, message, 
-                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        return reply == QMessageBox.StandardButton.Yes
-        
+        return _ask_yes_no_fn(self, title, message)
+
     def _ask_ok_cancel(self, title, message):
-        """Helper method for ok/cancel dialogs."""
-        reply = QMessageBox.question(self, title, message,
-                                     QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
-        return reply == QMessageBox.StandardButton.Ok
+        return _ask_ok_cancel_fn(self, title, message)
+
+    def _show_about_dialog(self):
+        """Show About dialog with program information."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("About This Program")
+        dialog.setMinimumWidth(500)
+        dialog.setMinimumHeight(400)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        program_name = QLabel(f"UNH/CCOM-JHC SAT PLanner v{__version__}")
+        program_name.setStyleSheet("font-size: 16pt; font-weight: bold;")
+        program_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(program_name)
+
+        compile_date = "Unknown"
+        try:
+            if getattr(sys, 'frozen', False):
+                exe_path = sys.executable
+                if os.path.exists(exe_path):
+                    mod_time = os.path.getmtime(exe_path)
+                    compile_date = datetime.datetime.fromtimestamp(mod_time).strftime("%B %d, %Y")
+            else:
+                script_path = __file__
+                if os.path.exists(script_path):
+                    mod_time = os.path.getmtime(script_path)
+                    compile_date = datetime.datetime.fromtimestamp(mod_time).strftime("%B %d, %Y")
+        except Exception:
+            compile_date = "Unknown"
+
+        date_label = QLabel(f"Compiled: {compile_date}")
+        date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        date_label.setStyleSheet("font-size: 10pt; color: gray;")
+        layout.addWidget(date_label)
+
+        logo_path = os.path.join(os.path.dirname(__file__), "media", "CCOM.png")
+        if os.path.exists(logo_path):
+            logo_label = QLabel()
+            pixmap = QPixmap(logo_path)
+            if pixmap.width() > 300:
+                pixmap = pixmap.scaledToWidth(300, Qt.TransformationMode.SmoothTransformation)
+            logo_label.setPixmap(pixmap)
+            logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(logo_label)
+
+        author_label = QLabel("Paul Johnson")
+        author_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        author_label.setStyleSheet("font-size: 12pt; font-weight: bold; margin-top: 10px;")
+        layout.addWidget(author_label)
+
+        email_label = QLabel("pjohnson@ccom.unh.edu")
+        email_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        email_label.setStyleSheet("font-size: 10pt; margin-top: 3px;")
+        layout.addWidget(email_label)
+
+        institution_label = QLabel("Center for Coastal and Ocean Mapping/Joint Hydrographic Center, University of New Hampshire")
+        institution_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        institution_label.setWordWrap(True)
+        institution_label.setStyleSheet("font-size: 10pt; margin-top: 5px;")
+        layout.addWidget(institution_label)
+
+        grant_text = ("This program was developed at the University of New Hampshire, "
+                      "Center for Coastal and Ocean Mapping - Joint Hydrographic Center "
+                      "(UNH/CCOM-JHC) under the grant NA25NOSX400C0001-T1-01 from the National "
+                      "Oceanic and Atmospheric Administration (NOAA).")
+        grant_label = QLabel(grant_text)
+        grant_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        grant_label.setWordWrap(True)
+        grant_label.setStyleSheet("font-size: 9pt; margin-top: 15px;")
+        layout.addWidget(grant_label)
+
+        license_label = QLabel("This software is released for general use under the BSD 3-Clause License.")
+        license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        license_label.setWordWrap(True)
+        license_label.setStyleSheet("font-size: 9pt; margin-top: 10px;")
+        layout.addWidget(license_label)
+
+        layout.addStretch()
+
+        ok_button = QPushButton("OK")
+        ok_button.setMaximumWidth(100)
+        ok_button.clicked.connect(dialog.accept)
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(ok_button)
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        dialog.exec()
+
+    def _toggle_imagery_basemap(self):
+        """Toggle imagery basemap on/off."""
+        if hasattr(self, 'imagery_basemap_checkbox'):
+            self.show_imagery_basemap_var = self.imagery_basemap_checkbox.isChecked()
+            if not hasattr(self, '_last_basemap_zoom_level'):
+                self._last_basemap_zoom_level = None
+            if not hasattr(self, '_last_basemap_extent'):
+                self._last_basemap_extent = None
+            self._plot_survey_plan(preserve_view_limits=True)
+
+    def _toggle_noaa_charts(self):
+        """Toggle NOAA ENC Charts overlay on/off."""
+        if hasattr(self, 'noaa_charts_checkbox'):
+            self.show_noaa_charts_var = self.noaa_charts_checkbox.isChecked()
+            if hasattr(self, 'noaa_charts_opacity_slider'):
+                self.noaa_charts_opacity_slider.setEnabled(self.show_noaa_charts_var)
+            if hasattr(self, 'noaa_charts_opacity_label'):
+                self.noaa_charts_opacity_label.setEnabled(self.show_noaa_charts_var)
+            if not self.show_noaa_charts_var:
+                if hasattr(self, 'noaa_charts_image_plot') and self.noaa_charts_image_plot is not None:
+                    try:
+                        self.noaa_charts_image_plot.remove()
+                    except Exception:
+                        pass
+                    self.noaa_charts_image_plot = None
+                self.canvas.draw_idle()
+            else:
+                self._load_and_plot_noaa_charts()
+
+    def _update_noaa_charts_opacity(self, value):
+        """Update the opacity of NOAA charts overlay."""
+        self.noaa_charts_opacity = value
+        if hasattr(self, 'noaa_charts_opacity_label'):
+            self.noaa_charts_opacity_label.setText(f"Opacity: {value}%")
+        if hasattr(self, 'noaa_charts_image_plot') and self.noaa_charts_image_plot is not None:
+            try:
+                self.noaa_charts_image_plot.set_alpha(value / 100.0)
+                self.canvas.draw_idle()
+            except Exception as e:
+                print(f"Error updating NOAA charts opacity: {e}")
+
+    def _load_and_plot_basemap(self, force_reload=False):
+        """Load and display ArcGIS World Imagery basemap tiles."""
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            if not xlim or not ylim or xlim[0] >= xlim[1] or ylim[0] >= ylim[1]:
+                return
+            extent_width = xlim[1] - xlim[0]
+            extent_height = ylim[1] - ylim[0]
+            current_extent = (xlim[0], xlim[1], ylim[0], ylim[1])
+            if not force_reload:
+                if hasattr(self, '_last_basemap_extent') and self._last_basemap_extent is not None:
+                    last = self._last_basemap_extent
+                    lw, lh = last[1] - last[0], last[3] - last[2]
+                    wc = abs(extent_width - lw) / max(extent_width, lw) if max(extent_width, lw) > 0 else 1.0
+                    hc = abs(extent_height - lh) / max(extent_height, lh) if max(extent_height, lh) > 0 else 1.0
+                    cx = (xlim[0] + xlim[1]) / 2
+                    cy = (ylim[0] + ylim[1]) / 2
+                    lcx = (last[0] + last[1]) / 2
+                    lcy = (last[2] + last[3]) / 2
+                    cxc = abs(cx - lcx) / extent_width if extent_width > 0 else 0
+                    cyc = abs(cy - lcy) / extent_height if extent_height > 0 else 0
+                    if wc < 0.15 and hc < 0.15 and cxc < 0.25 and cyc < 0.25:
+                        return
+            self._last_basemap_extent = current_extent
+            if not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
+                return
+            wgs84_to_mercator = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+            x_min_merc, y_min_merc = wgs84_to_mercator.transform(xlim[0], ylim[0])
+            x_max_merc, y_max_merc = wgs84_to_mercator.transform(xlim[1], ylim[1])
+            extent_width_m = abs(x_max_merc - x_min_merc)
+            extent_height_m = abs(y_max_merc - y_min_merc)
+            min_extent = min(extent_width_m, extent_height_m)
+            target_resolution = min_extent / 512
+            zoom_level = int(np.round(np.clip(np.log2(156543.03392 / target_resolution), 0, 19)))
+            origin_x, origin_y = -20037508.34, 20037508.34
+            tile_size = 256
+            res = 156543.03392 / (2 ** zoom_level)
+            tile_x_min = int(np.floor((x_min_merc - origin_x) / (tile_size * res)))
+            tile_x_max = int(np.ceil((x_max_merc - origin_x) / (tile_size * res)))
+            tile_y_min = int(np.floor((origin_y - y_max_merc) / (tile_size * res)))
+            tile_y_max = int(np.ceil((origin_y - y_min_merc) / (tile_size * res)))
+            max_tile = 2 ** zoom_level
+            tile_x_min = max(0, min(tile_x_min, max_tile - 1))
+            tile_x_max = max(0, min(tile_x_max, max_tile - 1))
+            tile_y_min = max(0, min(tile_y_min, max_tile - 1))
+            tile_y_max = max(0, min(tile_y_max, max_tile - 1))
+            base_url = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            tiles = []
+            for ty in range(tile_y_min, tile_y_max + 1):
+                for tx in range(tile_x_min, tile_x_max + 1):
+                    try:
+                        url = base_url.format(z=zoom_level, y=ty, x=tx)
+                        req = Request(url, headers={'User-Agent': 'SAT_Planner'})
+                        with urlopen(req, timeout=5) as response:
+                            img_data = response.read()
+                            img = Image.open(BytesIO(img_data))
+                            tiles.append((tx, ty, img))
+                    except Exception:
+                        continue
+            if not tiles:
+                return
+            tile_x_coords = [tx for tx, ty, _ in tiles]
+            tile_y_coords = [ty for tx, ty, _ in tiles]
+            min_tx, max_tx = min(tile_x_coords), max(tile_x_coords)
+            min_ty, max_ty = min(tile_y_coords), max(tile_y_coords)
+            composite_width = (max_tx - min_tx + 1) * tile_size
+            composite_height = (max_ty - min_ty + 1) * tile_size
+            composite = Image.new('RGB', (composite_width, composite_height))
+            for tx, ty, img in tiles:
+                x_off = (tx - min_tx) * tile_size
+                y_off = (ty - min_ty) * tile_size
+                composite.paste(img, (x_off, y_off))
+            composite_array = np.array(composite)
+            tile_x_min_merc = origin_x + min_tx * tile_size * res
+            tile_x_max_merc = origin_x + (max_tx + 1) * tile_size * res
+            tile_y_max_merc = origin_y - min_ty * tile_size * res
+            tile_y_min_merc = origin_y - (max_ty + 1) * tile_size * res
+            mercator_to_wgs84 = pyproj.Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True)
+            lon_min, lat_max = mercator_to_wgs84.transform(tile_x_min_merc, tile_y_max_merc)
+            lon_max, lat_min = mercator_to_wgs84.transform(tile_x_max_merc, tile_y_min_merc)
+            if hasattr(self, 'basemap_image_plot') and self.basemap_image_plot is not None:
+                try:
+                    self.basemap_image_plot.remove()
+                except Exception:
+                    pass
+                self.basemap_image_plot = None
+            self.basemap_image_plot = self.ax.imshow(
+                composite_array,
+                extent=[lon_min, lon_max, lat_min, lat_max],
+                origin='upper',
+                zorder=-3,
+                interpolation='bilinear')
+            self.canvas.draw_idle()
+        except Exception as e:
+            print(f"Error loading basemap: {e}")
+            traceback.print_exc()
+
+    def _load_and_plot_noaa_charts(self, force_reload=False):
+        """Load and display NOAA ENC Charts using ESRI REST MapServer export endpoint."""
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            if not xlim or not ylim or xlim[0] >= xlim[1] or ylim[0] >= ylim[1]:
+                return
+            extent_width = xlim[1] - xlim[0]
+            extent_height = ylim[1] - ylim[0]
+            current_extent = (xlim[0], xlim[1], ylim[0], ylim[1])
+            if not force_reload:
+                if hasattr(self, '_last_noaa_charts_extent') and self._last_noaa_charts_extent is not None:
+                    last = self._last_noaa_charts_extent
+                    lw, lh = last[1] - last[0], last[3] - last[2]
+                    wc = abs(extent_width - lw) / max(extent_width, lw) if max(extent_width, lw) > 0 else 1.0
+                    hc = abs(extent_height - lh) / max(extent_height, lh) if max(extent_height, lh) > 0 else 1.0
+                    cx = (xlim[0] + xlim[1]) / 2
+                    cy = (ylim[0] + ylim[1]) / 2
+                    lcx, lcy = (last[0] + last[1]) / 2, (last[2] + last[3]) / 2
+                    cxc = abs(cx - lcx) / extent_width if extent_width > 0 else 0
+                    cyc = abs(cy - lcy) / extent_height if extent_height > 0 else 0
+                    if wc < 0.15 and hc < 0.15 and cxc < 0.25 and cyc < 0.25:
+                        return
+            self._last_noaa_charts_extent = current_extent
+            if not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
+                return
+            wgs84_to_mercator = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+            width = xlim[1] - xlim[0]
+            height = ylim[1] - ylim[0]
+            base_padding = 0.15
+            padded_xlim = (xlim[0] - width * base_padding, xlim[1] + width * base_padding)
+            padded_ylim = (ylim[0] - height * base_padding, ylim[1] + height * base_padding)
+            x_min_merc, y_min_merc = wgs84_to_mercator.transform(padded_xlim[0], padded_ylim[0])
+            x_max_merc, y_max_merc = wgs84_to_mercator.transform(padded_xlim[1], padded_ylim[1])
+            bbox_width_merc = x_max_merc - x_min_merc
+            bbox_height_merc = y_max_merc - y_min_merc
+            max_dimension_pixels = 2048
+            if bbox_width_merc >= bbox_height_merc:
+                cell_size = bbox_width_merc / max_dimension_pixels
+                image_width = max_dimension_pixels
+                image_height = int(bbox_height_merc / cell_size)
+            else:
+                cell_size = bbox_height_merc / max_dimension_pixels
+                image_height = max_dimension_pixels
+                image_width = int(bbox_width_merc / cell_size)
+            if image_width > max_dimension_pixels:
+                image_width = max_dimension_pixels
+                cell_size = bbox_width_merc / image_width
+                image_height = int(bbox_height_merc / cell_size)
+            if image_height > max_dimension_pixels:
+                image_height = max_dimension_pixels
+                cell_size = bbox_height_merc / image_height
+                image_width = int(bbox_width_merc / cell_size)
+            image_width = max(image_width, 256)
+            image_height = max(image_height, 256)
+            bbox_3857 = f"{x_min_merc},{y_min_merc},{x_max_merc},{y_max_merc}"
+            base_url = "https://gis.charttools.noaa.gov/arcgis/rest/services/MCS/NOAAChartDisplay/MapServer/exts/MaritimeChartService/MapServer/export"
+            params = {
+                'bbox': bbox_3857, 'bboxSR': '3857', 'imageSR': '3857',
+                'size': f"{image_width},{image_height}", 'format': 'png',
+                'transparent': 'true', 'f': 'image', 'layers': 'show:0,1,2,3,4,5,6,7'
+            }
+            url = f"{base_url}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
+            req = Request(url, headers={'User-Agent': 'SAT_Planner'})
+            with urlopen(req, timeout=10) as response:
+                img_data = response.read()
+            if len(img_data) < 8 or img_data[:8] != b'\x89PNG\r\n\x1a\n':
+                return
+            img = Image.open(BytesIO(img_data))
+            img_array_3857 = np.array(img)
+            if len(img_array_3857.shape) == 2:
+                img_array_3857 = np.stack([img_array_3857] * 3, axis=-1)
+            elif len(img_array_3857.shape) == 3 and img_array_3857.shape[2] == 4:
+                if img_array_3857.dtype != np.uint8:
+                    img_array_3857 = (img_array_3857 * 255).astype(np.uint8) if img_array_3857.max() <= 1.0 else img_array_3857.astype(np.uint8)
+            elif len(img_array_3857.shape) == 3 and img_array_3857.shape[2] == 3:
+                if img_array_3857.dtype != np.uint8:
+                    img_array_3857 = (img_array_3857 * 255).astype(np.uint8) if img_array_3857.max() <= 1.0 else img_array_3857.astype(np.uint8)
+            src_transform = transform.from_bounds(
+                x_min_merc, y_min_merc, x_max_merc, y_max_merc,
+                image_width, image_height)
+            dst_transform = transform.from_bounds(
+                padded_xlim[0], padded_ylim[0], padded_xlim[1], padded_ylim[1],
+                image_width, image_height)
+            num_bands = img_array_3857.shape[2] if len(img_array_3857.shape) == 3 else 1
+            reprojected_bands = []
+            for band_idx in range(num_bands):
+                source_band = img_array_3857[:, :, band_idx] if len(img_array_3857.shape) == 3 else img_array_3857
+                destination_band = np.zeros((image_height, image_width), dtype=source_band.dtype)
+                reproject(
+                    source=source_band, destination=destination_band,
+                    src_transform=src_transform, src_crs='EPSG:3857',
+                    dst_transform=dst_transform, dst_crs='EPSG:4326',
+                    resampling=Resampling.bilinear)
+                reprojected_bands.append(destination_band)
+            img_array = np.stack(reprojected_bands, axis=-1) if len(reprojected_bands) > 1 else reprojected_bands[0]
+            if img_array.dtype != np.uint8:
+                img_array = img_array.astype(np.uint8)
+            if hasattr(self, 'noaa_charts_image_plot') and self.noaa_charts_image_plot is not None:
+                try:
+                    self.noaa_charts_image_plot.remove()
+                except Exception:
+                    pass
+            current_aspect = self.ax.get_aspect()
+            current_xlim_before = self.ax.get_xlim()
+            current_ylim_before = self.ax.get_ylim()
+            alpha = self.noaa_charts_opacity / 100.0 if hasattr(self, 'noaa_charts_opacity') else 0.5
+            self.noaa_charts_image_plot = self.ax.imshow(
+                img_array,
+                extent=[padded_xlim[0], padded_xlim[1], padded_ylim[0], padded_ylim[1]],
+                origin='upper', zorder=10, alpha=alpha, interpolation='bilinear')
+            current_xlim_after = self.ax.get_xlim()
+            current_ylim_after = self.ax.get_ylim()
+            current_aspect_after = self.ax.get_aspect()
+            if (current_xlim_before != current_xlim_after or current_ylim_before != current_ylim_after or current_aspect != current_aspect_after):
+                self.ax.set_xlim(current_xlim_before)
+                self.ax.set_ylim(current_ylim_before)
+                if current_aspect != 'auto':
+                    self.ax.set_aspect(current_aspect, adjustable='datalim')
+            self.canvas.draw_idle()
+        except Exception as e:
+            print(f"Error loading NOAA charts: {e}")
+            traceback.print_exc()
 
     def _update_multiplier_label_len(self, val):
         """Updates the label next to the line length multiplier slider."""
@@ -432,7 +810,23 @@ class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixi
                 profile_layout = QVBoxLayout()
                 profile_layout.setContentsMargins(0, 0, 0, 0)
                 profile_layout.addWidget(self.profile_widget)
-                profile_layout.addWidget(self.slope_profile_checkbox)
+                # Horizontal layout for checkbox and About button
+                checkbox_button_layout = QHBoxLayout()
+                checkbox_button_layout.setContentsMargins(0, 0, 0, 0)
+                checkbox_button_layout.addWidget(self.slope_profile_checkbox)
+                if hasattr(self, 'imagery_basemap_checkbox'):
+                    checkbox_button_layout.addWidget(self.imagery_basemap_checkbox)
+                if hasattr(self, 'noaa_charts_checkbox'):
+                    checkbox_button_layout.addWidget(self.noaa_charts_checkbox)
+                    if hasattr(self, 'noaa_charts_opacity_label'):
+                        checkbox_button_layout.addWidget(self.noaa_charts_opacity_label)
+                    if hasattr(self, 'noaa_charts_opacity_slider'):
+                        self.noaa_charts_opacity_slider.setMaximumWidth(100)
+                        checkbox_button_layout.addWidget(self.noaa_charts_opacity_slider)
+                checkbox_button_layout.addStretch()
+                if hasattr(self, 'about_btn'):
+                    checkbox_button_layout.addWidget(self.about_btn)
+                profile_layout.addLayout(checkbox_button_layout)
                 profile_widget = QWidget()
                 profile_widget.setLayout(profile_layout)
                 profile_widget.setMaximumHeight(250)  # Limit profile height
@@ -619,7 +1013,7 @@ class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixi
             
             # Filter Z-values
             data[data < -11000] = np.nan
-            data[data > 0] = np.nan
+            data[data >= 0] = np.nan
             
             # Validate the extent to prevent flipping
             if region_extent[1] <= region_extent[0] or region_extent[3] <= region_extent[2]:
@@ -1948,7 +2342,10 @@ class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixi
         self.canvas = FigureCanvas(self.figure)
         plot_layout.addWidget(self.canvas)
         self.canvas_widget = self.canvas  # For compatibility
-        
+        # Add navigation toolbar (zoom/pan/home etc.)
+        self.toolbar = NavigationToolbar(self.canvas, self.plot_frame)
+        plot_layout.addWidget(self.toolbar)
+
         print(f"Widgets created - param_scroll: {self.param_scroll is not None}, plot_frame: {self.plot_frame is not None}, canvas: {self.canvas is not None}")
 
         # Add stub for _on_parameter_change if missing

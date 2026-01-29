@@ -420,8 +420,87 @@ class MapInteractionMixin:
         self._last_user_xlim = new_xlim
         self._last_user_ylim = new_ylim
 
+        # Reload basemap if enabled (throttled via timer)
+        if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
+            if not hasattr(self, '_basemap_reload_timer'):
+                self._basemap_reload_timer = QTimer()
+                self._basemap_reload_timer.setSingleShot(True)
+                self._basemap_reload_timer.timeout.connect(self._load_and_plot_basemap)
+            self._basemap_reload_timer.stop()
+            self._basemap_reload_timer.start(150)
+        # Reload NOAA charts if enabled
+        if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
+            if not hasattr(self, '_noaa_charts_reload_timer'):
+                self._noaa_charts_reload_timer = QTimer()
+                self._noaa_charts_reload_timer.setSingleShot(True)
+                self._noaa_charts_reload_timer.timeout.connect(self._load_and_plot_noaa_charts)
+            self._noaa_charts_reload_timer.stop()
+            self._noaa_charts_reload_timer.start(150)
+
         # Use draw_idle() for non-blocking updates during zoom
         self.canvas.draw_idle()
+
+    def _on_axis_limits_changed(self, ax):
+        """Callback for axis limit changes (e.g., from toolbar zoom/pan)."""
+        if ax != self.ax:
+            return
+        if hasattr(self, '_rapid_zoom_mode') and self._rapid_zoom_mode:
+            return
+        if hasattr(self, '_setting_limits_programmatically') and self._setting_limits_programmatically:
+            return
+        if not hasattr(self, '_processing_limit_change'):
+            self._processing_limit_change = False
+        if self._processing_limit_change:
+            return
+        self._processing_limit_change = True
+        if not hasattr(self, '_limit_change_flag_timer'):
+            self._limit_change_flag_timer = QTimer()
+            self._limit_change_flag_timer.setSingleShot(True)
+            self._limit_change_flag_timer.timeout.connect(lambda: setattr(self, '_processing_limit_change', False))
+        self._limit_change_flag_timer.stop()
+        self._limit_change_flag_timer.start(100)
+
+        current_xlim = self.ax.get_xlim()
+        current_ylim = self.ax.get_ylim()
+
+        if (self.geotiff_dataset_original is not None and
+            self.dynamic_resolution_enabled and
+            hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None):
+            full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
+            full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+            new_width = current_xlim[1] - current_xlim[0]
+            new_height = current_ylim[1] - current_ylim[0]
+            width_ratio = new_width / full_width if full_width > 0 else 1.0
+            height_ratio = new_height / full_height if full_height > 0 else 1.0
+            new_zoom_level = min(width_ratio, height_ratio)
+            new_zoom_level = max(0.01, min(10.0, new_zoom_level))
+            old_zoom_level = getattr(self, 'geotiff_zoom_level', 1.0)
+            zoom_change = abs(new_zoom_level - old_zoom_level)
+            if zoom_change > 0.05:
+                self.geotiff_zoom_level = new_zoom_level
+                self._last_user_xlim = current_xlim
+                self._last_user_ylim = current_ylim
+                if not hasattr(self, '_limit_change_timer'):
+                    self._limit_change_timer = QTimer()
+                    self._limit_change_timer.setSingleShot(True)
+                    self._limit_change_timer.timeout.connect(self._reload_geotiff_at_current_zoom)
+                self._limit_change_timer.stop()
+                self._limit_change_timer.start(500)
+
+        if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
+            if not hasattr(self, '_basemap_reload_timer'):
+                self._basemap_reload_timer = QTimer()
+                self._basemap_reload_timer.setSingleShot(True)
+                self._basemap_reload_timer.timeout.connect(self._load_and_plot_basemap)
+            self._basemap_reload_timer.stop()
+            self._basemap_reload_timer.start(150)
+        if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
+            if not hasattr(self, '_noaa_charts_reload_timer'):
+                self._noaa_charts_reload_timer = QTimer()
+                self._noaa_charts_reload_timer.setSingleShot(True)
+                self._noaa_charts_reload_timer.timeout.connect(self._load_and_plot_noaa_charts)
+            self._noaa_charts_reload_timer.stop()
+            self._noaa_charts_reload_timer.start(150)
 
     def _zoom_to_plan(self):
         all_lats = []
@@ -674,6 +753,13 @@ class MapInteractionMixin:
                                 self._pan_timer.setSingleShot(True)
                                 self._pan_timer.timeout.connect(self._reload_geotiff_at_current_zoom)
                                 self._pan_timer.start(300)
+
+            # Reload basemap if enabled (after panning)
+            if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
+                self._load_and_plot_basemap()
+            # Reload NOAA charts if enabled (after panning)
+            if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
+                self._load_and_plot_noaa_charts()
 
     def _zoom_to_pitch_line(self):
         if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:

@@ -70,7 +70,7 @@ class ProfilesMixin:
                 extent = [dst_left, dst_right, dst_bottom, dst_top]
 
             data[data < -11000] = np.nan
-            data[data > 0] = np.nan
+            data[data >= 0] = np.nan
 
             left, right, bottom, top = extent
             nrows, ncols = data.shape
@@ -177,10 +177,10 @@ class ProfilesMixin:
         self._profile_dists = dists
         self._profile_elevations = elevations
         self._profile_slopes = slopes
-        self.profile_ax.plot(dists, elevations, color='purple', lw=1, label='Elevation')
+        self.profile_ax.plot(dists, elevations, color='darkorchid', lw=1, label='Elevation')
         if self.show_slope_profile_var:
             slope_ax = self.profile_ax.twinx()
-            slope_ax.plot(dists, slopes, color='blue', lw=1, linestyle='--', label='Slope (deg)')
+            slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
             slope_ax.set_ylabel('Slope (deg)', fontsize=8)
             slope_ax.tick_params(axis='y', labelsize=7)
             slope_ax.grid(False)
@@ -286,10 +286,10 @@ class ProfilesMixin:
             dists = np.array(dists)
         except Exception:
             dists = np.linspace(0, 1, 100)
-        self.profile_ax.plot(dists, elevations, color='orange', lw=1, label='Elevation')
+        self.profile_ax.plot(dists, elevations, color='red', lw=1, label='Elevation')
         if self.show_slope_profile_var:
             slope_ax = self.profile_ax.twinx()
-            slope_ax.plot(dists, slopes, color='blue', lw=1, linestyle='--', label='Slope (deg)')
+            slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
             slope_ax.set_ylabel('Slope (deg)', fontsize=8)
             slope_ax.tick_params(axis='y', labelsize=7)
             slope_ax.grid(False)

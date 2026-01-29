@@ -401,7 +401,7 @@ class LinePlanningMixin:
         if hasattr(self, 'line_planning_temp_line') and self.line_planning_temp_line is not None:
             self.line_planning_temp_line.set_data(lons, lats)
         else:
-            self.line_planning_temp_line, = self.ax.plot(lons, lats, color='orange', linewidth=1, linestyle='--', alpha=0.7)
+            self.line_planning_temp_line, = self.ax.plot(lons, lats, color='orange', linewidth=2, linestyle='--', alpha=0.7)
         if hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None:
             geod = pyproj.Geod(ellps="WGS84")
             total_length_m = 0.0
@@ -636,10 +636,10 @@ class LinePlanningMixin:
         for i, (lat, lon) in enumerate(self.line_planning_points):
             _, idx = min((abs(lat - lats[j]) + abs(lon - lons[j]), j) for j in range(len(lats)))
             waypoint_elevations.append(elevations[idx])
-        self.profile_ax.plot(waypoint_distances, waypoint_elevations, 'o', color='red', markersize=6, label='Waypoints')
+        self.profile_ax.plot(waypoint_distances, waypoint_elevations, 'o', color='orange', markersize=6, label='Waypoints')
         if np.any(~np.isnan(slopes)):
             slope_ax = self.profile_ax.twinx()
-            slope_ax.plot(dists, slopes, color='blue', lw=1, linestyle='--', label='Slope (deg)')
+            slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
             slope_ax.set_ylabel('Slope (deg)', fontsize=8)
             slope_ax.tick_params(axis='y', labelsize=7)
             slope_ax.grid(False)
