@@ -52,6 +52,7 @@ from sat_planner.mixins.line_planning_mixin import LinePlanningMixin
 from sat_planner.mixins.profiles_mixin import ProfilesMixin
 from sat_planner.mixins.map_interaction_mixin import MapInteractionMixin
 from sat_planner.mixins.export_import_mixin import ExportImportMixin
+from sat_planner.mixins.config_mixin import ConfigMixin
 
 """
 UNH/CCOM-JHC Shipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) Planner
@@ -70,7 +71,7 @@ This software is released for general use under the BSD 3-Clause License.
 
 """
 
-class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixin, LinePlanningMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, QMainWindow):
+class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixin, LinePlanningMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, QMainWindow):
     CONFIG_FILENAME = CONFIG_FILENAME  # from sat_planner
 
     def __init__(self):
@@ -1278,134 +1279,6 @@ class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixi
                                                          bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8), 
                                                          zorder=10)
             self.canvas.draw_idle()
-
-    def _load_last_used_dir(self):
-        try:
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, 'r') as f:
-                    config = json.load(f)
-                if 'last_used_dir' in config and os.path.isdir(config['last_used_dir']):
-                    self.last_used_dir = config['last_used_dir']
-        except Exception:
-            pass
-
-    def _save_last_used_dir(self):
-        try:
-            config = {'last_used_dir': self.last_used_dir}
-            with open(self.CONFIG_FILENAME, 'w') as f:
-                json.dump(config, f)
-        except Exception:
-            pass
-
-    def _load_last_geotiff_dir(self):
-        try:
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, 'r') as f:
-                    config = json.load(f)
-                if 'last_geotiff_dir' in config and os.path.isdir(config['last_geotiff_dir']):
-                    self.last_geotiff_dir = config['last_geotiff_dir']
-        except Exception:
-            pass
-
-    def _save_last_geotiff_dir(self):
-        try:
-            config = {}
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, 'r') as f:
-                    config = json.load(f)
-            config['last_geotiff_dir'] = self.last_geotiff_dir
-            with open(self.CONFIG_FILENAME, 'w') as f:
-                json.dump(config, f)
-        except Exception:
-            pass
-
-    def _load_last_survey_params_dir(self):
-        try:
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, 'r') as f:
-                    config = json.load(f)
-                if 'last_survey_params_dir' in config and os.path.isdir(config['last_survey_params_dir']):
-                    self.last_survey_params_dir = config['last_survey_params_dir']
-        except Exception:
-            pass
-
-    def _save_last_survey_params_dir(self):
-        try:
-            config = {}
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, 'r') as f:
-                    config = json.load(f)
-            config['last_survey_params_dir'] = self.last_survey_params_dir
-            with open(self.CONFIG_FILENAME, 'w') as f:
-                json.dump(config, f)
-        except Exception:
-            pass
-
-    def _load_last_export_dir(self):
-        try:
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, 'r') as f:
-                    config = json.load(f)
-                if 'last_export_dir' in config and os.path.isdir(config['last_export_dir']):
-                    self.last_export_dir = config['last_export_dir']
-        except Exception:
-            pass
-
-    def _save_last_export_dir(self):
-        try:
-            config = {}
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, 'r') as f:
-                    config = json.load(f)
-            config['last_export_dir'] = self.last_export_dir
-            with open(self.CONFIG_FILENAME, 'w') as f:
-                json.dump(config, f)
-        except Exception:
-            pass
-
-    def _load_last_ref_import_dir(self):
-        try:
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, 'r') as f:
-                    config = json.load(f)
-                if 'last_ref_import_dir' in config and os.path.isdir(config['last_ref_import_dir']):
-                    self.last_ref_import_dir = config['last_ref_import_dir']
-        except Exception:
-            pass
-
-    def _save_last_ref_import_dir(self):
-        try:
-            config = {}
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, 'r') as f:
-                    config = json.load(f)
-            config['last_ref_import_dir'] = self.last_ref_import_dir
-            with open(self.CONFIG_FILENAME, 'w') as f:
-                json.dump(config, f)
-        except Exception:
-            pass
-
-    def _load_last_line_import_dir(self):
-        try:
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, 'r') as f:
-                    config = json.load(f)
-                if 'last_line_import_dir' in config and os.path.isdir(config['last_line_import_dir']):
-                    self.last_line_import_dir = config['last_line_import_dir']
-        except Exception:
-            pass
-
-    def _save_last_line_import_dir(self):
-        try:
-            config = {}
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, 'r') as f:
-                    config = json.load(f)
-            config['last_line_import_dir'] = self.last_line_import_dir
-            with open(self.CONFIG_FILENAME, 'w') as f:
-                json.dump(config, f)
-        except Exception:
-            pass
 
     def _on_tab_changed(self, event=None):
         """Handle tab change event - update profile plot for active tab."""

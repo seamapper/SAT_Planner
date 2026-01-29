@@ -10,5 +10,6 @@ from .line_planning_mixin import LinePlanningMixin
 from .profiles_mixin import ProfilesMixin
 from .map_interaction_mixin import MapInteractionMixin
 from .export_import_mixin import ExportImportMixin
+from .config_mixin import ConfigMixin
 
-__all__ = ["GeoTIFFMixin", "PlottingMixin", "ReferenceMixin", "CalibrationMixin", "LinePlanningMixin", "ProfilesMixin", "MapInteractionMixin", "ExportImportMixin"]
+__all__ = ["GeoTIFFMixin", "PlottingMixin", "ReferenceMixin", "CalibrationMixin", "LinePlanningMixin", "ProfilesMixin", "MapInteractionMixin", "ExportImportMixin", "ConfigMixin"]
