@@ -4,8 +4,10 @@ Survey plan plotting: generate plan, plot survey lines/GeoTIFF/contours, clear p
 import traceback
 import numpy as np
 from matplotlib.colors import LightSource
+from matplotlib.ticker import FuncFormatter
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, CRSError
+from sat_planner.utils_geo import decimal_degrees_to_ddm
 
 
 class PlottingMixin:
@@ -741,6 +743,14 @@ class PlottingMixin:
             self.ax.set_ylabel("Latitude")
             self.ax.set_title("Survey Plan")
             self.ax.grid(True)
+
+            # Format axis tick labels as DDM (degrees-decimal minutes)
+            self.ax.xaxis.set_major_formatter(
+                FuncFormatter(lambda x, _: decimal_degrees_to_ddm(x, is_latitude=False))
+            )
+            self.ax.yaxis.set_major_formatter(
+                FuncFormatter(lambda y, _: decimal_degrees_to_ddm(y, is_latitude=True))
+            )
 
             # Calculate aspect ratio based on center latitude for equal scaling
             # Longitude degrees get shorter as you move away from equator
