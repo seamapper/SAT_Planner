@@ -7,5 +7,6 @@ from .plotting_mixin import PlottingMixin
 from .reference_mixin import ReferenceMixin
 from .calibration_mixin import CalibrationMixin
 from .line_planning_mixin import LinePlanningMixin
+from .profiles_mixin import ProfilesMixin
 
-__all__ = ["GeoTIFFMixin", "PlottingMixin", "ReferenceMixin", "CalibrationMixin", "LinePlanningMixin"]
+__all__ = ["GeoTIFFMixin", "PlottingMixin", "ReferenceMixin", "CalibrationMixin", "LinePlanningMixin", "ProfilesMixin"]
