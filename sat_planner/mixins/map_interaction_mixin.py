@@ -7,7 +7,7 @@ import traceback
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer
 
-from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, rowcol
+from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, rowcol
 
 
 class MapInteractionMixin:
@@ -924,3 +924,163 @@ class MapInteractionMixin:
         self.ax.set_xlim(min_lon - buffer_lon, max_lon + buffer_lon)
         self.ax.set_ylim(min_lat - buffer_lat, max_lat + buffer_lat)
         self.canvas.draw_idle()
+
+    def _on_mouse_motion(self, event):
+        """Handle all mouse motion events including hover info, line planning, pitch line, and pick center."""
+        if event.inaxes != self.ax:
+            if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
+                self.mouse_hover_info_text.set_visible(False)
+                self.mouse_hover_info_text = None
+                self.canvas.draw_idle()
+            return
+
+        mouse_lon = event.xdata
+        mouse_lat = event.ydata
+
+        if mouse_lon is None or mouse_lat is None:
+            if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
+                self.mouse_hover_info_text.set_visible(False)
+                self.mouse_hover_info_text = None
+                self.canvas.draw_idle()
+            return
+
+        if hasattr(self, 'line_planning_mode') and self.line_planning_mode and len(self.line_planning_points) >= 1:
+            self._on_line_planning_motion(event)
+            return
+
+        if hasattr(self, 'pick_pitch_line_mode') and self.pick_pitch_line_mode:
+            if len(self.pitch_line_points) == 0:
+                if hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None:
+                    elevation, slope = self._calculate_slope_at_point(mouse_lat, mouse_lon)
+                    try:
+                        depth_str = f"{abs(elevation):.1f} m" if elevation is not None and not np.isnan(elevation) else "-"
+                        slope_str = f"{slope:.1f}°" if slope is not None and not np.isnan(slope) else "-"
+                    except Exception:
+                        depth_str = "-"
+                        slope_str = "-"
+                    info_str = f"Depth: {depth_str}\nSlope: {slope_str}"
+                    if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
+                        self.mouse_hover_info_text.set_text(info_str)
+                        self.mouse_hover_info_text.set_visible(True)
+                    else:
+                        self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes,
+                                                                 fontsize=9, va='top', ha='left',
+                                                                 bbox=dict(boxstyle='round', facecolor='plum', alpha=0.8),
+                                                                 zorder=10)
+                    self.canvas.draw_idle()
+                return
+            if len(self.pitch_line_points) == 1:
+                lats = [self.pitch_line_points[0][0], mouse_lat]
+                lons = [self.pitch_line_points[0][1], mouse_lon]
+                if hasattr(self, 'pitch_line_temp_line') and self.pitch_line_temp_line is not None:
+                    self.pitch_line_temp_line.set_data(lons, lats)
+                else:
+                    self.pitch_line_temp_line, = self.ax.plot(lons, lats, color='red', linewidth=2, linestyle='--', alpha=0.7)
+
+                if hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None:
+                    geod = pyproj.Geod(ellps="WGS84")
+                    _, _, line_length_m = geod.inv(lons[0], lats[0], lons[1], lats[1])
+                    line_length_nm = line_length_m / 1852.0
+                    try:
+                        speed_knots = float(self.cal_survey_speed_entry.text()) if hasattr(self, 'cal_survey_speed_entry') else 8.0
+                    except Exception:
+                        speed_knots = 8.0
+                    speed_m_per_h = speed_knots * 1852
+                    time_hours = line_length_m / speed_m_per_h if speed_m_per_h > 0 else 0
+                    time_minutes = time_hours * 60
+                    elevation, slope = self._calculate_slope_at_point(mouse_lat, mouse_lon)
+                    try:
+                        depth_str = f"{abs(elevation):.1f} m" if elevation is not None and not np.isnan(elevation) else "-"
+                        slope_str = f"{slope:.1f}°" if slope is not None and not np.isnan(slope) else "-"
+                    except Exception:
+                        depth_str = "-"
+                        slope_str = "-"
+                    info_str = f"Depth: {depth_str}\nSlope: {slope_str}\nLine Length: {line_length_m:.1f} m\nLine Length: {line_length_nm:.3f} nm\nSurvey Time: {time_minutes:.1f} min"
+                    if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
+                        self.mouse_hover_info_text.set_text(info_str)
+                        self.mouse_hover_info_text.set_visible(True)
+                    else:
+                        self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes,
+                                                                 fontsize=9, va='top', ha='left',
+                                                                 bbox=dict(boxstyle='round', facecolor='plum', alpha=0.8),
+                                                                 zorder=10)
+                self.canvas.draw_idle()
+            return
+
+        if hasattr(self, 'pick_center_mode') and self.pick_center_mode:
+            if hasattr(self, 'pick_center_crosshair') and self.pick_center_crosshair is not None:
+                self.pick_center_crosshair.remove()
+            self.pick_center_crosshair, = self.ax.plot(mouse_lon, mouse_lat, '+', color='red', markersize=15, markeredgewidth=2)
+            self.canvas.draw_idle()
+            return
+
+        if hasattr(self, 'pick_roll_line_mode') and self.pick_roll_line_mode:
+            if len(self.roll_line_points) == 1:
+                lats = [self.roll_line_points[0][0], mouse_lat]
+                lons = [self.roll_line_points[0][1], mouse_lon]
+                if hasattr(self, 'roll_line_temp_line') and self.roll_line_temp_line is not None:
+                    self.roll_line_temp_line.set_data(lons, lats)
+                else:
+                    self.roll_line_temp_line, = self.ax.plot(lons, lats, color='purple', linewidth=2, linestyle='--', alpha=0.7)
+
+                if hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None:
+                    geod = pyproj.Geod(ellps="WGS84")
+                    _, _, line_length_m = geod.inv(lons[0], lats[0], lons[1], lats[1])
+                    line_length_nm = line_length_m / 1852.0
+                    try:
+                        speed_knots = float(self.cal_survey_speed_entry.text()) if hasattr(self, 'cal_survey_speed_entry') else 8.0
+                    except Exception:
+                        speed_knots = 8.0
+                    speed_m_per_h = speed_knots * 1852
+                    time_hours = line_length_m / speed_m_per_h if speed_m_per_h > 0 else 0
+                    time_minutes = time_hours * 60
+                    elevation, slope = self._calculate_slope_at_point(mouse_lat, mouse_lon)
+                    try:
+                        depth_str = f"{abs(elevation):.1f} m" if elevation is not None and not np.isnan(elevation) else "-"
+                        slope_str = f"{slope:.1f}°" if slope is not None and not np.isnan(slope) else "-"
+                    except Exception:
+                        depth_str = "-"
+                        slope_str = "-"
+                    info_str = f"Depth: {depth_str}\nSlope: {slope_str}\nLine Length: {line_length_m:.1f} m\nLine Length: {line_length_nm:.3f} nm\nSurvey Time: {time_minutes:.1f} min"
+                    if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
+                        self.mouse_hover_info_text.set_text(info_str)
+                        self.mouse_hover_info_text.set_visible(True)
+                    else:
+                        self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes,
+                                                                 fontsize=9, va='top', ha='left',
+                                                                 bbox=dict(boxstyle='round', facecolor='plum', alpha=0.8),
+                                                                 zorder=10)
+                self.canvas.draw_idle()
+            return
+
+        if not (hasattr(self, 'line_planning_mode') and self.line_planning_mode or
+                hasattr(self, 'pick_pitch_line_mode') and self.pick_pitch_line_mode or
+                hasattr(self, 'pick_center_mode') and self.pick_center_mode or
+                hasattr(self, 'pick_roll_line_mode') and self.pick_roll_line_mode):
+
+            if not (hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None):
+                if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
+                    self.mouse_hover_info_text.set_visible(False)
+                    self.mouse_hover_info_text = None
+                    self.canvas.draw_idle()
+                return
+
+            elevation, slope = self._calculate_slope_at_point(mouse_lat, mouse_lon)
+            try:
+                elev_str = f"{elevation:.1f} m" if elevation is not None and not np.isnan(elevation) else "-"
+                slope_str = f"{slope:.1f}°" if slope is not None and not np.isnan(slope) else "-"
+            except Exception:
+                elev_str = "-"
+                slope_str = "-"
+
+            info_str = f"Lat: {mouse_lat:.6f}\nLon: {mouse_lon:.6f}\nElevation: {elev_str}\nSlope: {slope_str}"
+
+            if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
+                self.mouse_hover_info_text.set_text(info_str)
+                self.mouse_hover_info_text.set_visible(True)
+            else:
+                self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes,
+                                                         fontsize=9, va='top', ha='left',
+                                                         bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                                                         zorder=10)
+            self.canvas.draw_idle()

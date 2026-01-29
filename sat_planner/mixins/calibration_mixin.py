@@ -12,8 +12,10 @@ from PyQt6.QtWidgets import QFileDialog
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat
 
+import numpy as np
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj
 from sat_planner import decimal_degrees_to_ddm
+from sat_planner.utils_ui import show_statistics_dialog
 
 
 class CalibrationMixin:
@@ -1078,4 +1080,116 @@ class CalibrationMixin:
             stats_text += f"Roll Start: {decimal_degrees_to_ddm(roll_start[0], True)}, {decimal_degrees_to_ddm(roll_start[1], False)}\n"
             stats_text += f"Roll End: {decimal_degrees_to_ddm(roll_end[0], True)}, {decimal_degrees_to_ddm(roll_end[1], False)}\n"
 
-        self._show_statistics_dialog("Calibration Planning Statistics", stats_text)
+        show_statistics_dialog(self, "Calibration Planning Statistics", stats_text)
+
+    def _update_cal_line_offset_from_pitch_line(self):
+        """Calculate heading line offset from median depth along pitch line."""
+        if (self.geotiff_data_array is None or self.geotiff_extent is None or
+            not hasattr(self, 'pitch_line_points') or len(self.pitch_line_points) != 2):
+            self.cal_line_offset_entry.clear()
+            return
+        (lat1, lon1), (lat2, lon2) = self.pitch_line_points
+        lats = np.linspace(lat1, lat2, 100)
+        lons = np.linspace(lon1, lon2, 100)
+        left, right, bottom, top = tuple(self.geotiff_extent)
+        nrows, ncols = self.geotiff_data_array.shape
+        rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
+        cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
+        elevations = []
+        for r, c in zip(rows, cols):
+            ir, ic = int(round(r)), int(round(c))
+            elevations.append(self.geotiff_data_array[ir, ic])
+        elevations = np.array(elevations)
+        if np.any(~np.isnan(elevations)):
+            median_val = np.nanmedian(elevations)
+            mean_val = np.nanmean(elevations)
+            min_val = np.nanmin(elevations)
+            max_val = np.nanmax(elevations)
+            valid_count = np.sum(~np.isnan(elevations))
+            offset_value = abs(median_val)
+            self.cal_line_offset_entry.setText(f"{offset_value:.2f}")
+            if hasattr(self, 'pitch_shallowest_depth_label'):
+                self.pitch_shallowest_depth_label.setText(f"{abs(max_val):.2f}")
+            if hasattr(self, 'pitch_max_depth_label'):
+                self.pitch_max_depth_label.setText(f"{abs(min_val):.2f}")
+            if hasattr(self, 'pitch_mean_depth_label'):
+                self.pitch_mean_depth_label.setText(f"{abs(mean_val):.2f}")
+            if hasattr(self, 'pitch_median_depth_label'):
+                self.pitch_median_depth_label.setText(f"{abs(median_val):.2f}")
+            if hasattr(self, 'set_cal_info_text'):
+                self.set_cal_info_text(
+                    f"Heading Line Offset calculated: {offset_value:.2f} m (median of {valid_count} points along pitch line). "
+                    f"Depth range: {abs(max_val):.2f} m (shallowest) to {abs(min_val):.2f} m (deepest). "
+                    f"Mean depth: {abs(mean_val):.2f} m, Median depth: {abs(median_val):.2f} m.",
+                    append=False
+                )
+        else:
+            self.cal_line_offset_entry.setText("-")
+            if hasattr(self, 'pitch_shallowest_depth_label'):
+                self.pitch_shallowest_depth_label.setText("-")
+            if hasattr(self, 'pitch_max_depth_label'):
+                self.pitch_max_depth_label.setText("-")
+            if hasattr(self, 'pitch_mean_depth_label'):
+                self.pitch_mean_depth_label.setText("-")
+            if hasattr(self, 'pitch_median_depth_label'):
+                self.pitch_median_depth_label.setText("-")
+            if hasattr(self, 'set_cal_info_text'):
+                self.set_cal_info_text(
+                    "Heading Line Offset: Could not calculate (no valid elevation data along pitch line).",
+                    append=False
+                )
+
+    def _add_heading_lines_from_pitch_line(self):
+        """Add heading lines north and south of pitch line at offset distance."""
+        if not GEOSPATIAL_LIBS_AVAILABLE:
+            self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot add heading lines.")
+            return
+        if self.geotiff_dataset_original is None:
+            self._show_message("warning", "No GeoTIFF", "Load a GeoTIFF first.")
+            return
+        if not hasattr(self, 'pitch_line_points') or len(self.pitch_line_points) != 2:
+            self._show_message("warning", "No Pitch Line", "Pick a pitch line first.")
+            return
+        try:
+            offset_val = float(self.cal_line_offset_entry.text())
+            if offset_val <= 0:
+                raise ValueError
+        except Exception:
+            self._show_message("warning", "Invalid Offset", "Line Offset must be a positive number.")
+            return
+        (lat1, lon1), (lat2, lon2) = self.pitch_line_points
+        geod = pyproj.Geod(ellps="WGS84")
+        az12, az21, dist = geod.inv(lon1, lat1, lon2, lat2)
+        perp_az_north = (az12 + 90) % 360
+        perp_az_south = (az12 - 90) % 360
+        n1_lon, n1_lat, _ = geod.fwd(lon1, lat1, perp_az_north, offset_val)
+        n2_lon, n2_lat, _ = geod.fwd(lon2, lat2, perp_az_north, offset_val)
+        s1_lon, s1_lat, _ = geod.fwd(lon1, lat1, perp_az_south, offset_val)
+        s2_lon, s2_lat, _ = geod.fwd(lon2, lat2, perp_az_south, offset_val)
+        self.heading_lines = [
+            [(n1_lat, n1_lon), (n2_lat, n2_lon)],
+            [(s1_lat, s1_lon), (s2_lat, s2_lon)]
+        ]
+        self._plot_survey_plan(preserve_view_limits=True)
+        if hasattr(self, 'add_heading_lines_btn'):
+            self.add_heading_lines_btn.setStyleSheet("")
+        if hasattr(self, 'set_cal_info_text'):
+            self.set_cal_info_text("Heading lines have been added north and south of the pitch line.")
+
+    def _update_cal_export_name_from_pitch_line(self):
+        """Update calibration export name from pitch line and offset."""
+        if not hasattr(self, 'pitch_line_points') or len(self.pitch_line_points) != 2:
+            return
+        try:
+            offset_val = float(self.cal_line_offset_entry.text())
+        except Exception:
+            return
+        (lat1, lon1), (lat2, lon2) = self.pitch_line_points
+        try:
+            geod = pyproj.Geod(ellps="WGS84")
+            az12, az21, dist = geod.inv(lon1, lat1, lon2, lat2)
+            heading = int(round(az12)) % 360
+        except Exception:
+            heading = 0
+        export_name = f"Cal_{int(round(offset_val))}m_{heading}deg"
+        self.cal_export_name_entry.setText(export_name)

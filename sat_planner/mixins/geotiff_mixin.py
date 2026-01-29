@@ -882,3 +882,72 @@ class GeoTIFFMixin:
         except Exception as e:
             print(f"Error getting depth: {e}")
             return 0.0
+
+    def _on_draw_event_update_colormap(self, event=None):
+        """Update elevation colormap to visible region when view changes."""
+        if not hasattr(self, 'geotiff_data_array') or self.geotiff_data_array is None:
+            return
+        if not hasattr(self, 'geotiff_extent') or self.geotiff_extent is None:
+            return
+        if not hasattr(self, 'geotiff_display_mode') or self.geotiff_display_mode != 'elevation':
+            return
+        if not hasattr(self, 'geotiff_image_plot') or self.geotiff_image_plot is None:
+            return
+        display_data = self.geotiff_data_array
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        left, right, bottom, top = tuple(self.geotiff_extent)
+        nrows, ncols = display_data.shape
+        col_min = int(np.clip((min(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
+        col_max = int(np.clip((max(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
+        row_min = int(np.clip((top - max(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
+        row_max = int(np.clip((top - min(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
+        r0, r1 = sorted([row_min, row_max])
+        c0, c1 = sorted([col_min, col_max])
+        visible_region = display_data[r0:r1+1, c0:c1+1]
+        if visible_region.size > 0 and not np.all(np.isnan(visible_region)):
+            vmin_elev = np.nanmin(visible_region)
+            vmax_elev = np.nanmax(visible_region)
+        else:
+            vmin_elev = np.nanmin(display_data) if not np.all(np.isnan(display_data)) else None
+            vmax_elev = np.nanmax(display_data) if not np.all(np.nan(display_data)) else None
+        if vmin_elev is not None and vmax_elev is not None and vmin_elev != vmax_elev:
+            self.geotiff_image_plot.set_clim(vmin=vmin_elev, vmax=vmax_elev)
+
+    def _on_temp_line_motion(self, event):
+        """Draw temporary line from start point to current mouse; show length, azimuth, time."""
+        if not hasattr(self, '_temp_line') or not hasattr(self, '_temp_line_start'):
+            return
+        if event.inaxes != self.ax:
+            return
+        x0, y0 = self._temp_line_start[1], self._temp_line_start[0]
+        x1, y1 = event.xdata, event.ydata
+        if x1 is None or y1 is None:
+            return
+        self._temp_line.set_data([x0, x1], [y0, y1])
+        try:
+            geod = pyproj.Geod(ellps="WGS84")
+            az12, az21, dist = geod.inv(x0, y0, x1, y1)
+        except Exception:
+            dist = np.sqrt((x1 - x0)**2 + (y1 - y0)**2) * 111320
+            az12 = np.degrees(np.arctan2(x1 - x0, y1 - y0)) % 360
+        speed_knots = None
+        try:
+            if hasattr(self, 'cal_survey_speed_entry') and self.cal_survey_speed_entry.isVisible():
+                speed_knots = float(self.cal_survey_speed_entry.text())
+            elif hasattr(self, 'survey_speed_entry'):
+                speed_knots = float(self.survey_speed_entry.text())
+        except Exception:
+            speed_knots = None
+        msg = f"Length: {dist:.1f} m, Azimuth: {az12:.1f}°"
+        if speed_knots and speed_knots > 0:
+            speed_m_per_s = speed_knots * 1852 / 3600.0
+            time_sec = dist / speed_m_per_s
+            if time_sec < 60:
+                time_str = f"{time_sec:.1f} s"
+            elif time_sec < 3600:
+                time_str = f"{time_sec/60:.1f} min"
+            else:
+                time_str = f"{time_sec/3600:.2f} hr"
+            msg += f", Time: {time_str}"
+        self.canvas.draw_idle()

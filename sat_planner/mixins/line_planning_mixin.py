@@ -14,6 +14,7 @@ from PyQt6.QtGui import QTextCursor
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, LineString, fiona
 from sat_planner import decimal_degrees_to_ddm
+from sat_planner.utils_ui import show_statistics_dialog
 
 try:
     from shapely.geometry import mapping as _shapely_mapping
@@ -727,4 +728,4 @@ class LinePlanningMixin:
             stats_text += "\nWAYPOINTS\n" + "-" * 10 + "\n"
             for i, (lat, lon) in enumerate(self.line_planning_points):
                 stats_text += f"WP{i+1}: {decimal_degrees_to_ddm(lat, True)}, {decimal_degrees_to_ddm(lon, False)} ({lat:.6f}, {lon:.6f})\n"
-        self._show_statistics_dialog("Line Planning Statistics", stats_text)
+        show_statistics_dialog(self, "Line Planning Statistics", stats_text)

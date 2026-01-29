@@ -10,6 +10,7 @@ from PyQt6.QtGui import QTextCursor
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, LineString, fiona
 from sat_planner import decimal_degrees_to_ddm
+from sat_planner.utils_ui import show_statistics_dialog
 
 
 class ReferenceMixin:
@@ -964,4 +965,40 @@ class ReferenceMixin:
             stats_text += f"CLE: {cle_lat_ddm}, {cle_lon_ddm} ({self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f})\n"
 
         # Create custom dialog window with copy functionality
-        self._show_statistics_dialog("Reference Planning Statistics", stats_text)
+        show_statistics_dialog(self, "Reference Planning Statistics", stats_text)
+
+    def _update_multiplier_label_len(self, val):
+        """Updates the label next to the line length multiplier slider."""
+        self.multiplier_label_len.setText(f"{float(val):.1f}")
+
+    def _update_multiplier_label_dist(self, val):
+        """Updates the label next to the distance between lines multiplier slider."""
+        self.multiplier_label_dist.setText(f"{float(val):.1f}")
+
+    def _on_parameter_changed(self):
+        """Handle parameter changes by restarting the auto-regenerate timer."""
+        self.auto_regenerate_timer.stop()
+        self.auto_regenerate_timer.start(800)  # 800ms debounce delay
+
+    def _auto_regenerate_survey_plan(self):
+        """Auto-regenerate survey plan when timer expires, if survey plan already exists."""
+        if hasattr(self, 'survey_lines_data') and len(self.survey_lines_data) > 0:
+            try:
+                is_valid, values = self._validate_inputs()
+                if is_valid:
+                    self._generate_and_plot(show_success_dialog=False)
+            except Exception as e:
+                print(f"Auto-regenerate failed: {e}")
+
+    def _on_line_length_or_speed_change(self, *args):
+        pass
+
+    def _update_export_name(self):
+        try:
+            dist = int(float(self.dist_between_lines_entry.text()))
+            heading = int(float(self.heading_entry.text()))
+            export_name = f"Reference_{dist}m_{heading}deg"
+            self.export_name_entry.clear()
+            self.export_name_entry.setText(export_name)
+        except Exception:
+            pass
