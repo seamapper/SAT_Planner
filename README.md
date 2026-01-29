@@ -48,6 +48,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Hillshade rendering for better terrain visualization
 - Dynamic resolution loading for performance
 - Support for various coordinate reference systems (CRS)
+- Survey plan axis labels in degrees–decimal minutes (DDM)
 
 ## Requirements
 
@@ -64,6 +65,30 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - pyproj
 - shapely
 - fiona
+
+### Optional (for map overlays)
+- Pillow (PIL) – required for Imagery Basemap and NOAA ENC Charts overlays
+
+## Project structure
+
+The application is organized as a package plus a launcher:
+
+- **`SAT_Planner_PyQt.py`** – Entry point; creates the main window and runs the app (`python SAT_Planner_PyQt.py`).
+- **`sat_planner/`** – Core package:
+  - **`constants.py`** – Version, config path, geospatial library availability.
+  - **`utils_geo.py`** – Coordinate helpers (e.g. decimal degrees to DDM).
+  - **`utils_ui.py`** – UI helpers (message boxes, confirmations).
+  - **`mixins/`** – Feature mixins used by the main window:
+    - **BasemapMixin** – Imagery basemap and NOAA ENC Charts overlays.
+    - **GeoTIFFMixin** – Load/remove GeoTIFF, display mode, dynamic resolution, contours.
+    - **PlottingMixin** – Survey plan plot, limits, colorbars, DDM axis labels.
+    - **ReferenceMixin** – Reference tab, survey lines, export/import.
+    - **CalibrationMixin** – Calibration tab, pitch/roll/heading lines, export/import.
+    - **LinePlanningMixin** – Line planning tab, draw/edit, profile, statistics.
+    - **ProfilesMixin** – Crossline, pitch, and line-planning elevation profiles.
+    - **MapInteractionMixin** – Click, scroll, pan, zoom, pick center/pitch/roll.
+    - **ExportImportMixin** – Save/load parameters, export survey files.
+    - **ConfigMixin** – Last-used directories, config load/save.
 
 ## Installation
 
@@ -87,12 +112,12 @@ cd SAT_Planner
 
 **Using pip:**
 ```bash
-pip install PyQt6 matplotlib numpy rasterio pyproj shapely fiona
+pip install PyQt6 matplotlib numpy rasterio pyproj shapely fiona Pillow
 ```
 
 **Using conda (recommended for Windows and macOS):**
 ```bash
-conda install -c conda-forge pyqt matplotlib numpy rasterio pyproj shapely fiona
+conda install -c conda-forge pyqt matplotlib numpy rasterio pyproj shapely fiona pillow
 ```
 
 3. Run the application:
@@ -109,17 +134,12 @@ python SAT_Planner_PyQt.py
 pip install pyinstaller
 ```
 
-2. Run the build script:
+2. Run the build script (edit `build_exe.bat` to set `PYTHON_PATH` and the spec filename if needed):
 ```bash
 build_exe.bat
 ```
 
-Or manually:
-```bash
-pyinstaller Sat_Planner_v2025.11.spec
-```
-
-The executable will be created in the `dist` folder.
+Or build manually with a PyInstaller spec file; the executable will be created in the `dist` folder.
 
 ### Building for macOS
 
@@ -282,6 +302,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.01**: Refactored into `sat_planner` package with mixins (Basemap, GeoTIFF, Plotting, Reference, Calibration, Line Planning, Profiles, Map Interaction, Export/Import, Config). Survey plan axes show DDM (degrees–decimal minutes) tick labels. Moved basemap/NOAA and geotiff/plotting helpers into mixins.
 - **v2025.11**: Fixed Dynamic Resolution for toolbar zoom/pan operations, updated About this Program dialog
 - **v2025.10**: Added Imagery Basemap and NOAA ENC Charts overlays with opacity controls, navigation toolbar at bottom of map, fixed Dynamic Resolution for toolbar zoom/pan, improved map visualization
 - **v2025.09**: Made profile colors coordinate with survey plot

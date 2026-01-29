@@ -1,5 +1,20 @@
 # Refactoring Plan: SAT_Planner_PyQt.py into Smaller Modules
 
+## Progress summary
+
+| Phase | Status |
+|-------|--------|
+| Package + constants + utils | **Done** – `sat_planner/`, `constants.py`, `utils_geo.py`, `utils_ui.py` |
+| All mixins extracted | **Done** – Basemap, GeoTIFF, Plotting, Reference, Calibration, Line Planning, Profiles, Map Interaction, Export/Import, Config |
+| GeoTIFF/plotting helpers moved | **Done** – resolution, zoom/pan, _reset_to_consistent_view, _calculate_consistent_plot_limits, _calculate_slope_at_point, _get_depth_at_point in mixins |
+| Basemap/NOAA web services | **Done** – `BasemapMixin` (_toggle_imagery_basemap, _load_and_plot_basemap, _load_and_plot_noaa_charts, etc.) |
+| Survey plan DDM axis labels | **Done** – degrees–decimal minutes in `plotting_mixin` via `utils_geo.decimal_degrees_to_ddm` |
+| Move app class to package | **Remaining** – put `SurveyPlanApp` in `sat_planner/app_core.py`, launcher in `SAT_Planner_PyQt.py` |
+| Move remaining methods from main | **Remaining** – ~22 methods still in main file (see table below) |
+| Optional: `main.py`, `widgets/` | **Optional** – `python -m sat_planner`; split `_create_widgets` by tab |
+
+---
+
 ## Would splitting help?
 
 **Yes.** A single 10,000+ line file with one giant class is hard to:
@@ -16,16 +31,9 @@ Breaking the app into logical modules makes each of these easier.
 
 ## Current structure (summary)
 
-- **One class:** `SurveyPlanApp(QMainWindow)` (~10,100 lines)
-- **117+ methods** covering:
-  - GeoTIFF load/display, dynamic resolution, contours
-  - Reference planning (survey lines, crossline, export/import)
-  - Calibration (pitch/roll lines, heading, export/import)
-  - Line planning (draw line, profile, statistics)
-  - Map interaction (click, scroll, pan, zoom)
-  - Profile plots (crossline, pitch, line planning)
-  - UI setup (`_create_widgets`), dialogs, activity log
-  - Utilities (messages, coordinate conversion, config paths)
+- **Entry point:** `SAT_Planner_PyQt.py` – creates `SurveyPlanApp`, runs app (~1,800 lines; down from ~10,100).
+- **Package:** `sat_planner/` – constants, utils_geo, utils_ui, and 10 mixins (Basemap, GeoTIFF, Plotting, Reference, Calibration, Line Planning, Profiles, Map Interaction, Export/Import, Config).
+- **Still in main file:** ~22 methods – `__init__`, `_setup_layout`, `_create_widgets`, message wrappers, parameter/tab handlers, calibration helpers, colormap/temp-line events, `_on_mouse_motion`, `_show_statistics_dialog`, etc.
 
 ---
 
@@ -35,86 +43,107 @@ Keep `SurveyPlanApp` as the main window, but **split its behavior into mixins** 
 
 ### 1. Package layout
 
+**In place:**  
+`SAT_Planner_PyQt.py` (launcher + `SurveyPlanApp`), `sat_planner/` with:
+
 ```
-MBES_Test_Planner/
-├── SAT_Planner_PyQt.py      # optional: thin launcher that imports from sat_planner
-├── sat_planner/
-│   ├── __init__.py          # __version__, GEOSPATIAL_LIBS_AVAILABLE, SurveyPlanApp
-│   ├── main.py              # if __name__ == "__main__": QApplication, window.show()
-│   ├── constants.py         # CONFIG_FILENAME, version, geospatial import flag
-│   ├── utils_ui.py          # _show_message, _ask_yes_no, _ask_ok_cancel (need QApplication)
-│   ├── utils_geo.py         # decimal_degrees_to_ddm, depth/slope helpers (pure)
-│   ├── app_core.py          # SurveyPlanApp __init__, _setup_layout, _create_widgets (or import)
-│   ├── mixins/
-│   │   ├── __init__.py
-│   │   ├── geotiff_mixin.py      # Load/remove GeoTIFF, resolution, display mode, contours
-│   │   ├── plotting_mixin.py     # _plot_survey_plan, _clear_plot, colorbars
-│   │   ├── reference_mixin.py    # Reference tab, survey lines, export/import reference
-│   │   ├── calibration_mixin.py  # Pitch/roll lines, calibration export/import, cal stats
-│   │   ├── line_planning_mixin.py# Line planning tab, draw/edit, profile, line stats
-│   │   ├── profiles_mixin.py      # Crossline/pitch/line planning profile drawing
-│   │   ├── map_interaction_mixin.py # Click, scroll, pan, zoom, pick center/pitch/roll
-│   │   ├── export_import_mixin.py   # Save/load params, export/import survey files
-│   │   └── config_mixin.py        # Last-used dirs, config load/save
-│   └── widgets/
-│       ├── __init__.py
-│       └── tab_reference.py   # optional: build reference tab given parent app
-│       └── tab_calibration.py
-│       └── tab_line_planning.py
+sat_planner/
+├── __init__.py              # __version__, CONFIG_FILENAME, GEOSPATIAL_LIBS_AVAILABLE, decimal_degrees_to_ddm, show_message, ask_yes_no, ask_ok_cancel
+├── constants.py             # CONFIG_FILENAME, __version__, geospatial imports (rasterio, pyproj, etc.)
+├── utils_ui.py               # show_message, ask_yes_no, ask_ok_cancel (take parent)
+├── utils_geo.py             # decimal_degrees_to_ddm, decimal_degrees_to_dms_string (pure)
+├── mixins/
+│   ├── __init__.py
+│   ├── basemap_mixin.py     # Imagery basemap, NOAA ENC Charts (toggles, load, opacity)
+│   ├── geotiff_mixin.py     # Load/remove GeoTIFF, resolution, display mode, contours, slope/depth at point, reset view
+│   ├── plotting_mixin.py    # _plot_survey_plan, _clear_plot, colorbars, _calculate_consistent_plot_limits, DDM axis labels
+│   ├── reference_mixin.py   # Reference tab, survey lines, export/import reference
+│   ├── calibration_mixin.py # Pitch/roll lines, calibration export/import, cal stats
+│   ├── line_planning_mixin.py # Line planning tab, draw/edit, profile, line stats
+│   ├── profiles_mixin.py    # Crossline/pitch/line planning profile drawing
+│   ├── map_interaction_mixin.py # Click, scroll, pan, zoom, pick center/pitch/roll, basemap/NOAA reload timers
+│   ├── export_import_mixin.py   # Save/load params, export/import survey files
+│   └── config_mixin.py      # Last-used dirs, config load/save
 ```
+
+**Remaining / optional:**
+
+- **app_core.py** (remaining) – Move `SurveyPlanApp` class here (with `__init__`, `_setup_layout`, `_create_widgets`, `_on_tab_changed`, `_quit_app`, `_show_about_dialog`). Launcher stays in `SAT_Planner_PyQt.py` and imports `SurveyPlanApp` from `sat_planner`.
+- **main.py** (optional) – `if __name__ == "__main__":` so you can run `python -m sat_planner`.
+- **widgets/** (optional) – `tab_reference.py`, `tab_calibration.py`, `tab_line_planning.py`; each builds one tab given `self` (app). `_create_widgets` in app_core just calls them.
 
 - **constants.py** – single source of truth for version and config path.
-- **utils_ui.py** – small helpers that need Qt (message boxes, etc.); can stay as methods on the app or become functions that take `parent` if you prefer.
-- **utils_geo.py** – pure coordinate/depth/slope helpers; easy to unit test.
-- **mixins/** – each file holds one logical group of methods. `SurveyPlanApp` inherits from all of them (e.g. `class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, ...):`). No change to how methods call each other or use `self`.
-- **widgets/** – optional; you can later move tab-building code into functions or small classes that take `self` (the app) and attach widgets to it.
+- **utils_ui.py** – Qt helpers (message boxes, etc.); used as functions with `parent`.
+- **utils_geo.py** – pure coordinate helpers (DDM, DMS); easy to unit test.
+- **mixins/** – `SurveyPlanApp` inherits from all 10 mixins; methods use `self` as before.
 
-### 2. Main app class (after refactor)
+### 2. Main app class (current and target)
+
+**Current:** `SurveyPlanApp` is defined in `SAT_Planner_PyQt.py` and inherits from all 10 mixins:
 
 ```python
-# sat_planner/app_core.py
-from PyQt6.QtWidgets import QMainWindow, ...
-from .constants import CONFIG_FILENAME, __version__
-from .mixins.geotiff_mixin import GeoTIFFMixin
-from .mixins.plotting_mixin import PlottingMixin
-from .mixins.reference_mixin import ReferenceMixin
-# ... other mixins
-
-class SurveyPlanApp(GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixin,
+# SAT_Planner_PyQt.py (current)
+class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixin,
                     LinePlanningMixin, ProfilesMixin, MapInteractionMixin,
                     ExportImportMixin, ConfigMixin, QMainWindow):
-    def __init__(self):
-        super().__init__()
-        # Only init state and layout here; mixins provide the methods.
-        ...
+    ...
 ```
+
+**Target (remaining):** Move the class into `sat_planner/app_core.py` so `SAT_Planner_PyQt.py` becomes a thin launcher that imports `SurveyPlanApp` and runs the app. Same inheritance list; `__init__`, `_setup_layout`, `_create_widgets`, and any remaining “core” methods live in app_core.
 
 ### 3. What to move where (method → module)
 
+**Done:** constants, utils_ui, utils_geo; all 10 mixins exist and contain the methods below (plus BasemapMixin for basemap/NOAA). GeoTIFF and Plotting mixins also have: _load_geotiff_at_resolution, _reload_geotiff_at_current_zoom, _clear_rapid_zoom_mode, _clear_panning_mode, _toggle_dynamic_resolution, _reset_to_consistent_view, _calculate_consistent_plot_limits, _calculate_slope_at_point, _get_depth_at_point. Plotting has DDM axis labels via utils_geo.decimal_degrees_to_ddm.
+
+**Remaining (still in SAT_Planner_PyQt.py):**
+
+| Still in main file | Target |
+|--------------------|--------|
+| _show_message, _ask_yes_no, _ask_ok_cancel | Remove wrappers; call utils_ui show_message, ask_yes_no, ask_ok_cancel directly where used. |
+| _show_about_dialog | Keep in app (app_core). |
+| _update_multiplier_label_len, _update_multiplier_label_dist | reference_mixin |
+| _setup_layout | app_core |
+| _on_parameter_changed, _auto_regenerate_survey_plan | reference_mixin |
+| _quit_app | app_core |
+| _on_line_length_or_speed_change, _update_export_name | reference_mixin |
+| _update_cal_line_offset_from_pitch_line, _add_heading_lines_from_pitch_line, _update_cal_export_name_from_pitch_line | calibration_mixin |
+| _on_draw_event_update_colormap, _on_temp_line_motion | geotiff_mixin or plotting_mixin |
+| _on_mouse_motion | map_interaction_mixin |
+| _on_tab_changed | app_core |
+| _create_widgets | app_core (or later split into widgets/) |
+| _show_statistics_dialog | utils_ui (function with parent) or keep in app |
+
+**Original mapping (for reference):**
+
 | Module | Methods (examples) |
 |--------|---------------------|
-| **constants** | CONFIG_FILENAME, __version__, GEOSPATIAL_LIBS_AVAILABLE |
-| **utils_ui** | _show_message, _ask_yes_no, _ask_ok_cancel |
-| **utils_geo** | _decimal_degrees_to_ddm, _get_depth_at_point, _calculate_slope_at_point |
-| **geotiff_mixin** | _load_geotiff, _remove_geotiff, _load_geotiff_at_resolution, _on_geotiff_display_mode_changed, _on_contour_*, _toggle_dynamic_resolution |
-| **plotting_mixin** | _plot_survey_plan, _clear_plot, _remove_colorbar, _generate_and_plot |
-| **reference_mixin** | _export_survey_data, _import_survey_files (ref), _validate_inputs (ref), set_ref_info_text, _reset_reference_tab, _show_reference_planning_info |
-| **calibration_mixin** | _toggle_pick_pitch_line_mode, _toggle_edit_pitch_line_mode, _toggle_pick_roll_line_mode, pitch/roll handle events, _export_cal_survey_files, _import_cal_survey_files, _show_calibration_statistics |
-| **line_planning_mixin** | _toggle_line_planning_mode, _clear_line_planning, line planning click/handle events, _draw_line_planning_profile, _show_line_information |
-| **profiles_mixin** | _get_profile_data_from_geotiff, _draw_crossline_profile, _draw_pitch_line_profile, _draw_current_profile |
-| **map_interaction_mixin** | _on_plot_click, _on_scroll, _on_middle_*, _zoom_to_*, _toggle_pick_center_mode |
-| **export_import_mixin** | _save_survey_parameters, _load_survey_parameters, _export_survey_files, etc. |
-| **config_mixin** | _load_last_used_dir, _save_last_used_dir, _load_last_geotiff_dir, ... |
-
-You can refine this table as you split (e.g. move a method to a different mixin if it fits better).
+| **constants** | CONFIG_FILENAME, __version__, GEOSPATIAL_LIBS_AVAILABLE ✓ |
+| **utils_ui** | show_message, ask_yes_no, ask_ok_cancel ✓ |
+| **utils_geo** | decimal_degrees_to_ddm, (get_depth/slope in geotiff_mixin) ✓ |
+| **basemap_mixin** | _toggle_imagery_basemap, _toggle_noaa_charts, _load_and_plot_basemap, _load_and_plot_noaa_charts, _update_noaa_charts_opacity ✓ |
+| **geotiff_mixin** | _load_geotiff, _remove_geotiff, _load_geotiff_at_resolution, _toggle_dynamic_resolution, _reset_to_consistent_view, _calculate_slope_at_point, _get_depth_at_point, … ✓ |
+| **plotting_mixin** | _plot_survey_plan, _clear_plot, _calculate_consistent_plot_limits, DDM axis labels, … ✓ |
+| **reference_mixin** | _export_survey_data, _validate_inputs (ref), set_ref_info_text, … (+ remaining: _on_parameter_changed, _auto_regenerate_survey_plan, multiplier labels, _update_export_name, _on_line_length_or_speed_change) |
+| **calibration_mixin** | pitch/roll/heading, export/import cal (+ remaining: _update_cal_line_offset_from_pitch_line, _add_heading_lines_from_pitch_line, _update_cal_export_name_from_pitch_line) |
+| **line_planning_mixin** | _toggle_line_planning_mode, _draw_line_planning_profile, … ✓ |
+| **profiles_mixin** | _draw_crossline_profile, _draw_pitch_line_profile, _draw_current_profile ✓ |
+| **map_interaction_mixin** | _on_plot_click, _on_scroll, pan, zoom, pick center (+ remaining: _on_mouse_motion) |
+| **export_import_mixin** | _save_survey_parameters, _load_survey_parameters, _export_survey_files, … ✓ |
+| **config_mixin** | _load_last_used_dir, _save_last_used_dir, … ✓ |
 
 ### 4. Migration strategy (low risk)
 
-1. **Create the package** – Add `sat_planner/`, `constants.py`, `utils_geo.py`, and empty mixin files.
-2. **Extract constants and pure utils** – Move version, config path, and geospatial flag to `constants.py`. Move coordinate/depth/slope helpers to `utils_geo.py` and have the main file import them. Run the app and tests to confirm nothing breaks.
-3. **Extract one mixin** – Pick the smallest coherent block (e.g. GeoTIFF or Config “last used dirs”). Move those methods into a mixin, add the mixin as a base class of `SurveyPlanApp`, and remove those methods from the monolith. Run again.
-4. **Repeat** – Extract one mixin at a time, run after each step. Fix any missing `self` or cross-mixin calls.
-5. **Optional** – Move `_create_widgets` into smaller functions in `widgets/` (e.g. one function per tab) that take `self` and create the widgets. The main app still calls them from `_create_widgets`.
+**Done:**
+
+1. ~~Create the package~~ – `sat_planner/`, `constants.py`, `utils_geo.py`, `utils_ui.py`, and all 10 mixin files.
+2. ~~Extract constants and pure utils~~ – Version, config path, geospatial imports in `constants.py`; DDM/DMS in `utils_geo.py`; message/confirm in `utils_ui.py`.
+3. ~~Extract mixins~~ – All 10 mixins extracted (Basemap, GeoTIFF, Plotting, Reference, Calibration, Line Planning, Profiles, Map Interaction, Export/Import, Config). GeoTIFF/plotting helpers and basemap/NOAA moved into mixins. Survey plan axes use DDM labels.
+
+**Next (recommended order):**
+
+4. **Move remaining methods from main file** – Move the ~22 methods still in `SAT_Planner_PyQt.py` into the target mixins or app_core (see table in §3). Remove message wrappers and call `utils_ui` directly. Run after each move.
+5. **Move app class to package** – Create `sat_planner/app_core.py` with `SurveyPlanApp` (and `__init__`, `_setup_layout`, `_create_widgets`, `_on_tab_changed`, `_quit_app`, `_show_about_dialog`). Have `SAT_Planner_PyQt.py` import `SurveyPlanApp` from `sat_planner` and run the app. Main file becomes a thin launcher.
+6. **Optional** – Add `sat_planner/main.py` for `python -m sat_planner`. Optionally split `_create_widgets` into `widgets/tab_*.py` (one function per tab).
 
 ### 5. Alternative: composition instead of mixins
 
@@ -130,22 +159,5 @@ That’s cleaner OOP but requires more refactoring: the current code often does 
 ## Summary
 
 - **Yes, breaking the program into smaller pieces will make editing (and navigating, testing, and reviewing) easier.**
-- **Recommended first step:** Introduce the `sat_planner` package, move constants and pure geo utils, then extract one mixin (e.g. config or GeoTIFF) and wire it up. After that, repeat for the other logical blocks using the table above.
-
-### 6. Quick start (package created)
-
-A starter package is in place:
-
-- **`sat_planner/constants.py`** – `__version__`, `CONFIG_FILENAME`, `GEOSPATIAL_LIBS_AVAILABLE`
-- **`sat_planner/utils_geo.py`** – `decimal_degrees_to_ddm(decimal_deg, is_latitude=True)` (pure function)
-- **`sat_planner/__init__.py`** – re-exports the above
-- **`sat_planner/mixins/`** – placeholder for future mixins
-
-To use it from `SAT_Planner_PyQt.py` without moving the whole app:
-
-1. At the top, add:  
-   `from sat_planner import __version__, CONFIG_FILENAME, GEOSPATIAL_LIBS_AVAILABLE, decimal_degrees_to_ddm`
-2. Remove the local `__version__`, `CONFIG_FILENAME`, and the geospatial try/except block (they’re now in `sat_planner.constants`).
-3. Replace every `self._decimal_degrees_to_ddm(...)` with `decimal_degrees_to_ddm(...)` (and keep the same two arguments).
-
-The app can still be run as `python SAT_Planner_PyQt.py`. After that, extract one mixin at a time following the table in section 3.
+- **Done:** Package, constants, utils, all 10 mixins (including Basemap), geotiff/plotting helpers, DDM axis labels. Main file reduced from ~10,100 to ~1,800 lines.
+- **Next:** Move the ~22 remaining methods from `SAT_Planner_PyQt.py` into the target mixins (see §3). Then move `SurveyPlanApp` into `sat_planner/app_core.py` so the main file is a thin launcher. Optional: `main.py`, `widgets/`.

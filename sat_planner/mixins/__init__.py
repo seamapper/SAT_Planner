@@ -1,7 +1,8 @@
 """
 Mixins for SurveyPlanApp. Each mixin holds a logical group of methods.
-SurveyPlanApp will inherit from these (e.g. GeoTIFFMixin, PlottingMixin, ReferenceMixin, ...).
+SurveyPlanApp will inherit from these (e.g. BasemapMixin, GeoTIFFMixin, PlottingMixin, ...).
 """
+from .basemap_mixin import BasemapMixin
 from .geotiff_mixin import GeoTIFFMixin
 from .plotting_mixin import PlottingMixin
 from .reference_mixin import ReferenceMixin
@@ -12,4 +13,4 @@ from .map_interaction_mixin import MapInteractionMixin
 from .export_import_mixin import ExportImportMixin
 from .config_mixin import ConfigMixin
 
-__all__ = ["GeoTIFFMixin", "PlottingMixin", "ReferenceMixin", "CalibrationMixin", "LinePlanningMixin", "ProfilesMixin", "MapInteractionMixin", "ExportImportMixin", "ConfigMixin"]
+__all__ = ["BasemapMixin", "GeoTIFFMixin", "PlottingMixin", "ReferenceMixin", "CalibrationMixin", "LinePlanningMixin", "ProfilesMixin", "MapInteractionMixin", "ExportImportMixin", "ConfigMixin"]

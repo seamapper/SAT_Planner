@@ -285,6 +285,18 @@ class GeoTIFFMixin:
         else:
             print(f"DEBUG: Dynamic resolution toggled to {status}, but no GeoTIFF loaded")
 
+    def _reset_to_consistent_view(self):
+        """Reset the plot view to the consistent limits that maintain window size."""
+        if self.geotiff_extent is None:
+            # No GeoTIFF loaded, use global limits
+            self.ax.set_xlim(self.fixed_xlim)
+            self.ax.set_ylim(self.fixed_ylim)
+        else:
+            # Use the calculated consistent limits
+            self.ax.set_xlim(self.current_xlim)
+            self.ax.set_ylim(self.current_ylim)
+        self.canvas.draw_idle()
+
     def _load_geotiff(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot load GeoTIFF.")
@@ -803,3 +815,70 @@ class GeoTIFFMixin:
         # Replot everything with preserve_view_limits=True to keep our limits
         # This will properly display the GeoTIFF and preserve all existing lines
         self._plot_survey_plan(preserve_view_limits=True)
+
+    def _calculate_slope_at_point(self, lat, lon):
+        """Calculate slope at a given lat/lon point."""
+        if (self.geotiff_data_array is None or self.geotiff_extent is None):
+            return None, None
+
+        try:
+            left, right, bottom, top = tuple(self.geotiff_extent)
+            nrows, ncols = self.geotiff_data_array.shape
+
+            col = int((lon - left) / (right - left) * (ncols - 1))
+            row = int((top - lat) / (top - bottom) * (nrows - 1))
+
+            if 0 <= row < nrows and 0 <= col < ncols:
+                elevation = self.geotiff_data_array[row, col]
+
+                center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
+                m_per_deg_lat = 111320.0
+                m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat_geotiff))
+
+                res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / self.geotiff_data_array.shape[0]
+                res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / self.geotiff_data_array.shape[1]
+
+                dx_m = res_lon_deg * m_per_deg_lon
+                dy_m = res_lat_deg * m_per_deg_lat
+
+                window_size = 3
+                r_start = max(0, row - window_size // 2)
+                r_end = min(nrows, row + window_size // 2 + 1)
+                c_start = max(0, col - window_size // 2)
+                c_end = min(ncols, col + window_size // 2 + 1)
+
+                window_data = self.geotiff_data_array[r_start:r_end, c_start:c_end]
+
+                if window_data.size > 1 and not np.all(np.isnan(window_data)):
+                    dz_dy, dz_dx = np.gradient(window_data, dy_m, dx_m)
+                    slope_rad = np.arctan(np.sqrt(dz_dx**2 + dz_dy**2))
+                    slope_degrees = np.degrees(slope_rad)
+                    center_idx = window_size // 2
+                    if center_idx < slope_degrees.shape[0] and center_idx < slope_degrees.shape[1]:
+                        return elevation, slope_degrees[center_idx, center_idx]
+                    return elevation, slope_degrees[0, 0]
+                return elevation, None
+            return None, None
+        except Exception as e:
+            print(f"Error calculating slope: {e}")
+            return None, None
+
+    def _get_depth_at_point(self, lat, lon):
+        """Get depth/elevation at a given lat/lon point."""
+        if (self.geotiff_data_array is None or self.geotiff_extent is None):
+            return 0.0
+
+        try:
+            left, right, bottom, top = tuple(self.geotiff_extent)
+            nrows, ncols = self.geotiff_data_array.shape
+
+            col = int((lon - left) / (right - left) * (ncols - 1))
+            row = int((top - lat) / (top - bottom) * (nrows - 1))
+
+            if 0 <= row < nrows and 0 <= col < ncols:
+                elevation = self.geotiff_data_array[row, col]
+                return elevation if not np.isnan(elevation) else 0.0
+            return 0.0
+        except Exception as e:
+            print(f"Error getting depth: {e}")
+            return 0.0

@@ -310,6 +310,85 @@ class PlottingMixin:
 
         return vert_exag
 
+    def _calculate_consistent_plot_limits(self):
+        """Calculate plot limits that maintain consistent window size regardless of GeoTIFF dimensions."""
+        if self.geotiff_extent is None:
+            # No GeoTIFF loaded, use global limits
+            return self.fixed_xlim, self.fixed_ylim
+
+        # Get GeoTIFF extent
+        min_lon, max_lon, min_lat, max_lat = self.geotiff_extent
+
+        # Calculate the center of the GeoTIFF
+        center_lon = (min_lon + max_lon) / 2
+        center_lat = (min_lat + max_lat) / 2
+
+        # Calculate the dimensions of the GeoTIFF
+        geotiff_width = max_lon - min_lon
+        geotiff_height = max_lat - min_lat
+
+        # Calculate geographic aspect ratio at center latitude
+        # Longitude degrees get shorter as you move away from equator
+        center_lat_rad = np.radians(center_lat)
+        geographic_aspect = 1.0 / np.cos(center_lat_rad)
+        geographic_aspect = np.clip(geographic_aspect, 0.1, 10.0)
+
+        # Get figure dimensions to calculate figure aspect ratio
+        fig_width, fig_height = self.figure.get_size_inches()
+        plot_width = fig_width * (0.95 - 0.08)  # right - left margins
+        plot_height = fig_height * (0.95 - 0.08)  # top - bottom margins
+        figure_aspect = plot_width / plot_height
+
+        # Calculate the GeoTIFF's display aspect ratio (accounting for geographic aspect)
+        # When displayed, longitude is stretched by geographic_aspect
+        geotiff_display_width = geotiff_width * geographic_aspect
+        geotiff_display_height = geotiff_height
+        geotiff_display_aspect = geotiff_display_width / geotiff_display_height if geotiff_display_height > 0 else 1.0
+
+        # Use GeoTIFF dimensions directly with minimal buffer (1% to avoid edge clipping)
+        buffer_factor = 1.01
+
+        # Calculate limits that will fill the figure while maintaining GeoTIFF aspect ratio
+        # We want the display aspect of our limits to match the figure aspect
+        # Display aspect = (width * geographic_aspect) / height
+        # We want: (width * geographic_aspect) / height = figure_aspect
+        # So: width / height = figure_aspect / geographic_aspect
+
+        # Start with GeoTIFF dimensions with minimal buffer
+        base_width = geotiff_width * buffer_factor
+        base_height = geotiff_height * buffer_factor
+
+        # Calculate what the display aspect would be with these dimensions
+        base_display_aspect = (base_width * geographic_aspect) / base_height if base_height > 0 else 1.0
+
+        # Adjust to match figure aspect while maintaining GeoTIFF's aspect ratio
+        # Only expand in one dimension to fill the figure, keeping the other at the GeoTIFF size
+        if base_display_aspect > figure_aspect:
+            # Display would be wider than figure - expand height to fill, keep width at GeoTIFF size
+            new_height = (base_width * geographic_aspect) / figure_aspect
+            new_width = base_width
+        else:
+            # Display would be taller than figure - expand width to fill, keep height at GeoTIFF size
+            new_width = (base_height * figure_aspect) / geographic_aspect
+            new_height = base_height
+
+        # Set minimum size
+        min_plot_size = 0.1  # degrees
+        new_width = max(new_width, min_plot_size)
+        new_height = max(new_height, min_plot_size)
+
+        # Calculate new limits centered on the GeoTIFF
+        half_width = new_width / 2
+        half_height = new_height / 2
+        new_xlim = (center_lon - half_width, center_lon + half_width)
+        new_ylim = (center_lat - half_height, center_lat + half_height)
+
+        # Ensure limits don't exceed global bounds
+        new_xlim = (max(-180, new_xlim[0]), min(180, new_xlim[1]))
+        new_ylim = (max(-90, new_ylim[0]), min(90, new_ylim[1]))
+
+        return new_xlim, new_ylim
+
     def _plot_survey_plan(self, preserve_view_limits=True):
         try:
             # Remove all axes except the main one to prevent accumulation of colorbar axes
