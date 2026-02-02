@@ -1,10 +1,10 @@
 @echo off
 REM Build executable for SAT Planner
-REM This script builds the executable using PyInstaller
+REM Output: SAT_Planner_v{version}.exe (version from sat_planner.constants). Icon: media\CCOM.ico
 
 set PYTHON_PATH=C:\Users\pjohnson\PycharmProjects\MultibeamToolsMolokai\.venv\Scripts\python.exe
 
-echo Building Sat_Planner_v2025.05.exe...
+echo Building SAT Planner executable (name and version from code)...
 echo.
 
 REM Check if PyInstaller is installed
@@ -14,8 +14,8 @@ if errorlevel 1 (
     "%PYTHON_PATH%" -m pip install pyinstaller
 )
 
-REM Build the executable using the spec file
-"%PYTHON_PATH%" -m PyInstaller Sat_Planner_v2025.05.spec
+REM Build using SAT_Planner.spec (exe name = SAT_Planner_v + __version__, icon = media\CCOM.ico)
+"%PYTHON_PATH%" -m PyInstaller SAT_Planner.spec
 
 if errorlevel 1 (
     echo.
