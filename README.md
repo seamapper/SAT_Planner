@@ -15,8 +15,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ### Core Functionality
 - **Multi-tab Interface**: Separate tabs for Calibration, Reference, and Line planning
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
-- **Dynamic Resolution**: Automatically adjust GeoTIFF resolution based on zoom level (works with mouse wheel, toolbar zoom, and pan)
-- **Navigation Toolbar**: Built-in matplotlib navigation toolbar at bottom of map window
+- **Dynamic Resolution**: Automatically adjust GeoTIFF resolution based on zoom level
 - **Interactive Plotting**: Pan, zoom, and interact with survey plans on the map
 - **Real-time Statistics**: Calculate survey distances, times, and comprehensive statistics
 - **Elevation Profiles**: View elevation and slope profiles for drawn lines
@@ -27,14 +26,18 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Generate heading calibration lines from pitch line
 - Calculate heading line offset based on median depth
 - Display pitch line depth statistics (shallowest, maximum, mean, median)
-- Export calibration survey plans
+- Configure turn time for accurate time estimates
+- Comprehensive statistics with survey time, transit time, and turn time breakdowns
+- Validation warning when heading line offset exceeds 2x shallowest depth
+- Export calibration survey plans with detailed statistics
 
 ### Reference Survey Planning
 - Generate parallel survey lines with customizable parameters
 - Auto-regenerate plans when parameters change (with debounce)
-- Configure line length, spacing, heading, and speed
-- Calculate comprehensive survey statistics
-- Export reference survey plans
+- Configure line length, spacing, heading, speed, and turn time
+- Calculate comprehensive survey statistics with time breakdowns
+- Survey time breakdown showing main lines, crossline, transit, and turn times
+- Export reference survey plans with detailed statistics
 
 ### Line Planning
 - Interactive line drawing with waypoint support
@@ -49,12 +52,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Hillshade rendering for better terrain visualization
 - Dynamic resolution loading for performance
 - Support for various coordinate reference systems (CRS)
-
-### Map Overlays
-- **Imagery Basemap**: Toggle satellite imagery basemap overlay with adjustable opacity
-- **NOAA ENC Charts**: Display NOAA Electronic Navigational Charts overlay with adjustable opacity
-- Both overlays support real-time updates as you pan and zoom
-- Overlays are properly reprojected to match your plot coordinate system
+- Survey plan axis labels in degrees–decimal minutes (DDM)
 
 ## Requirements
 
@@ -72,12 +70,36 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - shapely
 - fiona
 
+### Optional (for map overlays)
+- Pillow (PIL) – required for Imagery Basemap and NOAA ENC Charts overlays
+
+## Project structure
+
+The application is organized as a package plus a launcher:
+
+- **`SAT_Planner_PyQt.py`** – Entry point; creates the main window and runs the app (`python SAT_Planner_PyQt.py`).
+- **`sat_planner/`** – Core package:
+  - **`constants.py`** – Version, config path, geospatial library availability.
+  - **`utils_geo.py`** – Coordinate helpers (e.g. decimal degrees to DDM).
+  - **`utils_ui.py`** – UI helpers (message boxes, confirmations).
+  - **`mixins/`** – Feature mixins used by the main window:
+    - **BasemapMixin** – Imagery basemap and NOAA ENC Charts overlays.
+    - **GeoTIFFMixin** – Load/remove GeoTIFF, display mode, dynamic resolution, contours.
+    - **PlottingMixin** – Survey plan plot, limits, colorbars, DDM axis labels.
+    - **ReferenceMixin** – Reference tab, survey lines, export/import.
+    - **CalibrationMixin** – Calibration tab, pitch/roll/heading lines, export/import.
+    - **LinePlanningMixin** – Line planning tab, draw/edit, profile, statistics.
+    - **ProfilesMixin** – Crossline, pitch, and line-planning elevation profiles.
+    - **MapInteractionMixin** – Click, scroll, pan, zoom, pick center/pitch/roll.
+    - **ExportImportMixin** – Save/load parameters, export survey files.
+    - **ConfigMixin** – Last-used directories, config load/save.
+
 ## Installation
 
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `Sat_Planner_v2025.11.exe` (Windows) or newer
+- `SAT_Planner_v2026.02.exe` (Windows) or newer
 - `SAT_Planner.app` (macOS) - if available
 
 No installation required - just run the executable or app bundle.
@@ -94,12 +116,12 @@ cd SAT_Planner
 
 **Using pip:**
 ```bash
-pip install PyQt6 matplotlib numpy rasterio pyproj shapely fiona
+pip install PyQt6 matplotlib numpy rasterio pyproj shapely fiona Pillow
 ```
 
 **Using conda (recommended for Windows and macOS):**
 ```bash
-conda install -c conda-forge pyqt matplotlib numpy rasterio pyproj shapely fiona
+conda install -c conda-forge pyqt matplotlib numpy rasterio pyproj shapely fiona pillow
 ```
 
 3. Run the application:
@@ -116,17 +138,12 @@ python SAT_Planner_PyQt.py
 pip install pyinstaller
 ```
 
-2. Run the build script:
+2. Run the build script (edit `build_exe.bat` to set `PYTHON_PATH` and the spec filename if needed):
 ```bash
 build_exe.bat
 ```
 
-Or manually:
-```bash
-pyinstaller Sat_Planner_v2025.11.spec
-```
-
-The executable will be created in the `dist` folder.
+Or build manually with a PyInstaller spec file; the executable will be created in the `dist` folder.
 
 ### Building for macOS
 
@@ -187,13 +204,15 @@ create-dmg dist/SAT_Planner.app dist/
 
 1. Load a GeoTIFF (recommended)
 2. Click "Draw a Pitch Line" and click start/end points on the map
-3. Click "Add Heading Lines" to generate heading calibration lines
-4. Click "Draw a Roll Line" and click start/end points
-5. View statistics and export as needed
+3. Configure Turn Time (min) in Calibration Info - default: 5 minutes
+4. Click "Add Heading Lines" to generate heading calibration lines (warning shown if offset > 2x shallowest depth)
+5. Click "Draw a Roll Line" and click start/end points
+6. View comprehensive statistics showing survey time, transit time, and turn time breakdowns
+7. Export as needed (statistics file includes all details from dialog)
 
 ### Reference Survey Planning
 
-1. Optionally load a GeoTIFF and pick a center point
+1. Optionally load a GeoTIFF and pick a center point (view stays at current zoom)
 2. Enter survey parameters:
    - Central Latitude/Longitude
    - Number of Lines
@@ -201,8 +220,10 @@ create-dmg dist/SAT_Planner.app dist/
    - Heading
    - Distance Between Lines
    - Survey Speed
+   - Turn Time (min) - default: 5 minutes
 3. The plan auto-regenerates as you change parameters
-4. View statistics and export the plan
+4. View comprehensive statistics with survey time, transit time, and turn time breakdowns
+5. Export the plan
 
 ### Line Planning
 
@@ -289,6 +310,8 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.02**: Added Turn Time parameter to Calibration and Reference Info tabs. Enhanced statistics displays with Total Survey Time and Total Transit Time breakdowns. Fixed autozoom issue when picking center from GeoTIFF. Added validation warning when heading line offset exceeds 2x shallowest depth. Updated export functions to include comprehensive statistics matching dialog displays.
+- **v2026.01**: Refactored into `sat_planner` package with mixins (Basemap, GeoTIFF, Plotting, Reference, Calibration, Line Planning, Profiles, Map Interaction, Export/Import, Config). Survey plan axes show DDM (degrees–decimal minutes) tick labels. Moved basemap/NOAA and geotiff/plotting helpers into mixins.
 - **v2025.11**: Fixed Dynamic Resolution for toolbar zoom/pan operations, updated About this Program dialog
 - **v2025.10**: Added Imagery Basemap and NOAA ENC Charts overlays with opacity controls, navigation toolbar at bottom of map, fixed Dynamic Resolution for toolbar zoom/pan, improved map visualization
 - **v2025.09**: Made profile colors coordinate with survey plot
