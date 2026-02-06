@@ -1051,12 +1051,14 @@ class PlottingMixin:
             self.geotiff_to_wgs84_transformer = None
             self.wgs84_to_geotiff_transformer = None
 
-            # Disable Remove GeoTIFF button and Pick Center button
+            # Disable Remove GeoTIFF, Pick Center, and Zoom to GeoTIFF buttons
             if hasattr(self, 'remove_geotiff_btn'):
                 self.remove_geotiff_btn.setEnabled(False)
             if hasattr(self, 'pick_center_btn'):
                 self.pick_center_btn.setEnabled(False)
                 self.pick_center_btn.setStyleSheet("")  # Reset to normal style when GeoTIFF is removed
+            if hasattr(self, 'zoom_to_geotiff_btn'):
+                self.zoom_to_geotiff_btn.setEnabled(False)
             # Reset "Start Drawing Line" button to normal style when GeoTIFF is removed
             if hasattr(self, 'line_start_draw_btn'):
                 self.line_start_draw_btn.setStyleSheet("")
@@ -1078,3 +1080,30 @@ class PlottingMixin:
 
         # Also clear the crossline elevation profile
         self._draw_crossline_profile()
+
+    def _clear_reference_plan(self):
+        """Remove only the reference plan (survey lines, crossline, central point). Keeps GeoTIFF and other data."""
+        self.survey_lines_data = []
+        self.cross_line_data = []
+        self.central_point_coords = (None, None)
+        self._plot_survey_plan(preserve_view_limits=True)
+        self._draw_crossline_profile()
+
+    def _clear_calibration_plan(self):
+        """Remove only the calibration lines (pitch line, roll line, heading lines). Keeps GeoTIFF and other data."""
+        if hasattr(self, 'pitch_line_points'):
+            self.pitch_line_points = []
+        if hasattr(self, 'roll_line_points'):
+            self.roll_line_points = []
+        if hasattr(self, 'heading_lines'):
+            self.heading_lines = []
+        # Exit edit modes so UI state is clean
+        if hasattr(self, 'edit_pitch_line_mode'):
+            self.edit_pitch_line_mode = False
+        if hasattr(self, 'edit_roll_line_mode'):
+            self.edit_roll_line_mode = False
+        self._plot_survey_plan(preserve_view_limits=True)
+        if hasattr(self, '_draw_current_profile'):
+            self._draw_current_profile()
+        elif hasattr(self, '_draw_pitch_line_profile'):
+            self._draw_pitch_line_profile()

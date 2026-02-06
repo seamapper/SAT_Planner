@@ -80,11 +80,18 @@ class LinePlanningMixin:
 
     def _clear_line_planning(self):
         self.line_planning_points = []
+        # Safely remove line artist (some matplotlib artists raise NotImplementedError on remove())
         if self.line_planning_line is not None:
-            self.line_planning_line.remove()
+            try:
+                self.line_planning_line.remove()
+            except (NotImplementedError, ValueError, AttributeError):
+                pass
             self.line_planning_line = None
         if hasattr(self, 'line_planning_temp_line') and self.line_planning_temp_line is not None:
-            self.line_planning_temp_line.remove()
+            try:
+                self.line_planning_temp_line.remove()
+            except (NotImplementedError, ValueError, AttributeError):
+                pass
             self.line_planning_temp_line = None
         if hasattr(self, 'line_planning_info_text') and self.line_planning_info_text is not None:
             self.line_planning_info_text.set_visible(False)
@@ -94,7 +101,10 @@ class LinePlanningMixin:
             self.line_planning_handles = []
             self.dragging_line_planning_handle = None
             if hasattr(self, 'line_planning_edit_line') and self.line_planning_edit_line is not None:
-                self.line_planning_edit_line.remove()
+                try:
+                    self.line_planning_edit_line.remove()
+                except (NotImplementedError, ValueError, AttributeError):
+                    pass
                 self.line_planning_edit_line = None
             if hasattr(self, 'line_planning_pick_cid'):
                 self.canvas.mpl_disconnect(self.line_planning_pick_cid)
@@ -104,7 +114,11 @@ class LinePlanningMixin:
                 self.canvas.mpl_disconnect(self.line_planning_release_cid)
             self.line_edit_btn.setText("Edit Line Planning")
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
-        self.canvas.draw_idle()
+        # Redraw survey plan so line is gone (handles case where artist.remove() raised NotImplementedError)
+        if hasattr(self, '_plot_survey_plan'):
+            self._plot_survey_plan(preserve_view_limits=True)
+        else:
+            self.canvas.draw_idle()
         self.line_start_draw_btn.setText("Start Drawing Line")
         if hasattr(self, 'geotiff_dataset_original') and self.geotiff_dataset_original is not None:
             if hasattr(self, 'line_start_draw_btn'):

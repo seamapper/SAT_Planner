@@ -337,6 +337,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, C
                 self.pick_center_btn.setEnabled(False)
             if hasattr(self, 'remove_geotiff_btn'):
                 self.remove_geotiff_btn.setEnabled(False)  # Disable Remove GeoTIFF button
+            if hasattr(self, 'zoom_to_geotiff_btn'):
+                self.zoom_to_geotiff_btn.setEnabled(False)
 
         # Bind parameter changes to update the plot
         self._updating_from_code = False  # Flag to prevent recursion
@@ -657,6 +659,13 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, C
         geotiff_layout.addWidget(self.dynamic_resolution_btn)
         geotiff_layout.addSpacing(3)
 
+        # Zoom to GeoTIFF button - zooms map to original bounds when GeoTIFF was first loaded
+        self.zoom_to_geotiff_btn = QPushButton("Zoom to GeoTIFF")
+        self.zoom_to_geotiff_btn.clicked.connect(self._zoom_to_geotiff)
+        self.zoom_to_geotiff_btn.setEnabled(False)  # Enabled when a GeoTIFF is loaded
+        geotiff_layout.addWidget(self.zoom_to_geotiff_btn)
+        geotiff_layout.addSpacing(3)
+
         # Show Contours checkbox and Interval on same row
         contours_interval_frame = QWidget()
         contours_interval_layout = QHBoxLayout(contours_interval_frame)
@@ -867,13 +876,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, C
         ref_plot_control_layout.addWidget(self.zoom_to_plan_btn)
         ref_plot_control_layout.addSpacing(3)
 
-        self.zoom_to_geotiff_btn_ref = QPushButton("Zoom to GeoTIFF")
-        self.zoom_to_geotiff_btn_ref.clicked.connect(self._zoom_to_geotiff)
-        ref_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_ref)
-        ref_plot_control_layout.addSpacing(3)
-
-        self.clear_plot_btn = QPushButton("Clear Plot")
-        self.clear_plot_btn.clicked.connect(self._clear_plot)
+        self.clear_plot_btn = QPushButton("Remove Reference Surface Plan")
+        self.clear_plot_btn.clicked.connect(self._clear_reference_plan)  # Remove only reference plan lines
         ref_plot_control_layout.addWidget(self.clear_plot_btn)
 
         ref_layout.addWidget(ref_plot_control_groupbox, row, 0, 1, 2)
@@ -1070,13 +1074,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, C
         cal_plot_control_layout.addWidget(self.zoom_to_all_lines_btn)
         cal_plot_control_layout.addSpacing(3)
 
-        self.zoom_to_geotiff_btn_cal = QPushButton("Zoom to GeoTIFF")
-        self.zoom_to_geotiff_btn_cal.clicked.connect(self._zoom_to_geotiff)
-        cal_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_cal)
-        cal_plot_control_layout.addSpacing(3)
-
-        self.clear_plot_btn_cal = QPushButton("Clear Plot")
-        self.clear_plot_btn_cal.clicked.connect(self._clear_plot)
+        self.clear_plot_btn_cal = QPushButton("Remove Calibration Plan")
+        self.clear_plot_btn_cal.clicked.connect(self._clear_calibration_plan)  # Remove only calibration lines
         cal_plot_control_layout.addWidget(self.clear_plot_btn_cal)
 
         cal_layout.addWidget(cal_plot_control_groupbox, cal_row, 0, 1, 2)
@@ -1194,9 +1193,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, C
         line_plot_control_layout.addWidget(self.zoom_to_line_btn)
         line_plot_control_layout.addSpacing(3)
 
-        self.zoom_to_geotiff_btn_line = QPushButton("Zoom to GeoTIFF")
-        self.zoom_to_geotiff_btn_line.clicked.connect(self._zoom_to_geotiff)
-        line_plot_control_layout.addWidget(self.zoom_to_geotiff_btn_line)
+        self.clear_plot_btn_line = QPushButton("Remove Line Plan")
+        self.clear_plot_btn_line.clicked.connect(self._clear_line_planning)  # Clear and remove the line plan
+        line_plot_control_layout.addWidget(self.clear_plot_btn_line)
 
         line_layout.addWidget(line_plot_control_groupbox, line_row, 0, 1, 2)
         line_layout.setRowStretch(line_row, 0)

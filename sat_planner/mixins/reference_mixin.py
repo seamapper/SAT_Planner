@@ -1048,9 +1048,8 @@ class ReferenceMixin:
             try:
                 is_valid, values = self._validate_inputs()
                 if is_valid:
-                    # Check if we're in pick center mode - if so, don't zoom
-                    auto_zoom = not (hasattr(self, 'pick_center_mode') and self.pick_center_mode)
-                    self._generate_and_plot(show_success_dialog=False, auto_zoom=auto_zoom)
+                    # Do not auto-zoom when parameters change; preserve current view
+                    self._generate_and_plot(show_success_dialog=False, auto_zoom=False)
             except Exception as e:
                 print(f"Auto-regenerate failed: {e}")
 

@@ -489,11 +489,13 @@ class GeoTIFFMixin:
             # Close progress window
             progress_window.close()
 
-            # Enable Remove GeoTIFF button and Pick Center button
+            # Enable Remove GeoTIFF, Pick Center, and Zoom to GeoTIFF buttons
             if hasattr(self, 'remove_geotiff_btn'):
                 self.remove_geotiff_btn.setEnabled(True)
             if hasattr(self, 'pick_center_btn'):
                 self.pick_center_btn.setEnabled(True)
+            if hasattr(self, 'zoom_to_geotiff_btn'):
+                self.zoom_to_geotiff_btn.setEnabled(True)
                 # Make "Pick Center from GeoTIFF" button bold and orange after loading GeoTIFF
                 self.pick_center_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
             # Reset Load GeoTIFF button to normal style after successful loading
