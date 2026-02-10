@@ -68,10 +68,19 @@ class LinePlanningMixin:
         self.line_planning_mode = not self.line_planning_mode
         if self.line_planning_mode:
             self.line_planning_points = []
+            # Safely remove line artist (some matplotlib artists raise NotImplementedError on remove())
             if self.line_planning_line is not None:
-                self.line_planning_line.remove()
+                try:
+                    self.line_planning_line.remove()
+                except (NotImplementedError, ValueError, AttributeError):
+                    pass
                 self.line_planning_line = None
-            self.line_start_draw_btn.setText("Drawing: Left-click to add, Right-click to finish")
+            # Redraw survey plan so old line is gone (handles case where artist.remove() raised NotImplementedError)
+            if hasattr(self, '_plot_survey_plan'):
+                self._plot_survey_plan(preserve_view_limits=True)
+            else:
+                self.canvas.draw_idle()
+            self.line_start_draw_btn.setText("Left-click to add, Right-click to finish")
             self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
             self.set_line_info_text("Left click to start line, left click to add waypoints, and Right click to end line")
         else:
@@ -443,7 +452,7 @@ class LinePlanningMixin:
                 self.mouse_hover_info_text.set_text(info_str)
                 self.mouse_hover_info_text.set_visible(True)
             else:
-                self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes, fontsize=9, va='top', ha='left', bbox=dict(boxstyle='round', facecolor='orange', alpha=0.8), zorder=10)
+                self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes, fontsize=9, va='top', ha='left', bbox=dict(boxstyle='round', facecolor='orange', alpha=0.8), zorder=13)
         self.canvas.draw_idle()
 
     def _update_line_planning_button_states(self):

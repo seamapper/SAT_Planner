@@ -983,7 +983,7 @@ class MapInteractionMixin:
                         self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes,
                                                                  fontsize=9, va='top', ha='left',
                                                                  bbox=dict(boxstyle='round', facecolor='plum', alpha=0.8),
-                                                                 zorder=10)
+                                                                 zorder=13)
                     self.canvas.draw_idle()
                 return
             if len(self.pitch_line_points) == 1:
@@ -1020,7 +1020,7 @@ class MapInteractionMixin:
                         self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes,
                                                                  fontsize=9, va='top', ha='left',
                                                                  bbox=dict(boxstyle='round', facecolor='plum', alpha=0.8),
-                                                                 zorder=10)
+                                                                 zorder=13)
                 self.canvas.draw_idle()
             return
 
@@ -1066,7 +1066,7 @@ class MapInteractionMixin:
                         self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes,
                                                                  fontsize=9, va='top', ha='left',
                                                                  bbox=dict(boxstyle='round', facecolor='plum', alpha=0.8),
-                                                                 zorder=10)
+                                                                 zorder=13)
                 self.canvas.draw_idle()
             return
 
@@ -1099,5 +1099,5 @@ class MapInteractionMixin:
                 self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes,
                                                          fontsize=9, va='top', ha='left',
                                                          bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
-                                                         zorder=10)
+                                                         zorder=13)
             self.canvas.draw_idle()
