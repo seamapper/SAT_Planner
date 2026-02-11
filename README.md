@@ -99,7 +99,7 @@ The application is organized as a package plus a launcher:
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `SAT_Planner_v2026.02.exe` (Windows) or newer
+- `SAT_Planner_v2026.04.exe` (Windows) or newer
 - `SAT_Planner.app` (macOS) - if available
 
 No installation required - just run the executable or app bundle.
@@ -310,6 +310,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.04**: Updated hover text to display coordinates in degrees and decimal minutes (DDM) format instead of decimal degrees. Changed default window height to 1110 pixels.
 - **v2026.02**: Added Turn Time parameter to Calibration and Reference Info tabs. Enhanced statistics displays with Total Survey Time and Total Transit Time breakdowns. Fixed autozoom issue when picking center from GeoTIFF. Added validation warning when heading line offset exceeds 2x shallowest depth. Updated export functions to include comprehensive statistics matching dialog displays.
 - **v2026.01**: Refactored into `sat_planner` package with mixins (Basemap, GeoTIFF, Plotting, Reference, Calibration, Line Planning, Profiles, Map Interaction, Export/Import, Config). Survey plan axes show DDM (degrees–decimal minutes) tick labels. Moved basemap/NOAA and geotiff/plotting helpers into mixins.
 - **v2025.11**: Fixed Dynamic Resolution for toolbar zoom/pan operations, updated About this Program dialog
