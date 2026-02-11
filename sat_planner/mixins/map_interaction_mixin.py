@@ -8,6 +8,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, QTimer
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, rowcol
+from sat_planner.utils_geo import decimal_degrees_to_ddm
 
 
 class MapInteractionMixin:
@@ -199,7 +200,9 @@ class MapInteractionMixin:
         if hasattr(self, 'hillshade_vs_slope_viz_mode') and self.hillshade_vs_slope_viz_mode in ["hillshade", "slope_viz"]:
             elevation, slope = self._calculate_slope_at_point(clicked_lat, clicked_lon)
             if elevation is not None and slope is not None:
-                info_msg = f"Lat: {clicked_lat:.6f}, Lon: {clicked_lon:.6f}, Slope: {slope:.1f}°, Depth: {abs(elevation):.1f}m"
+                lat_str = decimal_degrees_to_ddm(clicked_lat, is_latitude=True)
+                lon_str = decimal_degrees_to_ddm(clicked_lon, is_latitude=False)
+                info_msg = f"Lat: {lat_str}, Lon: {lon_str}, Slope: {slope:.1f}°, Depth: {abs(elevation):.1f}m"
                 print(f"INFO: {info_msg}")
 
         # Temporarily block signals to prevent auto-regenerate from triggering zoom
@@ -1090,7 +1093,9 @@ class MapInteractionMixin:
                 elev_str = "-"
                 slope_str = "-"
 
-            info_str = f"Lat: {mouse_lat:.6f}\nLon: {mouse_lon:.6f}\nElevation: {elev_str}\nSlope: {slope_str}"
+            lat_str = decimal_degrees_to_ddm(mouse_lat, is_latitude=True)
+            lon_str = decimal_degrees_to_ddm(mouse_lon, is_latitude=False)
+            info_str = f"Lat: {lat_str}\nLon: {lon_str}\nElevation: {elev_str}\nSlope: {slope_str}"
 
             if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
                 self.mouse_hover_info_text.set_text(info_str)

@@ -31,6 +31,7 @@ import time
 
 from . import __version__, CONFIG_FILENAME, GEOSPATIAL_LIBS_AVAILABLE
 from .utils_ui import show_message as _show_message_fn, ask_yes_no as _ask_yes_no_fn, ask_ok_cancel as _ask_ok_cancel_fn
+from .utils_geo import decimal_degrees_to_ddm
 from .mixins.basemap_mixin import BasemapMixin
 from .mixins.geotiff_mixin import GeoTIFFMixin
 from .mixins.plotting_mixin import PlottingMixin
@@ -201,7 +202,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, C
                 az12 = float('nan')
                 dist = float('nan')
                 time_minutes = float('nan')
-            info_str = f"Lat: {cur_lat:.6f}\nLon: {cur_lon:.6f}\nLength: {dist:.1f} m\nAzimuth: {az12:.1f}°\nTime: {time_minutes:.1f} min"
+            lat_str = decimal_degrees_to_ddm(cur_lat, is_latitude=True)
+            lon_str = decimal_degrees_to_ddm(cur_lon, is_latitude=False)
+            info_str = f"Lat: {lat_str}\nLon: {lon_str}\nLength: {dist:.1f} m\nAzimuth: {az12:.1f}°\nTime: {time_minutes:.1f} min"
             if hasattr(self, 'pitch_line_info_text') and self.pitch_line_info_text is not None:
                 self.pitch_line_info_text.set_text(info_str)
                 self.pitch_line_info_text.set_visible(True)
@@ -236,7 +239,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, C
             except Exception:
                 depth_str = "-"
                 slope_str = "-"
-            info_str = f"Lat: {cur_lat:.6f}\nLon: {cur_lon:.6f}\nDepth: {depth_str}\nSlope: {slope_str}"
+            lat_str = decimal_degrees_to_ddm(cur_lat, is_latitude=True)
+            lon_str = decimal_degrees_to_ddm(cur_lon, is_latitude=False)
+            info_str = f"Lat: {lat_str}\nLon: {lon_str}\nDepth: {depth_str}\nSlope: {slope_str}"
             if hasattr(self, 'pick_center_info_text') and self.pick_center_info_text is not None:
                 self.pick_center_info_text.set_text(info_str)
                 self.pick_center_info_text.set_visible(True)
