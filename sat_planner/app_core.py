@@ -51,7 +51,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, C
         self.setWindowTitle(f"UNH/CCOM-JHC - SAT Planner - v{__version__} - pjohnson@ccom.unh.edu")
 
         # Set minimum window size
-        self.setMinimumSize(1600, 1150)
+        self.setMinimumSize(1600, 1110)
 
         # Auto-regenerate timer: wait 800ms after last parameter change before regenerating
         self.auto_regenerate_timer = QTimer()
@@ -390,7 +390,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, C
 
         # Show window maximized after everything is set up
         # Set window to minimum size on startup
-        self.resize(1600, 1150)
+        self.resize(1600, 1110)
         print("Initialization complete, window should be visible")
 
     # Helper methods for dialog conversions (delegate to utils_ui)
