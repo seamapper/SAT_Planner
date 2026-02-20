@@ -5,12 +5,185 @@ import os
 import csv
 import json
 
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtWidgets import (QFileDialog, QDialog, QVBoxLayout, QHBoxLayout,
+                             QLabel, QComboBox, QPushButton, QWidget)
 from PyQt6.QtGui import QTextCursor
 
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+
+import numpy as np
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, LineString, fiona
 from sat_planner import decimal_degrees_to_ddm
 from sat_planner.utils_ui import show_statistics_dialog
+
+try:
+    from .calibration_mixin import UTMZoneDialog
+except ImportError:
+    UTMZoneDialog = None
+
+
+def _line_heading_degrees(geod, line):
+    """Return forward azimuth (0-360) from first point to second point of a 2-point line."""
+    if not line or len(line) < 2:
+        return None
+    (lat1, lon1), (lat2, lon2) = line[0], line[1]
+    try:
+        fwd_az, _, _ = geod.inv(lon1, lat1, lon2, lat2)
+        return fwd_az % 360.0
+    except Exception:
+        return None
+
+
+def _suggest_crossline_index(imported_lines):
+    """Suggest which line index is the crossline (orientation most different from the median).
+    Uses orientation 0-180 so opposite directions (e.g. 0° vs 180°) are treated as the same
+    line direction; the crossline is usually perpendicular to the reference lines."""
+    if not imported_lines or not pyproj:
+        return 0
+    geod = pyproj.Geod(ellps="WGS84")
+    headings = []
+    for line in imported_lines:
+        h = _line_heading_degrees(geod, line)
+        headings.append(h if h is not None else 0.0)
+    if len(headings) < 2:
+        return 0
+    # Normalize to orientation 0-180 (so 0° and 180° count as same direction)
+    headings_arr = np.array(headings)
+    orientation = headings_arr % 180.0
+    median_orient = np.median(orientation)
+    # Angular difference in 0-180 space
+    diffs = np.abs(orientation - median_orient)
+    diffs = np.minimum(diffs, 180.0 - diffs)
+    return int(np.argmax(diffs))
+
+
+class ReferenceLineAssignmentDialog(QDialog):
+    """Dialog for assigning imported lines to crossline vs reference lines."""
+
+    def __init__(self, parent, imported_lines):
+        super().__init__(parent)
+        self.setWindowTitle("Assign Reference Survey Lines")
+        self.setMinimumSize(900, 700)
+        self.setModal(True)
+        self.imported_lines = imported_lines
+        self.assignments = {}
+
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+
+        instructions = QLabel("Assign one line as Crossline and the rest as Reference Lines:")
+        instructions.setStyleSheet("font-weight: bold;")
+        main_layout.addWidget(instructions)
+
+        self.figure = Figure(figsize=(8, 6))
+        self.ax = self.figure.add_subplot(111)
+        self.canvas = FigureCanvas(self.figure)
+        main_layout.addWidget(self.canvas)
+
+        self._plot_lines()
+
+        assignment_widget = QWidget()
+        assignment_layout = QVBoxLayout(assignment_widget)
+        assignment_layout.setContentsMargins(5, 5, 5, 5)
+        assignment_label = QLabel("Line Assignments:")
+        assignment_label.setStyleSheet("font-weight: bold;")
+        assignment_layout.addWidget(assignment_label)
+
+        suggested_cross = _suggest_crossline_index(imported_lines)
+        line_colors = ['red', 'blue', 'green', 'purple', 'orange', 'cyan', 'magenta', 'yellow']
+        num_lines = len(imported_lines)
+        ref_options = ["Reference Line " + str(i + 1) for i in range(num_lines)]
+        self.comboboxes = []
+        for i in range(num_lines):
+            line_widget = QWidget()
+            line_layout = QHBoxLayout(line_widget)
+            line_layout.setContentsMargins(0, 0, 0, 0)
+            line_label = QLabel(f"Line {i+1}:")
+            line_label.setMinimumWidth(60)
+            line_layout.addWidget(line_label)
+            combo = QComboBox()
+            combo.addItem("")
+            combo.addItem("Crossline")
+            for opt in ref_options:
+                combo.addItem(opt)
+            if i == suggested_cross:
+                combo.setCurrentIndex(1)  # Crossline
+            self.comboboxes.append(combo)
+            line_layout.addWidget(combo)
+            color_label = QLabel("●")
+            color_label.setStyleSheet(f"color: {line_colors[i % len(line_colors)]}; font-size: 16pt;")
+            color_label.setMinimumWidth(30)
+            line_layout.addWidget(color_label)
+            assignment_layout.addWidget(line_widget)
+
+        main_layout.addWidget(assignment_widget)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self._on_ok_clicked)
+        button_layout.addWidget(ok_btn)
+        main_layout.addLayout(button_layout)
+
+    def _plot_lines(self):
+        self.ax.clear()
+        line_colors = ['red', 'blue', 'green', 'purple', 'orange', 'cyan', 'magenta', 'yellow']
+        all_lats, all_lons = [], []
+        for i, line in enumerate(self.imported_lines):
+            if len(line) == 2:
+                (lat1, lon1), (lat2, lon2) = line
+                self.ax.plot([lon1, lon2], [lat1, lat2], color=line_colors[i % len(line_colors)],
+                           linewidth=2, label=f'Line {i+1}', zorder=10)
+                mid_lat = (lat1 + lat2) / 2
+                mid_lon = (lon1 + lon2) / 2
+                self.ax.text(mid_lon, mid_lat, f'Line {i+1}', fontsize=10, ha='center', va='center',
+                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.7), zorder=11)
+                all_lats.extend([lat1, lat2])
+                all_lons.extend([lon1, lon2])
+        if all_lats and all_lons:
+            lat_range = max(all_lats) - min(all_lats)
+            lon_range = max(all_lons) - min(all_lons)
+            pad_lat = max(lat_range * 0.1, 0.01)
+            pad_lon = max(lon_range * 0.1, 0.01)
+            self.ax.set_xlim(min(all_lons) - pad_lon, max(all_lons) + pad_lon)
+            self.ax.set_ylim(min(all_lats) - pad_lat, max(all_lats) + pad_lat)
+        self.ax.set_xlabel('Longitude')
+        self.ax.set_ylabel('Latitude')
+        self.ax.grid(True, alpha=0.3)
+        self.ax.legend(loc='upper right')
+        self.figure.tight_layout()
+        self.canvas.draw()
+
+    def _on_ok_clicked(self):
+        from PyQt6.QtWidgets import QMessageBox
+        crossline_idx = None
+        for i, combo in enumerate(self.comboboxes):
+            idx = combo.currentIndex()
+            if idx == 0:
+                QMessageBox.warning(self, "Assignment Error", "Please assign every line.")
+                return
+            if idx == 1:  # Crossline
+                if crossline_idx is not None:
+                    QMessageBox.warning(self, "Assignment Error", "Exactly one line must be Crossline.")
+                    return
+                crossline_idx = i
+                self.assignments[i] = 'crossline'
+            else:
+                # idx 2 = Reference Line 1, idx 3 = Reference Line 2, ...
+                ref_num = idx - 1
+                self.assignments[i] = f'ref_{ref_num}'
+        if crossline_idx is None:
+            QMessageBox.warning(self, "Assignment Error", "Exactly one line must be Crossline.")
+            return
+        self.accept()
+
+    def get_assignments(self):
+        return self.assignments.copy()
 
 
 class ReferenceMixin:
@@ -271,32 +444,215 @@ class ReferenceMixin:
         except Exception as e:
             self._show_message("error","Export Error", f"Failed to export data: {e}")
 
+    def _apply_ref_assignments(self, assignments, imported_lines):
+        """Set cross_line_data and survey_lines_data from assignment dialog result."""
+        self.cross_line_data = []
+        self.survey_lines_data = []
+        ref_lines = []
+        for line_idx, role in assignments.items():
+            if role == 'crossline':
+                self.cross_line_data = imported_lines[line_idx]
+            else:
+                ref_lines.append((int(role.split('_')[1]), imported_lines[line_idx]))
+        ref_lines.sort(key=lambda x: x[0])
+        self.survey_lines_data = [line for _, line in ref_lines]
+
+    def _ref_import_post_import(self, file_path):
+        """Shared post-import: validate, load params, populate fields, plot, message."""
+        if not self.survey_lines_data and not self.cross_line_data:
+            self._show_message("warning", "Import Warning", "No valid survey lines found in the selected file.")
+            return
+        base_name = os.path.splitext(os.path.basename(file_path))[0]
+        dir_name = os.path.dirname(file_path)
+        metadata_path = os.path.join(dir_name, f"{base_name}_params.json")
+        params = None
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, 'r', encoding='utf-8') as f:
+                    params = json.load(f)
+            except Exception as e:
+                print(f"Warning: Could not load metadata file: {e}")
+        try:
+            if params:
+                if params.get('central_lat') is not None:
+                    self.central_lat_entry.clear()
+                    self.central_lat_entry.setText(str(params['central_lat']))
+                    if hasattr(self, 'pick_center_btn'):
+                        self.pick_center_btn.setStyleSheet("")
+                if params.get('central_lon') is not None:
+                    self.central_lon_entry.clear()
+                    self.central_lon_entry.setText(str(params['central_lon']))
+                if params.get('line_length') is not None:
+                    self.line_length_entry.setText(str(params['line_length']))
+                if params.get('heading') is not None:
+                    self.heading_entry.setText(str(params['heading']))
+                if params.get('dist_between_lines') is not None:
+                    self.dist_between_lines_entry.setText(str(params['dist_between_lines']))
+                if params.get('num_lines') is not None:
+                    self.num_lines_entry.setText(str(params['num_lines']))
+                if params.get('bisect_lead') is not None:
+                    self.bisect_lead_entry.setText(str(params['bisect_lead']))
+                if params.get('survey_speed') is not None:
+                    self.survey_speed_entry.setText(str(params['survey_speed']))
+                if params.get('crossline_passes') is not None:
+                    self.crossline_passes_entry.setText(str(params['crossline_passes']))
+                if params.get('export_name'):
+                    self.export_name_entry.clear()
+                    self.export_name_entry.setText(params['export_name'])
+                if params.get('offset_direction') and hasattr(self, 'offset_direction_combo'):
+                    idx = self.offset_direction_combo.findText(params['offset_direction'])
+                    if idx >= 0:
+                        self.offset_direction_combo.setCurrentIndex(idx)
+                    self.offset_direction_var = params['offset_direction']
+                if params.get('line_length_multiplier') is not None and hasattr(self, '_update_multiplier_label_len'):
+                    self.line_length_multiplier.set(params['line_length_multiplier'])
+                    self._update_multiplier_label_len(params['line_length_multiplier'])
+                if params.get('dist_between_lines_multiplier') is not None and hasattr(self, '_update_multiplier_label_dist'):
+                    self.dist_between_lines_multiplier.set(params['dist_between_lines_multiplier'])
+                    self._update_multiplier_label_dist(params['dist_between_lines_multiplier'])
+            else:
+                if pyproj is not None:
+                    geod = pyproj.Geod(ellps="WGS84")
+                    all_points = []
+                    for line in self.survey_lines_data:
+                        all_points.extend(line)
+                    if self.cross_line_data:
+                        all_points.extend(self.cross_line_data)
+                    if all_points:
+                        all_lats = [p[0] for p in all_points]
+                        all_lons = [p[1] for p in all_points]
+                        central_lat = (min(all_lats) + max(all_lats)) / 2.0
+                        central_lon = (min(all_lons) + max(all_lons)) / 2.0
+                        self.central_lat_entry.clear()
+                        self.central_lat_entry.setText(f"{central_lat:.6f}")
+                        if hasattr(self, 'pick_center_btn'):
+                            self.pick_center_btn.setStyleSheet("")
+                        self.central_lon_entry.clear()
+                        self.central_lon_entry.setText(f"{central_lon:.6f}")
+                    if len(self.survey_lines_data) > 0:
+                        first_line = self.survey_lines_data[0]
+                        try:
+                            lat1, lon1 = first_line[0]
+                            lat2, lon2 = first_line[1]
+                            fwd_az, back_az, dist = geod.inv(lon1, lat1, lon2, lat2)
+                            heading = fwd_az % 360
+                            self.heading_entry.clear()
+                            self.heading_entry.setText(f"{heading:.1f}")
+                            self.line_length_entry.clear()
+                            self.line_length_entry.setText(f"{dist:.1f}")
+                        except Exception:
+                            pass
+                    if self.survey_lines_data:
+                        self.num_lines_entry.clear()
+                        self.num_lines_entry.setText(str(len(self.survey_lines_data)))
+                    if len(self.survey_lines_data) > 1:
+                        try:
+                            line1_mid = ((self.survey_lines_data[0][0][0] + self.survey_lines_data[0][1][0]) / 2,
+                                       (self.survey_lines_data[0][0][1] + self.survey_lines_data[0][1][1]) / 2)
+                            line2_mid = ((self.survey_lines_data[1][0][0] + self.survey_lines_data[1][1][0]) / 2,
+                                       (self.survey_lines_data[1][0][1] + self.survey_lines_data[1][1][1]) / 2)
+                            _, _, dist = geod.inv(line1_mid[1], line1_mid[0], line2_mid[1], line2_mid[0])
+                            self.dist_between_lines_entry.clear()
+                            self.dist_between_lines_entry.setText(f"{dist:.1f}")
+                        except Exception:
+                            pass
+                if not self.export_name_entry.text().strip():
+                    self.export_name_entry.clear()
+                    self.export_name_entry.setText(base_name)
+        except Exception as e:
+            print(f"Warning: Error populating parameter fields: {e}")
+        self._plot_survey_plan(preserve_view_limits=True)
+        imported_items = []
+        if self.survey_lines_data:
+            imported_items.append(f"{len(self.survey_lines_data)} survey line(s)")
+        if self.cross_line_data:
+            imported_items.append("crossline")
+        if imported_items:
+            msg = f"Successfully imported: {', '.join(imported_items)}"
+            if params:
+                msg += " (parameters loaded from metadata)"
+            else:
+                msg += " (parameters calculated from lines)"
+            self.set_ref_info_text(msg)
+        else:
+            self._show_message("warning", "Import Warning", "No valid survey lines found in the selected file.")
+
     def _import_survey_files(self):
-        """Import reference planning survey lines from CSV or GeoJSON file."""
-        # Open file dialog to select import file
+        """Import reference planning survey lines from CSV, GeoJSON, or DDD/DMS/DMM/LNW text files."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Survey File to Import",
             self.last_ref_import_dir,
-            "Decimal Degree CSV files (*_DD.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json);;All files (*.*)"
+            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DD.csv *.csv *.geojson *.json *.lnw);;"
+            "Hypack LNW files (*.lnw);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
+            "Decimal Degrees (*_DDD.txt);;Decimal Degree CSV (*_DD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json)"
         )
-
         if not file_path:
             return
-
-        # Save the directory for next time
         import_dir = os.path.dirname(file_path)
         if import_dir and os.path.isdir(import_dir):
             self.last_ref_import_dir = import_dir
             self._save_last_ref_import_dir()
 
         try:
-            # Clear existing lines
             self.survey_lines_data = []
             self.cross_line_data = []
-
-            # Determine file type and import accordingly
             file_ext = os.path.splitext(file_path)[1].lower()
+            file_basename = os.path.basename(file_path)
+            file_processed = False
+
+            # DDD / DMS / DMM / LNW: use calibration parsers + reference assignment dialog
+            if file_ext == '.lnw':
+                if UTMZoneDialog is None:
+                    self._show_message("error", "Import Error", "UTM zone dialog not available.")
+                    return
+                utm_dialog = UTMZoneDialog(self)
+                if utm_dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                utm_zone, hemisphere = utm_dialog.get_utm_info()
+                imported_lines = self._parse_lnw_file(file_path, utm_zone, hemisphere)
+                if imported_lines is None:
+                    return
+                dialog = ReferenceLineAssignmentDialog(self, imported_lines)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self._apply_ref_assignments(dialog.get_assignments(), imported_lines)
+                file_processed = True
+
+            if not file_processed and file_basename.lower().endswith('_dms.txt'):
+                imported_lines = self._parse_dms_txt_file(file_path)
+                if imported_lines is None:
+                    return
+                dialog = ReferenceLineAssignmentDialog(self, imported_lines)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self._apply_ref_assignments(dialog.get_assignments(), imported_lines)
+                file_processed = True
+
+            if not file_processed and file_basename.lower().endswith('_dmm.txt'):
+                imported_lines = self._parse_dmm_txt_file(file_path)
+                if imported_lines is None:
+                    return
+                dialog = ReferenceLineAssignmentDialog(self, imported_lines)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self._apply_ref_assignments(dialog.get_assignments(), imported_lines)
+                file_processed = True
+
+            if not file_processed and file_basename.lower().endswith('_ddd.txt'):
+                imported_lines = self._parse_ddd_txt_file(file_path)
+                if imported_lines is None:
+                    return
+                dialog = ReferenceLineAssignmentDialog(self, imported_lines)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self._apply_ref_assignments(dialog.get_assignments(), imported_lines)
+                file_processed = True
+
+            if file_processed:
+                # Run same post-import logic as CSV/GeoJSON path
+                self._ref_import_post_import(file_path)
+                return
 
             if file_ext == '.csv':
                 # Import from CSV

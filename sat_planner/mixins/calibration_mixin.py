@@ -1010,65 +1010,52 @@ class CalibrationMixin:
     def _parse_dms_txt_file(self, file_path):
         """
         Parse a *_DMS.txt file format.
-        Format: No header, 8 rows, each row has 7 columns separated by spaces or tabs:
-                Point, deg_lat, min_lat, sec_lat, deg_lon, min_lon, sec_lon
-        Returns: List of 4 lines, each as [(lat1, lon1), (lat2, lon2)], or None on error
+        Format: No header, even number of rows (2, 4, 6, 8, ...), each row has 7 columns:
+                Point, deg_lat, min_lat, sec_lat, deg_lon, min_lon, sec_lon.
+        Pairs of consecutive rows form lines. Returns: List of lines, each as [(lat1, lon1), (lat2, lon2)], or None on error.
         """
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
+                content = f.read()
+            lines = [line.strip() for line in content.replace('\r\n', '\n').replace('\r', '\n').split('\n') if line.strip()]
             
-            # Remove empty lines and strip whitespace
-            lines = [line.strip() for line in lines if line.strip()]
-            
-            if len(lines) != 8:
-                self._show_message("error", "Import Error", 
-                                 f"Expected 8 data rows in *_DMS.txt file, found {len(lines)} rows.")
+            if len(lines) < 2:
+                self._show_message("error", "Import Error",
+                                 f"Expected at least 2 data rows in *_DMS.txt file, found {len(lines)} rows.")
+                return None
+            if len(lines) % 2 != 0:
+                self._show_message("error", "Import Error",
+                                 f"Expected an even number of data rows (pairs form lines). Found {len(lines)} rows.")
                 return None
             
             points = []
             for i, line in enumerate(lines):
-                # Split on whitespace (spaces or tabs), handling multiple spaces/tabs
                 parts = line.split()
                 if len(parts) < 7:
-                    self._show_message("error", "Import Error", 
+                    self._show_message("error", "Import Error",
                                      f"Row {i+1} does not have 7 columns (Point, deg_lat, min_lat, sec_lat, deg_lon, min_lon, sec_lon). Found {len(parts)} columns.")
                     return None
-                
                 try:
-                    # Parse DMS values: point, deg_lat, min_lat, sec_lat, deg_lon, min_lon, sec_lon
                     deg_lat = float(parts[1])
                     min_lat = float(parts[2])
                     sec_lat = float(parts[3])
                     deg_lon = float(parts[4])
                     min_lon = float(parts[5])
                     sec_lon = float(parts[6])
-                    
-                    # Convert to decimal degrees
                     lat = self._dms_to_decimal_degrees(deg_lat, min_lat, sec_lat, is_latitude=True)
                     lon = self._dms_to_decimal_degrees(deg_lon, min_lon, sec_lon, is_latitude=False)
-                    
                     points.append((lat, lon))
                 except (ValueError, IndexError) as e:
-                    self._show_message("error", "Import Error", 
+                    self._show_message("error", "Import Error",
                                      f"Row {i+1} has invalid DMS values: {str(e)}")
                     return None
             
-            # Group points into 4 lines (every 2 points = 1 line)
             imported_lines = []
-            for i in range(0, 8, 2):
+            for i in range(0, len(points), 2):
                 if i + 1 < len(points):
                     imported_lines.append([points[i], points[i+1]])
                 else:
-                    self._show_message("error", "Import Error", 
-                                     "Insufficient points to form 4 lines.")
-                    return None
-            
-            if len(imported_lines) != 4:
-                self._show_message("error", "Import Error", 
-                                 f"Expected 4 lines from 8 points, got {len(imported_lines)} lines.")
-                return None
-            
+                    break
             return imported_lines
             
         except FileNotFoundError:
@@ -1102,56 +1089,50 @@ class CalibrationMixin:
     def _parse_dmm_txt_file(self, file_path):
         """
         Parse a *_DMM.txt file format (degrees and decimal minutes).
-        Format: No header, 8 rows, each row has 5 columns separated by spaces or tabs:
-                Point, deg_lat, min_lat, deg_lon, min_lon
-        Returns: List of 4 lines, each as [(lat1, lon1), (lat2, lon2)], or None on error
+        Format: No header, even number of rows (2, 4, 6, 8, ...), each row has 5 columns:
+                Point, deg_lat, min_lat, deg_lon, min_lon.
+        Pairs of consecutive rows form lines. Returns: List of lines, each as [(lat1, lon1), (lat2, lon2)], or None on error.
         """
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
+                content = f.read()
+            lines = [line.strip() for line in content.replace('\r\n', '\n').replace('\r', '\n').split('\n') if line.strip()]
             
-            lines = [line.strip() for line in lines if line.strip()]
-            
-            if len(lines) != 8:
-                self._show_message("error", "Import Error", 
-                                 f"Expected 8 data rows in *_DMM.txt file, found {len(lines)} rows.")
+            if len(lines) < 2:
+                self._show_message("error", "Import Error",
+                                 f"Expected at least 2 data rows in *_DMM.txt file, found {len(lines)} rows.")
+                return None
+            if len(lines) % 2 != 0:
+                self._show_message("error", "Import Error",
+                                 f"Expected an even number of data rows (pairs form lines). Found {len(lines)} rows.")
                 return None
             
             points = []
             for i, line in enumerate(lines):
                 parts = line.split()
                 if len(parts) < 5:
-                    self._show_message("error", "Import Error", 
+                    self._show_message("error", "Import Error",
                                      f"Row {i+1} does not have 5 columns (Point, deg_lat, min_lat, deg_lon, min_lon). Found {len(parts)} columns.")
                     return None
-                
                 try:
                     deg_lat = float(parts[1])
                     min_lat = float(parts[2])
                     deg_lon = float(parts[3])
                     min_lon = float(parts[4])
-                    
                     lat = self._dmm_to_decimal_degrees(deg_lat, min_lat)
                     lon = self._dmm_to_decimal_degrees(deg_lon, min_lon)
                     points.append((lat, lon))
                 except (ValueError, IndexError) as e:
-                    self._show_message("error", "Import Error", 
+                    self._show_message("error", "Import Error",
                                      f"Row {i+1} has invalid DMM values: {str(e)}")
                     return None
             
             imported_lines = []
-            for i in range(0, 8, 2):
+            for i in range(0, len(points), 2):
                 if i + 1 < len(points):
                     imported_lines.append([points[i], points[i+1]])
                 else:
-                    self._show_message("error", "Import Error", "Insufficient points to form 4 lines.")
-                    return None
-            
-            if len(imported_lines) != 4:
-                self._show_message("error", "Import Error", 
-                                 f"Expected 4 lines from 8 points, got {len(imported_lines)} lines.")
-                return None
-            
+                    break
             return imported_lines
             
         except FileNotFoundError:
@@ -1166,55 +1147,47 @@ class CalibrationMixin:
     def _parse_ddd_txt_file(self, file_path):
         """
         Parse a *_DDD.txt file format.
-        Format: No header, 8 rows, each row has 3 columns separated by spaces or tabs: Point, Latitude, Longitude (decimal degrees)
-        Returns: List of 4 lines, each as [(lat1, lon1), (lat2, lon2)], or None on error
+        Format: No header, even number of rows (2, 4, 6, 8, ...), each row has 3 columns: Point, Latitude, Longitude (decimal degrees).
+        Pairs of consecutive rows form lines. Returns: List of lines, each as [(lat1, lon1), (lat2, lon2)], or None on error.
         """
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
+                content = f.read()
+            # Normalize line endings and drop empty lines
+            lines = [line.strip() for line in content.replace('\r\n', '\n').replace('\r', '\n').split('\n') if line.strip()]
             
-            # Remove empty lines and strip whitespace
-            lines = [line.strip() for line in lines if line.strip()]
-            
-            if len(lines) != 8:
-                self._show_message("error", "Import Error", 
-                                 f"Expected 8 data rows in *_DDD.txt file, found {len(lines)} rows.")
+            if len(lines) < 2:
+                self._show_message("error", "Import Error",
+                                 f"Expected at least 2 data rows in *_DDD.txt file, found {len(lines)} rows.")
+                return None
+            if len(lines) % 2 != 0:
+                self._show_message("error", "Import Error",
+                                 f"Expected an even number of data rows (pairs form lines). Found {len(lines)} rows.")
                 return None
             
             points = []
             for i, line in enumerate(lines):
-                # Split on whitespace (spaces or tabs), handling multiple spaces/tabs
                 parts = line.split()
                 if len(parts) < 3:
-                    self._show_message("error", "Import Error", 
+                    self._show_message("error", "Import Error",
                                      f"Row {i+1} does not have 3 columns (Point, Latitude, Longitude). Found {len(parts)} columns.")
                     return None
-                
                 try:
-                    # Skip first column (point number), use columns 2 and 3 for lat/lon
                     lat = float(parts[1])
                     lon = float(parts[2])
                     points.append((lat, lon))
                 except (ValueError, IndexError) as e:
-                    self._show_message("error", "Import Error", 
+                    self._show_message("error", "Import Error",
                                      f"Row {i+1} has invalid latitude/longitude values: {parts[1] if len(parts) > 1 else 'N/A'}, {parts[2] if len(parts) > 2 else 'N/A'}")
                     return None
             
-            # Group points into 4 lines (every 2 points = 1 line)
+            # Group points into lines (every 2 points = 1 line)
             imported_lines = []
-            for i in range(0, 8, 2):
+            for i in range(0, len(points), 2):
                 if i + 1 < len(points):
                     imported_lines.append([points[i], points[i+1]])
                 else:
-                    self._show_message("error", "Import Error", 
-                                     "Insufficient points to form 4 lines.")
-                    return None
-            
-            if len(imported_lines) != 4:
-                self._show_message("error", "Import Error", 
-                                 f"Expected 4 lines from 8 points, got {len(imported_lines)} lines.")
-                return None
-            
+                    break
             return imported_lines
             
         except FileNotFoundError:
@@ -1425,11 +1398,14 @@ class CalibrationMixin:
                 file_processed = True
             
             # Handle *_DMS.txt format (Degrees Minutes Seconds)
-            if not file_processed and (file_basename.endswith('_DMS.txt') or (file_ext == '.txt' and '_DMS' in file_basename)):
+            if not file_processed and file_basename.lower().endswith('_dms.txt'):
                 imported_lines = self._parse_dms_txt_file(file_path)
                 if imported_lines is None:
                     return  # Error already shown
-                
+                if len(imported_lines) != 4:
+                    self._show_message("error", "Calibration Import",
+                                     f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
+                    return
                 # Show assignment dialog
                 dialog = LineAssignmentDialog(self, imported_lines)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -1459,11 +1435,14 @@ class CalibrationMixin:
                 file_processed = True
             
             # Handle *_DMM.txt format (Degrees and decimal minutes)
-            if not file_processed and (file_basename.endswith('_DMM.txt') or (file_ext == '.txt' and '_DMM' in file_basename)):
+            if not file_processed and file_basename.lower().endswith('_dmm.txt'):
                 imported_lines = self._parse_dmm_txt_file(file_path)
                 if imported_lines is None:
                     return  # Error already shown
-                
+                if len(imported_lines) != 4:
+                    self._show_message("error", "Calibration Import",
+                                     f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
+                    return
                 dialog = LineAssignmentDialog(self, imported_lines)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return  # User cancelled
@@ -1490,11 +1469,14 @@ class CalibrationMixin:
                 file_processed = True
             
             # Handle *_DDD.txt format (Decimal Degrees)
-            if not file_processed and (file_basename.endswith('_DDD.txt') or (file_ext == '.txt' and '_DDD' in file_basename)):
+            if not file_processed and file_basename.lower().endswith('_ddd.txt'):
                 imported_lines = self._parse_ddd_txt_file(file_path)
                 if imported_lines is None:
                     return  # Error already shown
-                
+                if len(imported_lines) != 4:
+                    self._show_message("error", "Calibration Import",
+                                     f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
+                    return
                 # Show assignment dialog
                 dialog = LineAssignmentDialog(self, imported_lines)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
