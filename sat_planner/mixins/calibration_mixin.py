@@ -8,14 +8,272 @@ import json
 import re
 import datetime
 
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtWidgets import (QFileDialog, QDialog, QVBoxLayout, QHBoxLayout, 
+                             QLabel, QComboBox, QPushButton, QWidget, QLineEdit, QSpinBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat
 
 import numpy as np
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj
 from sat_planner import decimal_degrees_to_ddm
 from sat_planner.utils_ui import show_statistics_dialog
+
+
+class LineAssignmentDialog(QDialog):
+    """Dialog for assigning imported lines to calibration line types (pitch, roll, heading)."""
+    
+    def __init__(self, parent, imported_lines):
+        """
+        Args:
+            parent: Parent widget
+            imported_lines: List of 4 lines, each as [(lat1, lon1), (lat2, lon2)]
+        """
+        super().__init__(parent)
+        self.setWindowTitle("Assign Calibration Lines")
+        self.setMinimumSize(900, 700)
+        self.setModal(True)
+        
+        self.imported_lines = imported_lines
+        self.assignments = {}  # Will store {line_idx: assignment_type}
+        
+        # Create main layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(10)
+        
+        # Instructions label
+        instructions = QLabel("Assign each imported line to a calibration line type:")
+        instructions.setStyleSheet("font-weight: bold;")
+        main_layout.addWidget(instructions)
+        
+        # Create map figure and canvas
+        self.figure = Figure(figsize=(8, 6))
+        self.ax = self.figure.add_subplot(111)
+        self.canvas = FigureCanvas(self.figure)
+        main_layout.addWidget(self.canvas)
+        
+        # Plot all lines on the map
+        self._plot_lines()
+        
+        # Assignment controls
+        assignment_widget = QWidget()
+        assignment_layout = QVBoxLayout(assignment_widget)
+        assignment_layout.setContentsMargins(5, 5, 5, 5)
+        
+        assignment_label = QLabel("Line Assignments:")
+        assignment_label.setStyleSheet("font-weight: bold;")
+        assignment_layout.addWidget(assignment_label)
+        
+        # Create dropdowns for each line
+        self.comboboxes = []
+        line_colors = ['red', 'blue', 'green', 'purple', 'orange', 'cyan', 'magenta', 'yellow']
+        num_lines = len(imported_lines)
+        for i in range(num_lines):
+            line_widget = QWidget()
+            line_layout = QHBoxLayout(line_widget)
+            line_layout.setContentsMargins(0, 0, 0, 0)
+            
+            line_label = QLabel(f"Line {i+1}:")
+            line_label.setMinimumWidth(60)
+            line_layout.addWidget(line_label)
+            
+            combo = QComboBox()
+            combo.addItems(["", "Pitch Line", "Roll Line", "Heading Line 1", "Heading Line 2"])
+            # Use a closure to properly capture the line index
+            def make_handler(line_idx):
+                return lambda idx: self._on_assignment_changed(line_idx, idx)
+            combo.currentIndexChanged.connect(make_handler(i))
+            self.comboboxes.append(combo)
+            line_layout.addWidget(combo)
+            
+            # Color indicator
+            color_label = QLabel("●")
+            color_style = line_colors[i % len(line_colors)]  # Cycle through colors if more than 4 lines
+            color_label.setStyleSheet(f"color: {color_style}; font-size: 16pt;")
+            color_label.setMinimumWidth(30)
+            line_layout.addWidget(color_label)
+            
+            assignment_layout.addWidget(line_widget)
+        
+        main_layout.addWidget(assignment_widget)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self._on_ok_clicked)
+        button_layout.addWidget(ok_btn)
+        
+        main_layout.addLayout(button_layout)
+    
+    def _plot_lines(self):
+        """Plot all imported lines on the map with different colors."""
+        self.ax.clear()
+        
+        line_colors = ['red', 'blue', 'green', 'purple', 'orange', 'cyan', 'magenta', 'yellow']
+        all_lats = []
+        all_lons = []
+        
+        for i, line in enumerate(self.imported_lines):
+            if len(line) == 2:
+                (lat1, lon1), (lat2, lon2) = line
+                self.ax.plot([lon1, lon2], [lat1, lat2], 
+                           color=line_colors[i], linewidth=2, 
+                           label=f'Line {i+1}', zorder=10)
+                # Add label at midpoint
+                mid_lat = (lat1 + lat2) / 2
+                mid_lon = (lon1 + lon2) / 2
+                self.ax.text(mid_lon, mid_lat, f'Line {i+1}', 
+                           fontsize=10, ha='center', va='center',
+                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.7),
+                           zorder=11)
+                all_lats.extend([lat1, lat2])
+                all_lons.extend([lon1, lon2])
+        
+        if all_lats and all_lons:
+            # Set axis limits with padding
+            lat_range = max(all_lats) - min(all_lats)
+            lon_range = max(all_lons) - min(all_lons)
+            padding_lat = max(lat_range * 0.1, 0.01)
+            padding_lon = max(lon_range * 0.1, 0.01)
+            
+            self.ax.set_xlim(min(all_lons) - padding_lon, max(all_lons) + padding_lon)
+            self.ax.set_ylim(min(all_lats) - padding_lat, max(all_lats) + padding_lat)
+        
+        self.ax.set_xlabel('Longitude')
+        self.ax.set_ylabel('Latitude')
+        self.ax.grid(True, alpha=0.3)
+        self.ax.legend(loc='upper right')
+        self.figure.tight_layout()
+        self.canvas.draw()
+    
+    def _on_assignment_changed(self, line_idx, combo_idx):
+        """Handle assignment change (optional: could highlight line on map)."""
+        # Map combo index to assignment type
+        assignment_map = {
+            0: None,
+            1: 'pitch',
+            2: 'roll',
+            3: 'heading1',
+            4: 'heading2'
+        }
+        self.assignments[line_idx] = assignment_map.get(combo_idx)
+    
+    def _on_ok_clicked(self):
+        """Validate assignments and accept dialog if valid."""
+        # Check that exactly 4 lines are assigned (pitch, roll, heading1, heading2)
+        assigned_types = []
+        for i, combo in enumerate(self.comboboxes):
+            if combo.currentIndex() == 0:  # Empty selection
+                continue  # Allow unassigned lines, but we need exactly 4 assigned
+            assignment_type = ['', 'pitch', 'roll', 'heading1', 'heading2'][combo.currentIndex()]
+            if assignment_type in assigned_types:
+                self._show_error(f"Each line type can only be assigned once. '{assignment_type}' is assigned multiple times.")
+                return
+            assigned_types.append(assignment_type)
+            self.assignments[i] = assignment_type
+        
+        # Validate that we have exactly 4 assignments (pitch, roll, heading1, heading2)
+        if len(assigned_types) != 4:
+            self._show_error("Please assign exactly 4 lines: Pitch Line, Roll Line, Heading Line 1, and Heading Line 2.")
+            return
+        
+        if 'pitch' not in assigned_types or 'roll' not in assigned_types or 'heading1' not in assigned_types or 'heading2' not in assigned_types:
+            self._show_error("Please assign all required line types: Pitch Line, Roll Line, Heading Line 1, and Heading Line 2.")
+            return
+        
+        self.accept()
+    
+    def _show_error(self, message):
+        """Show error message to user."""
+        from PyQt6.QtWidgets import QMessageBox
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Warning)
+        msg.setWindowTitle("Assignment Error")
+        msg.setText(message)
+        msg.exec()
+    
+    def get_assignments(self):
+        """Return the assignments as a dict mapping line indices to assignment types."""
+        return self.assignments.copy()
+
+
+class UTMZoneDialog(QDialog):
+    """Dialog for getting UTM zone and hemisphere from user."""
+    
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle("UTM Zone Information")
+        self.setMinimumWidth(300)
+        self.setModal(True)
+        
+        self.utm_zone = None
+        self.hemisphere = None
+        
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
+        instructions = QLabel("Please enter the UTM zone information for the LNW file:")
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+        
+        # UTM Zone input
+        zone_layout = QHBoxLayout()
+        zone_label = QLabel("UTM Zone:")
+        zone_label.setMinimumWidth(100)
+        zone_layout.addWidget(zone_label)
+        
+        self.zone_spinbox = QSpinBox()
+        self.zone_spinbox.setMinimum(1)
+        self.zone_spinbox.setMaximum(60)
+        self.zone_spinbox.setValue(18)  # Default to zone 18
+        zone_layout.addWidget(self.zone_spinbox)
+        zone_layout.addStretch()
+        layout.addLayout(zone_layout)
+        
+        # Hemisphere selection
+        hemisphere_layout = QHBoxLayout()
+        hemisphere_label = QLabel("Hemisphere:")
+        hemisphere_label.setMinimumWidth(100)
+        hemisphere_layout.addWidget(hemisphere_label)
+        
+        self.hemisphere_combo = QComboBox()
+        self.hemisphere_combo.addItems(["North", "South"])
+        hemisphere_layout.addWidget(self.hemisphere_combo)
+        hemisphere_layout.addStretch()
+        layout.addLayout(hemisphere_layout)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        ok_btn = QPushButton("OK")
+        ok_btn.clicked.connect(self._on_ok_clicked)
+        button_layout.addWidget(ok_btn)
+        
+        layout.addLayout(button_layout)
+    
+    def _on_ok_clicked(self):
+        """Validate and accept dialog."""
+        self.utm_zone = self.zone_spinbox.value()
+        self.hemisphere = self.hemisphere_combo.currentText()
+        self.accept()
+    
+    def get_utm_info(self):
+        """Return (zone, hemisphere) tuple."""
+        return (self.utm_zone, self.hemisphere)
 
 
 class CalibrationMixin:
@@ -725,13 +983,391 @@ class CalibrationMixin:
         except Exception as e:
             self._show_message("error","Export Error", f"Failed to export calibration survey files: {e}")
 
+    def _dms_to_decimal_degrees(self, degrees, minutes, seconds, is_latitude=True):
+        """
+        Convert degrees, minutes, seconds to decimal degrees.
+        
+        Args:
+            degrees: Degrees (can be negative for S/W)
+            minutes: Minutes (0-59)
+            seconds: Seconds (0-59.999...)
+            is_latitude: True for latitude, False for longitude
+        
+        Returns:
+            Decimal degrees value
+        """
+        try:
+            # Handle sign: if degrees is negative, the whole value is negative
+            sign = -1 if degrees < 0 else 1
+            abs_degrees = abs(degrees)
+            
+            # Convert to decimal degrees
+            decimal = abs_degrees + (minutes / 60.0) + (seconds / 3600.0)
+            return sign * decimal
+        except (ValueError, TypeError, ZeroDivisionError):
+            raise ValueError(f"Invalid DMS values: {degrees}° {minutes}' {seconds}\"")
+
+    def _parse_dms_txt_file(self, file_path):
+        """
+        Parse a *_DMS.txt file format.
+        Format: No header, 8 rows, each row has 7 columns separated by spaces or tabs:
+                Point, deg_lat, min_lat, sec_lat, deg_lon, min_lon, sec_lon
+        Returns: List of 4 lines, each as [(lat1, lon1), (lat2, lon2)], or None on error
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            # Remove empty lines and strip whitespace
+            lines = [line.strip() for line in lines if line.strip()]
+            
+            if len(lines) != 8:
+                self._show_message("error", "Import Error", 
+                                 f"Expected 8 data rows in *_DMS.txt file, found {len(lines)} rows.")
+                return None
+            
+            points = []
+            for i, line in enumerate(lines):
+                # Split on whitespace (spaces or tabs), handling multiple spaces/tabs
+                parts = line.split()
+                if len(parts) < 7:
+                    self._show_message("error", "Import Error", 
+                                     f"Row {i+1} does not have 7 columns (Point, deg_lat, min_lat, sec_lat, deg_lon, min_lon, sec_lon). Found {len(parts)} columns.")
+                    return None
+                
+                try:
+                    # Parse DMS values: point, deg_lat, min_lat, sec_lat, deg_lon, min_lon, sec_lon
+                    deg_lat = float(parts[1])
+                    min_lat = float(parts[2])
+                    sec_lat = float(parts[3])
+                    deg_lon = float(parts[4])
+                    min_lon = float(parts[5])
+                    sec_lon = float(parts[6])
+                    
+                    # Convert to decimal degrees
+                    lat = self._dms_to_decimal_degrees(deg_lat, min_lat, sec_lat, is_latitude=True)
+                    lon = self._dms_to_decimal_degrees(deg_lon, min_lon, sec_lon, is_latitude=False)
+                    
+                    points.append((lat, lon))
+                except (ValueError, IndexError) as e:
+                    self._show_message("error", "Import Error", 
+                                     f"Row {i+1} has invalid DMS values: {str(e)}")
+                    return None
+            
+            # Group points into 4 lines (every 2 points = 1 line)
+            imported_lines = []
+            for i in range(0, 8, 2):
+                if i + 1 < len(points):
+                    imported_lines.append([points[i], points[i+1]])
+                else:
+                    self._show_message("error", "Import Error", 
+                                     "Insufficient points to form 4 lines.")
+                    return None
+            
+            if len(imported_lines) != 4:
+                self._show_message("error", "Import Error", 
+                                 f"Expected 4 lines from 8 points, got {len(imported_lines)} lines.")
+                return None
+            
+            return imported_lines
+            
+        except FileNotFoundError:
+            self._show_message("error", "Import Error", f"File not found: {file_path}")
+            return None
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Failed to parse *_DMS.txt file: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _dmm_to_decimal_degrees(self, degrees, decimal_minutes):
+        """
+        Convert degrees and decimal minutes to decimal degrees.
+        
+        Args:
+            degrees: Degrees (can be negative for S/W)
+            decimal_minutes: Decimal minutes (e.g. 7.406)
+        
+        Returns:
+            Decimal degrees value
+        """
+        try:
+            sign = -1 if degrees < 0 else 1
+            abs_degrees = abs(degrees)
+            decimal = abs_degrees + (decimal_minutes / 60.0)
+            return sign * decimal
+        except (ValueError, TypeError, ZeroDivisionError):
+            raise ValueError(f"Invalid DMM values: {degrees}° {decimal_minutes}'")
+
+    def _parse_dmm_txt_file(self, file_path):
+        """
+        Parse a *_DMM.txt file format (degrees and decimal minutes).
+        Format: No header, 8 rows, each row has 5 columns separated by spaces or tabs:
+                Point, deg_lat, min_lat, deg_lon, min_lon
+        Returns: List of 4 lines, each as [(lat1, lon1), (lat2, lon2)], or None on error
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            lines = [line.strip() for line in lines if line.strip()]
+            
+            if len(lines) != 8:
+                self._show_message("error", "Import Error", 
+                                 f"Expected 8 data rows in *_DMM.txt file, found {len(lines)} rows.")
+                return None
+            
+            points = []
+            for i, line in enumerate(lines):
+                parts = line.split()
+                if len(parts) < 5:
+                    self._show_message("error", "Import Error", 
+                                     f"Row {i+1} does not have 5 columns (Point, deg_lat, min_lat, deg_lon, min_lon). Found {len(parts)} columns.")
+                    return None
+                
+                try:
+                    deg_lat = float(parts[1])
+                    min_lat = float(parts[2])
+                    deg_lon = float(parts[3])
+                    min_lon = float(parts[4])
+                    
+                    lat = self._dmm_to_decimal_degrees(deg_lat, min_lat)
+                    lon = self._dmm_to_decimal_degrees(deg_lon, min_lon)
+                    points.append((lat, lon))
+                except (ValueError, IndexError) as e:
+                    self._show_message("error", "Import Error", 
+                                     f"Row {i+1} has invalid DMM values: {str(e)}")
+                    return None
+            
+            imported_lines = []
+            for i in range(0, 8, 2):
+                if i + 1 < len(points):
+                    imported_lines.append([points[i], points[i+1]])
+                else:
+                    self._show_message("error", "Import Error", "Insufficient points to form 4 lines.")
+                    return None
+            
+            if len(imported_lines) != 4:
+                self._show_message("error", "Import Error", 
+                                 f"Expected 4 lines from 8 points, got {len(imported_lines)} lines.")
+                return None
+            
+            return imported_lines
+            
+        except FileNotFoundError:
+            self._show_message("error", "Import Error", f"File not found: {file_path}")
+            return None
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Failed to parse *_DMM.txt file: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _parse_ddd_txt_file(self, file_path):
+        """
+        Parse a *_DDD.txt file format.
+        Format: No header, 8 rows, each row has 3 columns separated by spaces or tabs: Point, Latitude, Longitude (decimal degrees)
+        Returns: List of 4 lines, each as [(lat1, lon1), (lat2, lon2)], or None on error
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            # Remove empty lines and strip whitespace
+            lines = [line.strip() for line in lines if line.strip()]
+            
+            if len(lines) != 8:
+                self._show_message("error", "Import Error", 
+                                 f"Expected 8 data rows in *_DDD.txt file, found {len(lines)} rows.")
+                return None
+            
+            points = []
+            for i, line in enumerate(lines):
+                # Split on whitespace (spaces or tabs), handling multiple spaces/tabs
+                parts = line.split()
+                if len(parts) < 3:
+                    self._show_message("error", "Import Error", 
+                                     f"Row {i+1} does not have 3 columns (Point, Latitude, Longitude). Found {len(parts)} columns.")
+                    return None
+                
+                try:
+                    # Skip first column (point number), use columns 2 and 3 for lat/lon
+                    lat = float(parts[1])
+                    lon = float(parts[2])
+                    points.append((lat, lon))
+                except (ValueError, IndexError) as e:
+                    self._show_message("error", "Import Error", 
+                                     f"Row {i+1} has invalid latitude/longitude values: {parts[1] if len(parts) > 1 else 'N/A'}, {parts[2] if len(parts) > 2 else 'N/A'}")
+                    return None
+            
+            # Group points into 4 lines (every 2 points = 1 line)
+            imported_lines = []
+            for i in range(0, 8, 2):
+                if i + 1 < len(points):
+                    imported_lines.append([points[i], points[i+1]])
+                else:
+                    self._show_message("error", "Import Error", 
+                                     "Insufficient points to form 4 lines.")
+                    return None
+            
+            if len(imported_lines) != 4:
+                self._show_message("error", "Import Error", 
+                                 f"Expected 4 lines from 8 points, got {len(imported_lines)} lines.")
+                return None
+            
+            return imported_lines
+            
+        except FileNotFoundError:
+            self._show_message("error", "Import Error", f"File not found: {file_path}")
+            return None
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Failed to parse *_DDD.txt file: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _parse_lnw_file(self, file_path, utm_zone, hemisphere):
+        """
+        Parse a Hypack LNW file format.
+        Format: LNW version header, then blocks of:
+                LIN <num_points>
+                PTS <easting> <northing>  (repeated for each point)
+                LNN <line_name>  (optional)
+                EOL
+        Coordinates are in UTM (easting, northing in meters).
+        Returns: List of lines, each as [(lat1, lon1), (lat2, lon2)], or None on error
+        """
+        try:
+            if not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
+                self._show_message("error", "Import Error", 
+                                 "Geospatial libraries not available. Cannot import LNW files.")
+                return None
+            
+            # Create UTM CRS string (EPSG:326XX for North, EPSG:327XX for South)
+            if hemisphere.lower() == 'north' or hemisphere.lower() == 'n':
+                utm_crs = f"EPSG:326{utm_zone:02d}"
+            else:
+                utm_crs = f"EPSG:327{utm_zone:02d}"
+            
+            # Create transformer from UTM to WGS84
+            try:
+                transformer = pyproj.Transformer.from_crs(utm_crs, "EPSG:4326", always_xy=True)
+            except Exception as e:
+                self._show_message("error", "Import Error", 
+                                 f"Failed to create UTM transformer for zone {utm_zone} {hemisphere}: {e}")
+                return None
+            
+            with open(file_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+            
+            # Remove empty lines and strip whitespace
+            lines = [line.strip() for line in lines if line.strip()]
+            
+            if not lines:
+                self._show_message("error", "Import Error", "LNW file is empty.")
+                return None
+            
+            # Check for LNW header (optional, but good to verify)
+            if lines[0].upper().startswith('LNW'):
+                lines = lines[1:]  # Skip header
+            
+            imported_lines = []
+            i = 0
+            
+            while i < len(lines):
+                line = lines[i].upper().strip()
+                
+                # Look for LIN (line start)
+                if line.startswith('LIN'):
+                    parts = line.split()
+                    if len(parts) < 2:
+                        i += 1
+                        continue
+                    try:
+                        num_points = int(parts[1])
+                    except ValueError:
+                        i += 1
+                        continue
+                    
+                    # Read PTS lines
+                    points_utm = []
+                    i += 1
+                    points_read = 0
+                    
+                    while i < len(lines) and points_read < num_points:
+                        pts_line = lines[i].upper().strip()
+                        if pts_line.startswith('PTS'):
+                            parts = pts_line.split()
+                            if len(parts) >= 3:
+                                try:
+                                    easting = float(parts[1])
+                                    northing = float(parts[2])
+                                    points_utm.append((easting, northing))
+                                    points_read += 1
+                                except (ValueError, IndexError):
+                                    pass
+                        elif pts_line.startswith('LNN') or pts_line.startswith('EOL'):
+                            # End of this line block
+                            break
+                        i += 1
+                    
+                    # Convert UTM points to lat/lon
+                    if len(points_utm) >= 2:
+                        # Convert all points
+                        points_geo = []
+                        for easting, northing in points_utm:
+                            try:
+                                lon, lat = transformer.transform(easting, northing)
+                                points_geo.append((lat, lon))
+                            except Exception as e:
+                                self._show_message("error", "Import Error", 
+                                                 f"Failed to convert UTM coordinates: {e}")
+                                return None
+                        
+                        # For calibration, we need lines with exactly 2 points
+                        # If a line has more than 2 points, use first and last
+                        if len(points_geo) >= 2:
+                            imported_lines.append([points_geo[0], points_geo[-1]])
+                    
+                    # Skip to EOL or next LIN
+                    while i < len(lines):
+                        if lines[i].upper().strip().startswith('EOL'):
+                            i += 1
+                            break
+                        elif lines[i].upper().strip().startswith('LIN'):
+                            break
+                        i += 1
+                else:
+                    i += 1
+            
+            if len(imported_lines) == 0:
+                self._show_message("error", "Import Error", 
+                                 "No valid lines found in LNW file.")
+                return None
+            
+            if len(imported_lines) != 4:
+                self._show_message("warning", "Import Warning", 
+                                 f"LNW file contains {len(imported_lines)} lines. Expected 4 lines for calibration survey.")
+                # Still allow import, user can assign in dialog
+            
+            return imported_lines
+            
+        except FileNotFoundError:
+            self._show_message("error", "Import Error", f"File not found: {file_path}")
+            return None
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Failed to parse LNW file: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
     def _import_cal_survey_files(self):
-        """Import calibration survey lines from CSV or GeoJSON file."""
+        """Import calibration survey lines from CSV, GeoJSON, LNW, DMS, DMM, or DDD text file."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Survey File to Import",
             self.last_cal_import_dir,
-            "Decimal Degree CSV files (*_DD.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json);;All files (*.*)"
+            "Known Calibration Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DD.csv *.csv *.geojson *.json *.lnw);;Hypack LNW files (*.lnw);;Degrees Minutes Seconds Text files (*_DMS.txt);;Degrees Decimal Minutes Text files (*_DMM.txt);;Decimal Degrees Text files (*_DDD.txt);;Decimal Degree CSV files (*_DD.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json)"
         )
         if not file_path:
             return
@@ -744,7 +1380,149 @@ class CalibrationMixin:
             self.heading_lines = []
             self.roll_line_points = []
             file_ext = os.path.splitext(file_path)[1].lower()
-            if file_ext == '.csv':
+            file_basename = os.path.basename(file_path)
+            file_processed = False
+            
+            # Handle *.lnw format (Hypack LNW)
+            if file_ext == '.lnw':
+                # Show UTM zone dialog
+                utm_dialog = UTMZoneDialog(self)
+                if utm_dialog.exec() != QDialog.DialogCode.Accepted:
+                    return  # User cancelled
+                
+                utm_zone, hemisphere = utm_dialog.get_utm_info()
+                
+                imported_lines = self._parse_lnw_file(file_path, utm_zone, hemisphere)
+                if imported_lines is None:
+                    return  # Error already shown
+                
+                # Show assignment dialog
+                dialog = LineAssignmentDialog(self, imported_lines)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return  # User cancelled
+                
+                assignments = dialog.get_assignments()
+                
+                # Map assignments to calibration data structures
+                self.pitch_line_points = []
+                self.roll_line_points = []
+                self.heading_lines = []
+                
+                for line_idx, assignment_type in assignments.items():
+                    if assignment_type == 'pitch':
+                        self.pitch_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'roll':
+                        self.roll_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'heading1':
+                        if len(self.heading_lines) < 1:
+                            self.heading_lines.append([])
+                        self.heading_lines[0] = imported_lines[line_idx]
+                    elif assignment_type == 'heading2':
+                        if len(self.heading_lines) < 2:
+                            while len(self.heading_lines) < 2:
+                                self.heading_lines.append([])
+                        self.heading_lines[1] = imported_lines[line_idx]
+                file_processed = True
+            
+            # Handle *_DMS.txt format (Degrees Minutes Seconds)
+            if not file_processed and (file_basename.endswith('_DMS.txt') or (file_ext == '.txt' and '_DMS' in file_basename)):
+                imported_lines = self._parse_dms_txt_file(file_path)
+                if imported_lines is None:
+                    return  # Error already shown
+                
+                # Show assignment dialog
+                dialog = LineAssignmentDialog(self, imported_lines)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return  # User cancelled
+                
+                assignments = dialog.get_assignments()
+                
+                # Map assignments to calibration data structures
+                self.pitch_line_points = []
+                self.roll_line_points = []
+                self.heading_lines = []
+                
+                for line_idx, assignment_type in assignments.items():
+                    if assignment_type == 'pitch':
+                        self.pitch_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'roll':
+                        self.roll_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'heading1':
+                        if len(self.heading_lines) < 1:
+                            self.heading_lines.append([])
+                        self.heading_lines[0] = imported_lines[line_idx]
+                    elif assignment_type == 'heading2':
+                        if len(self.heading_lines) < 2:
+                            while len(self.heading_lines) < 2:
+                                self.heading_lines.append([])
+                        self.heading_lines[1] = imported_lines[line_idx]
+                file_processed = True
+            
+            # Handle *_DMM.txt format (Degrees and decimal minutes)
+            if not file_processed and (file_basename.endswith('_DMM.txt') or (file_ext == '.txt' and '_DMM' in file_basename)):
+                imported_lines = self._parse_dmm_txt_file(file_path)
+                if imported_lines is None:
+                    return  # Error already shown
+                
+                dialog = LineAssignmentDialog(self, imported_lines)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return  # User cancelled
+                
+                assignments = dialog.get_assignments()
+                self.pitch_line_points = []
+                self.roll_line_points = []
+                self.heading_lines = []
+                
+                for line_idx, assignment_type in assignments.items():
+                    if assignment_type == 'pitch':
+                        self.pitch_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'roll':
+                        self.roll_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'heading1':
+                        if len(self.heading_lines) < 1:
+                            self.heading_lines.append([])
+                        self.heading_lines[0] = imported_lines[line_idx]
+                    elif assignment_type == 'heading2':
+                        if len(self.heading_lines) < 2:
+                            while len(self.heading_lines) < 2:
+                                self.heading_lines.append([])
+                        self.heading_lines[1] = imported_lines[line_idx]
+                file_processed = True
+            
+            # Handle *_DDD.txt format (Decimal Degrees)
+            if not file_processed and (file_basename.endswith('_DDD.txt') or (file_ext == '.txt' and '_DDD' in file_basename)):
+                imported_lines = self._parse_ddd_txt_file(file_path)
+                if imported_lines is None:
+                    return  # Error already shown
+                
+                # Show assignment dialog
+                dialog = LineAssignmentDialog(self, imported_lines)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return  # User cancelled
+                
+                assignments = dialog.get_assignments()
+                
+                # Map assignments to calibration data structures
+                self.pitch_line_points = []
+                self.roll_line_points = []
+                self.heading_lines = []
+                
+                for line_idx, assignment_type in assignments.items():
+                    if assignment_type == 'pitch':
+                        self.pitch_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'roll':
+                        self.roll_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'heading1':
+                        if len(self.heading_lines) < 1:
+                            self.heading_lines.append([])
+                        self.heading_lines[0] = imported_lines[line_idx]
+                    elif assignment_type == 'heading2':
+                        if len(self.heading_lines) < 2:
+                            while len(self.heading_lines) < 2:
+                                self.heading_lines.append([])
+                        self.heading_lines[1] = imported_lines[line_idx]
+                file_processed = True
+            elif not file_processed and file_ext == '.csv':
                 with open(file_path, 'r', encoding='utf-8') as csvfile:
                     csv_reader = csv.DictReader(csvfile)
                     lines_data = {}
@@ -825,7 +1603,8 @@ class CalibrationMixin:
                             self.heading_lines.append([])
                         if heading_idx < 2:
                             self.heading_lines[heading_idx] = [point1, point2]
-            else:
+                file_processed = True
+            elif not file_processed:
                 self._show_message("error","Import Error", f"Unsupported file format: {file_ext}")
                 return
             params = None
