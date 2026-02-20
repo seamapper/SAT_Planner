@@ -1199,6 +1199,107 @@ class CalibrationMixin:
             traceback.print_exc()
             return None
 
+    def _parse_ddd_txt_file_as_polyline(self, file_path):
+        """Parse *_DDD.txt as a single polyline: all rows in order, 3 cols (Point, Lat, Lon). Returns list of (lat, lon) or None. Requires >= 2 points."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            lines = [line.strip() for line in content.replace('\r\n', '\n').replace('\r', '\n').split('\n') if line.strip()]
+            if len(lines) < 2:
+                self._show_message("error", "Import Error",
+                                 f"Line plan requires at least 2 points in *_DDD.txt file, found {len(lines)} rows.")
+                return None
+            points = []
+            for i, line in enumerate(lines):
+                parts = line.split()
+                if len(parts) < 3:
+                    self._show_message("error", "Import Error",
+                                     f"Row {i+1} does not have 3 columns (Point, Latitude, Longitude). Found {len(parts)} columns.")
+                    return None
+                try:
+                    lat = float(parts[1])
+                    lon = float(parts[2])
+                    points.append((lat, lon))
+                except (ValueError, IndexError):
+                    self._show_message("error", "Import Error",
+                                     f"Row {i+1} has invalid latitude/longitude values.")
+                    return None
+            return points
+        except FileNotFoundError:
+            self._show_message("error", "Import Error", f"File not found: {file_path}")
+            return None
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Failed to parse *_DDD.txt file: {e}")
+            return None
+
+    def _parse_dms_txt_file_as_polyline(self, file_path):
+        """Parse *_DMS.txt as a single polyline: all rows in order, 7 cols. Returns list of (lat, lon) or None. Requires >= 2 points."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            lines = [line.strip() for line in content.replace('\r\n', '\n').replace('\r', '\n').split('\n') if line.strip()]
+            if len(lines) < 2:
+                self._show_message("error", "Import Error",
+                                 f"Line plan requires at least 2 points in *_DMS.txt file, found {len(lines)} rows.")
+                return None
+            points = []
+            for i, line in enumerate(lines):
+                parts = line.split()
+                if len(parts) < 7:
+                    self._show_message("error", "Import Error",
+                                     f"Row {i+1} does not have 7 columns (Point, deg_lat, min_lat, sec_lat, deg_lon, min_lon, sec_lon). Found {len(parts)} columns.")
+                    return None
+                try:
+                    deg_lat, min_lat, sec_lat = float(parts[1]), float(parts[2]), float(parts[3])
+                    deg_lon, min_lon, sec_lon = float(parts[4]), float(parts[5]), float(parts[6])
+                    lat = self._dms_to_decimal_degrees(deg_lat, min_lat, sec_lat, is_latitude=True)
+                    lon = self._dms_to_decimal_degrees(deg_lon, min_lon, sec_lon, is_latitude=False)
+                    points.append((lat, lon))
+                except (ValueError, IndexError):
+                    self._show_message("error", "Import Error", f"Row {i+1} has invalid DMS values.")
+                    return None
+            return points
+        except FileNotFoundError:
+            self._show_message("error", "Import Error", f"File not found: {file_path}")
+            return None
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Failed to parse *_DMS.txt file: {e}")
+            return None
+
+    def _parse_dmm_txt_file_as_polyline(self, file_path):
+        """Parse *_DMM.txt as a single polyline: all rows in order, 5 cols. Returns list of (lat, lon) or None. Requires >= 2 points."""
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            lines = [line.strip() for line in content.replace('\r\n', '\n').replace('\r', '\n').split('\n') if line.strip()]
+            if len(lines) < 2:
+                self._show_message("error", "Import Error",
+                                 f"Line plan requires at least 2 points in *_DMM.txt file, found {len(lines)} rows.")
+                return None
+            points = []
+            for i, line in enumerate(lines):
+                parts = line.split()
+                if len(parts) < 5:
+                    self._show_message("error", "Import Error",
+                                     f"Row {i+1} does not have 5 columns (Point, deg_lat, min_lat, deg_lon, min_lon). Found {len(parts)} columns.")
+                    return None
+                try:
+                    deg_lat, min_lat = float(parts[1]), float(parts[2])
+                    deg_lon, min_lon = float(parts[3]), float(parts[4])
+                    lat = self._dmm_to_decimal_degrees(deg_lat, min_lat)
+                    lon = self._dmm_to_decimal_degrees(deg_lon, min_lon)
+                    points.append((lat, lon))
+                except (ValueError, IndexError):
+                    self._show_message("error", "Import Error", f"Row {i+1} has invalid DMM values.")
+                    return None
+            return points
+        except FileNotFoundError:
+            self._show_message("error", "Import Error", f"File not found: {file_path}")
+            return None
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Failed to parse *_DMM.txt file: {e}")
+            return None
+
     def _parse_lnw_file(self, file_path, utm_zone, hemisphere):
         """
         Parse a Hypack LNW file format.
@@ -1332,6 +1433,83 @@ class CalibrationMixin:
             self._show_message("error", "Import Error", f"Failed to parse LNW file: {e}")
             import traceback
             traceback.print_exc()
+            return None
+
+    def _parse_lnw_file_as_polyline(self, file_path, utm_zone, hemisphere):
+        """Parse first line block of an LNW file as a single polyline. Returns list of (lat, lon) or None. Requires >= 2 points."""
+        try:
+            if not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
+                self._show_message("error", "Import Error",
+                                 "Geospatial libraries not available. Cannot import LNW files.")
+                return None
+            if hemisphere.lower() == 'north' or hemisphere.lower() == 'n':
+                utm_crs = f"EPSG:326{utm_zone:02d}"
+            else:
+                utm_crs = f"EPSG:327{utm_zone:02d}"
+            try:
+                transformer = pyproj.Transformer.from_crs(utm_crs, "EPSG:4326", always_xy=True)
+            except Exception as e:
+                self._show_message("error", "Import Error",
+                                 f"Failed to create UTM transformer for zone {utm_zone} {hemisphere}: {e}")
+                return None
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            lines = [line.strip() for line in content.replace('\r\n', '\n').replace('\r', '\n').split('\n') if line.strip()]
+            if not lines:
+                self._show_message("error", "Import Error", "LNW file is empty.")
+                return None
+            if lines[0].upper().startswith('LNW'):
+                lines = lines[1:]
+            i = 0
+            while i < len(lines):
+                line = lines[i].upper().strip()
+                if line.startswith('LIN'):
+                    parts = line.split()
+                    if len(parts) < 2:
+                        i += 1
+                        continue
+                    try:
+                        num_points = int(parts[1])
+                    except ValueError:
+                        i += 1
+                        continue
+                    points_utm = []
+                    i += 1
+                    points_read = 0
+                    while i < len(lines) and points_read < num_points:
+                        pts_line = lines[i].upper().strip()
+                        if pts_line.startswith('PTS') and len(pts_line.split()) >= 3:
+                            try:
+                                p = pts_line.split()
+                                easting, northing = float(p[1]), float(p[2])
+                                points_utm.append((easting, northing))
+                                points_read += 1
+                            except (ValueError, IndexError):
+                                pass
+                        elif pts_line.startswith('LNN') or pts_line.startswith('EOL'):
+                            break
+                        i += 1
+                    if len(points_utm) < 2:
+                        self._show_message("error", "Import Error",
+                                         "Line plan requires at least 2 points in the first line block of the LNW file.")
+                        return None
+                    points_geo = []
+                    for easting, northing in points_utm:
+                        try:
+                            lon, lat = transformer.transform(easting, northing)
+                            points_geo.append((lat, lon))
+                        except Exception as e:
+                            self._show_message("error", "Import Error", f"Failed to convert UTM coordinates: {e}")
+                            return None
+                    return points_geo
+                i += 1
+            self._show_message("error", "Import Error", "No valid line block found in LNW file.")
+            return None
+        except FileNotFoundError:
+            self._show_message("error", "Import Error", f"File not found: {file_path}")
+            return None
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Failed to parse LNW file: {e}")
             return None
 
     def _import_cal_survey_files(self):

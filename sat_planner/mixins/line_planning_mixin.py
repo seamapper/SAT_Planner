@@ -8,7 +8,7 @@ import json
 import datetime
 
 import numpy as np
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtWidgets import QFileDialog, QDialog
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextCursor
 
@@ -20,6 +20,11 @@ try:
     from shapely.geometry import mapping as _shapely_mapping
 except ImportError:
     _shapely_mapping = None
+
+try:
+    from .calibration_mixin import UTMZoneDialog
+except ImportError:
+    UTMZoneDialog = None
 
 
 class LinePlanningMixin:
@@ -358,7 +363,9 @@ class LinePlanningMixin:
     def _import_drawn_line(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Line Plan File to Import", self.last_line_import_dir,
-            "Decimal Degree CSV files (*_DD.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json);;All files (*.*)")
+            "Known Line Plan Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DD.csv *.csv *.geojson *.json);;"
+            "Decimal Degrees (*_DDD.txt);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
+            "Hypack LNW (*.lnw);;Decimal Degree CSV (*_DD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;All files (*.*)")
         if not file_path:
             return
         import_dir = os.path.dirname(file_path)
@@ -368,7 +375,36 @@ class LinePlanningMixin:
         try:
             self.line_planning_points = []
             file_ext = os.path.splitext(file_path)[1].lower()
-            if file_ext == '.csv':
+            file_basename = os.path.basename(file_path)
+            file_processed = False
+
+            # Single polyline: points in file order, no assignment dialog
+            if file_basename.lower().endswith('_ddd.txt') and hasattr(self, '_parse_ddd_txt_file_as_polyline'):
+                points = self._parse_ddd_txt_file_as_polyline(file_path)
+                if points is not None:
+                    self.line_planning_points = points
+                    file_processed = True
+            elif file_basename.lower().endswith('_dms.txt') and hasattr(self, '_parse_dms_txt_file_as_polyline'):
+                points = self._parse_dms_txt_file_as_polyline(file_path)
+                if points is not None:
+                    self.line_planning_points = points
+                    file_processed = True
+            elif file_basename.lower().endswith('_dmm.txt') and hasattr(self, '_parse_dmm_txt_file_as_polyline'):
+                points = self._parse_dmm_txt_file_as_polyline(file_path)
+                if points is not None:
+                    self.line_planning_points = points
+                    file_processed = True
+            elif file_ext == '.lnw' and UTMZoneDialog is not None and hasattr(self, '_parse_lnw_file_as_polyline'):
+                utm_dialog = UTMZoneDialog(self)
+                if utm_dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                utm_zone, hemisphere = utm_dialog.get_utm_info()
+                points = self._parse_lnw_file_as_polyline(file_path, utm_zone, hemisphere)
+                if points is not None:
+                    self.line_planning_points = points
+                    file_processed = True
+
+            if not file_processed and file_ext == '.csv':
                 with open(file_path, 'r', encoding='utf-8') as csvfile:
                     csv_reader = csv.DictReader(csvfile)
                     for row in csv_reader:
@@ -378,7 +414,8 @@ class LinePlanningMixin:
                             self.line_planning_points.append((lat, lon))
                         except (ValueError, TypeError):
                             continue
-            elif file_ext in ['.geojson', '.json']:
+                file_processed = True
+            elif not file_processed and file_ext in ['.geojson', '.json']:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     geojson_data = json.load(f)
                 features = geojson_data.get('features', []) if geojson_data.get('type') == 'FeatureCollection' else [geojson_data] if geojson_data.get('type') == 'Feature' else []
@@ -391,7 +428,9 @@ class LinePlanningMixin:
                     for coord in geometry.get('coordinates', []):
                         if len(coord) >= 2:
                             self.line_planning_points.append((coord[1], coord[0]))
-            else:
+                file_processed = True
+
+            if not file_processed:
                 self._show_message("error", "Import Error", f"Unsupported file format: {file_ext}")
                 return
             if len(self.line_planning_points) < 2:
@@ -400,7 +439,7 @@ class LinePlanningMixin:
                 return
             if hasattr(self, 'line_export_name_entry'):
                 file_basename = os.path.splitext(os.path.basename(file_path))[0]
-                for suffix in ['_DD', '_DM', '.geojson', '.shp', '.lnw']:
+                for suffix in ['_DD', '_DM', '_DDD', '_DMS', '_DMM', '.geojson', '.shp', '.lnw']:
                     if file_basename.endswith(suffix):
                         file_basename = file_basename[:-len(suffix)]
                 self.line_export_name_entry.setText(file_basename)
