@@ -22,7 +22,7 @@ except ImportError:
     _shapely_mapping = None
 
 try:
-    from .calibration_mixin import UTMZoneDialog
+    from .survey_parsers_mixin import UTMZoneDialog
 except ImportError:
     UTMZoneDialog = None
 

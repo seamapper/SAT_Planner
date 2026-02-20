@@ -36,6 +36,7 @@ from .mixins.basemap_mixin import BasemapMixin
 from .mixins.geotiff_mixin import GeoTIFFMixin
 from .mixins.plotting_mixin import PlottingMixin
 from .mixins.reference_mixin import ReferenceMixin
+from .mixins.survey_parsers_mixin import SurveyParsersMixin
 from .mixins.calibration_mixin import CalibrationMixin
 from .mixins.line_planning_mixin import LinePlanningMixin
 from .mixins.profiles_mixin import ProfilesMixin
@@ -44,7 +45,7 @@ from .mixins.export_import_mixin import ExportImportMixin
 from .mixins.config_mixin import ConfigMixin
 
 
-class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, CalibrationMixin, LinePlanningMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, QMainWindow):
+class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, CalibrationMixin, LinePlanningMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, QMainWindow):
     CONFIG_FILENAME = CONFIG_FILENAME  # from package
 
     def __init__(self):

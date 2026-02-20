@@ -18,7 +18,7 @@ from sat_planner import decimal_degrees_to_ddm
 from sat_planner.utils_ui import show_statistics_dialog
 
 try:
-    from .calibration_mixin import UTMZoneDialog
+    from .survey_parsers_mixin import UTMZoneDialog
 except ImportError:
     UTMZoneDialog = None
 
