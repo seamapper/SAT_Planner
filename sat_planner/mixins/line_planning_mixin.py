@@ -360,6 +360,36 @@ class LinePlanningMixin:
         except Exception as e:
             self.set_line_info_text(f"Failed to export drawn line: {e}")
 
+    def _download_and_load_gmrt_after_line_import(self):
+        """Compute extent from line plan points (with buffer), then use GMRT mixin to download and load."""
+        if not getattr(self, "line_planning_points", None) or len(self.line_planning_points) < 2:
+            self._show_message("warning", "GMRT Download", "No line plan points to compute extent.")
+            return
+        lats = [p[0] for p in self.line_planning_points]
+        lons = [p[1] for p in self.line_planning_points]
+        min_lat, max_lat = min(lats), max(lats)
+        min_lon, max_lon = min(lons), max(lons)
+        mid_lat = (min_lat + max_lat) / 2.0
+        mid_lon = (min_lon + max_lon) / 2.0
+        buffer_deg = 0.5
+        if hasattr(self, "line_plan_gmrt_buffer_spin"):
+            try:
+                buffer_deg = float(self.line_plan_gmrt_buffer_spin.value())
+            except (ValueError, TypeError):
+                pass
+        west = mid_lon - buffer_deg
+        east = mid_lon + buffer_deg
+        south = mid_lat - buffer_deg
+        north = mid_lat + buffer_deg
+        self._download_gmrt_and_load(
+            west, east, south, north,
+            resolution=100,
+            layer="topo",
+            default_filename_prefix="GMRT_Bathy",
+            log_func=lambda msg, append=True: self.set_line_info_text(msg, append=append),
+            default_directory=getattr(self, "last_line_import_dir", None),
+        )
+
     def _import_drawn_line(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Line Plan File to Import", self.last_line_import_dir,
@@ -448,6 +478,8 @@ class LinePlanningMixin:
             self.set_line_info_text(f"Successfully imported line plan with {len(self.line_planning_points)} points.")
             if hasattr(self, 'line_start_draw_btn') and len(self.line_planning_points) >= 2:
                 self.line_start_draw_btn.setStyleSheet("")
+            if getattr(self, "line_plan_download_gmrt_checkbox", None) and self.line_plan_download_gmrt_checkbox.isChecked():
+                self._download_and_load_gmrt_after_line_import()
         except Exception as e:
             self._show_message("error", "Import Error", f"Failed to import line plan: {e}")
 
