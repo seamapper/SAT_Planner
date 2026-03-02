@@ -37,6 +37,7 @@ from .mixins.geotiff_mixin import GeoTIFFMixin
 from .mixins.plotting_mixin import PlottingMixin
 from .mixins.reference_mixin import ReferenceMixin
 from .mixins.survey_parsers_mixin import SurveyParsersMixin
+from .mixins.gmrt_download_mixin import GMRTDownloadMixin
 from .mixins.calibration_mixin import CalibrationMixin
 from .mixins.line_planning_mixin import LinePlanningMixin
 from .mixins.profiles_mixin import ProfilesMixin
@@ -45,7 +46,7 @@ from .mixins.export_import_mixin import ExportImportMixin
 from .mixins.config_mixin import ConfigMixin
 
 
-class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, CalibrationMixin, LinePlanningMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, QMainWindow):
+class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, QMainWindow):
     CONFIG_FILENAME = CONFIG_FILENAME  # from package
 
     def __init__(self):
@@ -1139,7 +1140,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_import_export_layout.addWidget(import_export_button_frame)
         cal_import_export_layout.addSpacing(3)
 
-        self.cal_download_gmrt_checkbox = QCheckBox("Download GMRT Grid")
+        self.cal_download_gmrt_checkbox = QCheckBox("Download GMRT")
         self.cal_download_gmrt_checkbox.setChecked(False)
         self.cal_download_gmrt_checkbox.setToolTip("When enabled, importing a calibration survey will download a GMRT bathymetry GeoTIFF (1° buffer, 100 m resolution) and load it.")
         cal_import_export_layout.addWidget(self.cal_download_gmrt_checkbox)

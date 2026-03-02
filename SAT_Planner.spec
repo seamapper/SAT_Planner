@@ -44,6 +44,7 @@ a = Analysis(
         'sat_planner.mixins.plotting_mixin',
         'sat_planner.mixins.reference_mixin',
         'sat_planner.mixins.survey_parsers_mixin',
+        'sat_planner.mixins.gmrt_download_mixin',
         'sat_planner.mixins.calibration_mixin',
         'sat_planner.mixins.line_planning_mixin',
         'sat_planner.mixins.profiles_mixin',
