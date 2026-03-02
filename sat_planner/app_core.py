@@ -7,7 +7,8 @@ Copyright (c) 2025, UNH/CCOM-JHC. BSD 3-Clause License (see LICENSE in repo root
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QGridLayout, QLabel, QLineEdit, QPushButton, QCheckBox, QTextEdit,
                              QScrollArea, QTabWidget, QFileDialog, QMessageBox, QDialog,
-                             QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar, QGroupBox)
+                             QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar, QGroupBox,
+                             QDoubleSpinBox)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat, QPixmap
 import matplotlib
@@ -1140,10 +1141,24 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_import_export_layout.addWidget(import_export_button_frame)
         cal_import_export_layout.addSpacing(3)
 
+        gmrt_row = QWidget()
+        gmrt_row_layout = QHBoxLayout(gmrt_row)
+        gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
+        gmrt_row_layout.setSpacing(6)
         self.cal_download_gmrt_checkbox = QCheckBox("Download GMRT")
         self.cal_download_gmrt_checkbox.setChecked(False)
-        self.cal_download_gmrt_checkbox.setToolTip("When enabled, importing a calibration survey will download a GMRT bathymetry GeoTIFF (1° buffer, 100 m resolution) and load it.")
-        cal_import_export_layout.addWidget(self.cal_download_gmrt_checkbox)
+        self.cal_download_gmrt_checkbox.setToolTip("When enabled, importing a calibration survey will download a GMRT bathymetry GeoTIFF (buffer and 100 m resolution) and load it.")
+        gmrt_row_layout.addWidget(self.cal_download_gmrt_checkbox)
+        self.cal_gmrt_buffer_spin = QDoubleSpinBox()
+        self.cal_gmrt_buffer_spin.setRange(0.01, 10.0)
+        self.cal_gmrt_buffer_spin.setSingleStep(0.1)
+        self.cal_gmrt_buffer_spin.setValue(0.5)
+        self.cal_gmrt_buffer_spin.setDecimals(2)
+        self.cal_gmrt_buffer_spin.setMinimumWidth(60)
+        self.cal_gmrt_buffer_spin.setToolTip("Buffer size in degrees around survey extent for GMRT download.")
+        gmrt_row_layout.addWidget(self.cal_gmrt_buffer_spin)
+        gmrt_row_layout.addStretch()
+        cal_import_export_layout.addWidget(gmrt_row)
         cal_import_export_layout.addSpacing(3)
 
         # Export Name at the bottom

@@ -1247,7 +1247,12 @@ class CalibrationMixin:
         min_lon, max_lon = min(lons), max(lons)
         mid_lat = (min_lat + max_lat) / 2.0
         mid_lon = (min_lon + max_lon) / 2.0
-        buffer_deg = 1.0
+        buffer_deg = 0.5
+        if hasattr(self, 'cal_gmrt_buffer_spin'):
+            try:
+                buffer_deg = float(self.cal_gmrt_buffer_spin.value())
+            except (ValueError, TypeError):
+                pass
         west = mid_lon - buffer_deg
         east = mid_lon + buffer_deg
         south = mid_lat - buffer_deg
