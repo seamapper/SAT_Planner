@@ -336,6 +336,21 @@ class GeoTIFFMixin:
             if not response:
                 return
 
+        self._load_geotiff_from_path(file_path, use_background_loading=use_background_loading)
+
+    def _load_geotiff_from_path(self, file_path, use_background_loading=False):
+        """Load and display a GeoTIFF from the given path. Used by Load GeoTIFF and by GMRT download."""
+        if not GEOSPATIAL_LIBS_AVAILABLE:
+            self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot load GeoTIFF.")
+            return
+        if not file_path or not os.path.isfile(file_path):
+            return
+        self.last_geotiff_dir = os.path.dirname(file_path)
+        if hasattr(self, '_save_last_geotiff_dir'):
+            self._save_last_geotiff_dir()
+
+        file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+
         # Show loading progress
         progress_window = QDialog(self)
         progress_window.setWindowTitle("Loading GeoTIFF")

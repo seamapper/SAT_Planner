@@ -1139,6 +1139,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_import_export_layout.addWidget(import_export_button_frame)
         cal_import_export_layout.addSpacing(3)
 
+        self.cal_download_gmrt_checkbox = QCheckBox("Download GMRT Grid")
+        self.cal_download_gmrt_checkbox.setChecked(False)
+        self.cal_download_gmrt_checkbox.setToolTip("When enabled, importing a calibration survey will download a GMRT bathymetry GeoTIFF (1° buffer, 100 m resolution) and load it.")
+        cal_import_export_layout.addWidget(self.cal_download_gmrt_checkbox)
+        cal_import_export_layout.addSpacing(3)
+
         # Export Name at the bottom
         export_name_frame = QWidget()
         export_name_layout = QGridLayout(export_name_frame)

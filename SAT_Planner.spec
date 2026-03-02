@@ -43,6 +43,7 @@ a = Analysis(
         'sat_planner.mixins.geotiff_mixin',
         'sat_planner.mixins.plotting_mixin',
         'sat_planner.mixins.reference_mixin',
+        'sat_planner.mixins.survey_parsers_mixin',
         'sat_planner.mixins.calibration_mixin',
         'sat_planner.mixins.line_planning_mixin',
         'sat_planner.mixins.profiles_mixin',
@@ -66,6 +67,7 @@ a = Analysis(
         'matplotlib.backends.backend_qtagg', 'matplotlib.backends.backend_qt5agg',
         'matplotlib.figure', 'matplotlib.colors', 'matplotlib.pyplot',
         'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
+        'requests',  # optional: for GMRT grid download on calibration import
     ],
     hookspath=[],
     hooksconfig={},

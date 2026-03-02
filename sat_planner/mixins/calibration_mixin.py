@@ -10,8 +10,16 @@ import datetime
 
 from PyQt6.QtWidgets import (QFileDialog, QDialog, QVBoxLayout, QHBoxLayout, 
                              QLabel, QComboBox, QPushButton, QWidget, QLineEdit, QSpinBox)
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat
+
+try:
+    import requests
+except ImportError:
+    requests = None
+
+# GMRT GridServer endpoint for bathymetry GeoTIFF download
+GMRT_GRIDSERVER_URL = "https://www.gmrt.org/services/GridServer"
 
 import numpy as np
 from matplotlib.figure import Figure
@@ -24,6 +32,46 @@ try:
     from .survey_parsers_mixin import UTMZoneDialog
 except ImportError:
     UTMZoneDialog = None
+
+
+class GMRTDownloadWorker(QThread):
+    """Worker thread to download a GeoTIFF from GMRT GridServer and save to a file."""
+    finished = pyqtSignal(bool, str)  # success, path_or_error_message
+
+    def __init__(self, params, save_path):
+        super().__init__()
+        self.params = dict(params)
+        self.params['format'] = 'geotiff'
+        self.save_path = save_path
+
+    def run(self):
+        try:
+            if requests is None:
+                self.finished.emit(False, "requests library is required. Install with: pip install requests")
+                return
+            with requests.get(GMRT_GRIDSERVER_URL, params=self.params, stream=True, timeout=120) as r:
+                if r.status_code != 200:
+                    msg = r.text[:200] if r.text else f"HTTP {r.status_code}"
+                    self.finished.emit(False, f"GMRT server error: {msg}")
+                    return
+                with open(self.save_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                if os.path.getsize(self.save_path) == 0:
+                    try:
+                        os.remove(self.save_path)
+                    except OSError:
+                        pass
+                    self.finished.emit(False, "Downloaded file is empty.")
+                    return
+                self.finished.emit(True, self.save_path)
+        except requests.exceptions.Timeout:
+            self.finished.emit(False, "GMRT request timed out.")
+        except requests.exceptions.ConnectionError:
+            self.finished.emit(False, "Could not connect to GMRT server.")
+        except Exception as e:
+            self.finished.emit(False, str(e))
 
 
 class LineAssignmentDialog(QDialog):
@@ -1219,12 +1267,79 @@ class CalibrationMixin:
                     imported_lines.append(f"Heading line {i+1}")
             if imported_lines:
                 self.set_cal_info_text(f"Successfully imported: {', '.join(imported_lines)}")
+                if getattr(self, 'cal_download_gmrt_checkbox', None) and self.cal_download_gmrt_checkbox.isChecked():
+                    self._download_and_load_gmrt_after_import()
             else:
                 self._show_message("warning","Import Warning", "No valid calibration lines found in the selected file.")
         except Exception as e:
             self._show_message("error","Import Error", f"Failed to import calibration survey files: {e}")
             import traceback
             traceback.print_exc()
+
+    def _download_and_load_gmrt_after_import(self):
+        """Compute extent from calibration lines (1° buffer), prompt for save path, download GMRT GeoTIFF, then load it."""
+        if requests is None:
+            self._show_message("warning", "GMRT Download",
+                             "The requests library is required to download GMRT grids. Install with: pip install requests")
+            return
+        all_points = []
+        if len(self.pitch_line_points) == 2:
+            all_points.extend(self.pitch_line_points)
+        if len(self.roll_line_points) == 2:
+            all_points.extend(self.roll_line_points)
+        for line in self.heading_lines:
+            if len(line) == 2:
+                all_points.extend(line)
+        if not all_points:
+            self._show_message("warning", "GMRT Download", "No calibration line points to compute extent.")
+            return
+        lats = [p[0] for p in all_points]
+        lons = [p[1] for p in all_points]
+        min_lat, max_lat = min(lats), max(lats)
+        min_lon, max_lon = min(lons), max(lons)
+        mid_lat = (min_lat + max_lat) / 2.0
+        mid_lon = (min_lon + max_lon) / 2.0
+        buffer_deg = 1.0
+        west = mid_lon - buffer_deg
+        east = mid_lon + buffer_deg
+        south = mid_lat - buffer_deg
+        north = mid_lat + buffer_deg
+        default_name = "GMRT_Bathy_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + ".tif"
+        start_dir = getattr(self, 'last_geotiff_dir', None) or os.path.expanduser("~")
+        suggested_path = os.path.join(start_dir, default_name)
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save GMRT GeoTIFF",
+            suggested_path,
+            "GeoTIFF (*.tif *.tiff);;All files (*.*)"
+        )
+        if not save_path:
+            return
+        if not save_path.lower().endswith(('.tif', '.tiff')):
+            save_path = save_path + ".tif"
+        self.set_cal_info_text("Downloading GMRT grid...", append=True)
+        params = {
+            "west": west,
+            "east": east,
+            "south": south,
+            "north": north,
+            "layer": "topo",
+            "mresolution": 100,
+        }
+        self._gmrt_download_worker = GMRTDownloadWorker(params, save_path)
+        self._gmrt_download_worker.finished.connect(self._on_gmrt_download_finished)
+        self._gmrt_download_worker.start()
+
+    def _on_gmrt_download_finished(self, success, path_or_error):
+        if success:
+            self.set_cal_info_text("GMRT grid downloaded. Loading GeoTIFF...", append=True)
+            if hasattr(self, '_load_geotiff_from_path'):
+                self._load_geotiff_from_path(path_or_error)
+            self.set_cal_info_text("GMRT grid loaded.", append=True)
+        else:
+            self._show_message("error", "GMRT Download", path_or_error)
+            self.set_cal_info_text(f"GMRT download failed: {path_or_error}", append=True)
+        self._gmrt_download_worker = None
 
     def _calculate_calibration_survey_statistics(self):
         """Calculate comprehensive calibration survey statistics including pitch, roll, heading lines and travel distances."""
