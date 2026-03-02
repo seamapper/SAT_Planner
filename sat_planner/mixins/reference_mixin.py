@@ -457,6 +457,41 @@ class ReferenceMixin:
         ref_lines.sort(key=lambda x: x[0])
         self.survey_lines_data = [line for _, line in ref_lines]
 
+    def _download_and_load_gmrt_after_ref_import(self):
+        """Compute extent from reference + crossline points (with buffer), then use GMRT mixin to download and load."""
+        all_points = []
+        for line in self.survey_lines_data:
+            all_points.extend(line)
+        if self.cross_line_data:
+            all_points.extend(self.cross_line_data)
+        if not all_points:
+            self._show_message("warning", "GMRT Download", "No reference line points to compute extent.")
+            return
+        lats = [p[0] for p in all_points]
+        lons = [p[1] for p in all_points]
+        min_lat, max_lat = min(lats), max(lats)
+        min_lon, max_lon = min(lons), max(lons)
+        mid_lat = (min_lat + max_lat) / 2.0
+        mid_lon = (min_lon + max_lon) / 2.0
+        buffer_deg = 0.5
+        if hasattr(self, "ref_gmrt_buffer_spin"):
+            try:
+                buffer_deg = float(self.ref_gmrt_buffer_spin.value())
+            except (ValueError, TypeError):
+                pass
+        west = mid_lon - buffer_deg
+        east = mid_lon + buffer_deg
+        south = mid_lat - buffer_deg
+        north = mid_lat + buffer_deg
+        self._download_gmrt_and_load(
+            west, east, south, north,
+            resolution=100,
+            layer="topo",
+            default_filename_prefix="GMRT_Bathy",
+            log_func=lambda msg, append=True: self.set_ref_info_text(msg, append=append),
+            default_directory=getattr(self, "last_ref_import_dir", None),
+        )
+
     def _ref_import_post_import(self, file_path):
         """Shared post-import: validate, load params, populate fields, plot, message."""
         if not self.survey_lines_data and not self.cross_line_data:
@@ -574,6 +609,8 @@ class ReferenceMixin:
             else:
                 msg += " (parameters calculated from lines)"
             self.set_ref_info_text(msg)
+            if getattr(self, "ref_download_gmrt_checkbox", None) and self.ref_download_gmrt_checkbox.isChecked():
+                self._download_and_load_gmrt_after_ref_import()
         else:
             self._show_message("warning", "Import Warning", "No valid survey lines found in the selected file.")
 
@@ -916,6 +953,8 @@ class ReferenceMixin:
                 else:
                     msg += " (parameters calculated from lines)"
                 self.set_ref_info_text(msg)
+                if getattr(self, "ref_download_gmrt_checkbox", None) and self.ref_download_gmrt_checkbox.isChecked():
+                    self._download_and_load_gmrt_after_ref_import()
             else:
                 self._show_message("warning","Import Warning", "No valid survey lines found in the selected file.")
 
