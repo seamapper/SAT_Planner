@@ -13,6 +13,37 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from PyQt6.QtCore import QTimer
+from PyQt6.QtGui import QPalette, QColor
+
+
+def apply_dark_theme(app):
+    """
+    Apply a dark theme to the Qt GUI (not matplotlib). Uses Fusion style and a dark
+    palette so the app looks consistent in both light and dark OS themes.
+    """
+    app.setStyle("Fusion")
+    palette = QPalette()
+    # Window and base backgrounds
+    palette.setColor(QPalette.ColorRole.Window, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(240, 240, 240))
+    palette.setColor(QPalette.ColorRole.Base, QColor(42, 42, 42))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(53, 53, 53))
+    # Buttons
+    palette.setColor(QPalette.ColorRole.Button, QColor(53, 53, 53))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(240, 240, 240))
+    # Text inputs and content
+    palette.setColor(QPalette.ColorRole.Text, QColor(240, 240, 240))
+    palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(127, 127, 127))
+    # Highlights (selection)
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+    # Disabled state (gray text)
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor(127, 127, 127))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(127, 127, 127))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(127, 127, 127))
+    # Links
+    palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
+    app.setPalette(palette)
 
 
 def show_message(parent, msg_type, title, message):

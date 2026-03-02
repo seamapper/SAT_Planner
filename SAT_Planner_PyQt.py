@@ -21,9 +21,11 @@ except ImportError:
     pass
 from PyQt6.QtWidgets import QApplication
 from sat_planner import SurveyPlanApp
+from sat_planner.utils_ui import apply_dark_theme
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    apply_dark_theme(app)
     window = SurveyPlanApp()
     window.show()
     sys.exit(app.exec())

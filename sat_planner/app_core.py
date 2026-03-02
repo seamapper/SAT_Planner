@@ -444,7 +444,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         date_label = QLabel(f"Compiled: {compile_date}")
         date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        date_label.setStyleSheet("font-size: 10pt; color: gray;")
+        date_label.setStyleSheet("font-size: 10pt; color: #a0a0a0;")
         layout.addWidget(date_label)
 
         # Media folder is at project root (parent of sat_planner package)
@@ -720,12 +720,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         self.param_notebook = QTabWidget()
 
-        # Make the selected tab text bold
-        self.param_notebook.setStyleSheet("""
-            QTabBar::tab:selected {
-                font-weight: bold;
-            }
-        """)
+        # Selected tab bold (theme colors from palette)
+        self.param_notebook.setStyleSheet("QTabBar::tab:selected { font-weight: bold; }")
 
         self.reference_frame = QWidget()
         self.calibration_frame = QWidget()
@@ -743,8 +739,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         self.activity_log_text = QTextEdit()
         self.activity_log_text.setReadOnly(True)
-        # Set light yellow background and black text color for visibility
-        self.activity_log_text.setStyleSheet("background-color: #e0e0e0; color: black;")
+        # Dark-theme log area (matches app theme)
+        self.activity_log_text.setStyleSheet("background-color: #2d2d2d; color: #e0e0e0;")
         # Let it expand to fill the groupbox - no height constraint
         activity_log_layout.addWidget(self.activity_log_text, 1)  # Stretch factor 1 to fill available space
 
