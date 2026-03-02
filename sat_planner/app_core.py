@@ -15,7 +15,6 @@ import matplotlib
 matplotlib.use('QtAgg')
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.colors import LightSource
 from matplotlib.figure import Figure
 import numpy as np
@@ -518,7 +517,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 print(f"ERROR: Missing widget - plot_frame: {hasattr(self, 'plot_frame')}")
                 return
 
-            # Add profile plot at bottom of right side
+            # Bottom strip: profile + options (left, stretches) | Activity Log (right, 420px fixed)
             if hasattr(self, 'profile_widget') and hasattr(self, 'slope_profile_checkbox'):
                 profile_layout = QVBoxLayout()
                 profile_layout.setContentsMargins(0, 0, 0, 0)
@@ -543,7 +542,17 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 profile_widget = QWidget()
                 profile_widget.setLayout(profile_layout)
                 profile_widget.setMaximumHeight(250)  # Limit profile height
-                right_side_layout.addWidget(profile_widget)
+
+                bottom_strip_layout = QHBoxLayout()
+                bottom_strip_layout.setContentsMargins(0, 0, 0, 0)
+                bottom_strip_layout.addWidget(profile_widget, 1)  # Left: profile + options, stretch with window
+                if hasattr(self, 'activity_log_groupbox'):
+                    self.activity_log_groupbox.setFixedWidth(380)
+                    bottom_strip_layout.addWidget(self.activity_log_groupbox)  # Right: Activity Log, 420px
+                bottom_strip_widget = QWidget()
+                bottom_strip_widget.setLayout(bottom_strip_layout)
+                bottom_strip_widget.setMaximumHeight(250)
+                right_side_layout.addWidget(bottom_strip_widget)
             else:
                 print(f"WARNING: Missing profile widgets - profile_widget: {hasattr(self, 'profile_widget')}, slope_profile_checkbox: {hasattr(self, 'slope_profile_checkbox')}")
 
@@ -733,9 +742,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         test_planning_layout.addWidget(self.param_notebook)
         param_layout.addWidget(test_planning_groupbox)
 
-        # --- Activity Log GroupBox ---
-        activity_log_groupbox = QGroupBox("Activity Log")
-        activity_log_layout = QVBoxLayout(activity_log_groupbox)
+        # --- Activity Log GroupBox (reparented to right-side bottom strip in _setup_layout) ---
+        self.activity_log_groupbox = QGroupBox("Activity Log")
+        activity_log_layout = QVBoxLayout(self.activity_log_groupbox)
 
         self.activity_log_text = QTextEdit()
         self.activity_log_text.setReadOnly(True)
@@ -743,8 +752,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.activity_log_text.setStyleSheet("background-color: #2d2d2d; color: #e0e0e0;")
         # Let it expand to fill the groupbox - no height constraint
         activity_log_layout.addWidget(self.activity_log_text, 1)  # Stretch factor 1 to fill available space
-
-        param_layout.addWidget(activity_log_groupbox)
 
         self.param_scroll.setWidget(param_widget)
 
@@ -1342,9 +1349,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.canvas = FigureCanvas(self.figure)
         plot_layout.addWidget(self.canvas)
         self.canvas_widget = self.canvas  # For compatibility
-        # Add navigation toolbar (zoom/pan/home etc.)
-        self.toolbar = NavigationToolbar(self.canvas, self.plot_frame)
-        plot_layout.addWidget(self.toolbar)
 
         print(f"Widgets created - param_scroll: {self.param_scroll is not None}, plot_frame: {self.plot_frame is not None}, canvas: {self.canvas is not None}")
 

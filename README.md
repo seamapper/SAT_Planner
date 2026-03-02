@@ -1,7 +1,8 @@
 # SAT/QAT Planner
 
 ![Example Plot](media/SAT_Planner.jpg)
-A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) planning tool with GeoTIFF support, built with PyQt6.
+
+A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) planning tool with GeoTIFF support, built with PyQt6. The GUI uses a consistent dark theme so the app works well in both light and dark system themes.
 
 ## Overview
 
@@ -13,13 +14,17 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ## Features
 
 ### Core Functionality
-- **Multi-tab Interface**: Separate tabs for Calibration, Reference, and Line planning
+- **Multi-tab Interface**: Separate tabs for Calibration, Reference, and Line planning (left panel)
+- **Dark Theme**: Qt GUI always uses a dark theme; map (matplotlib) keeps default styling
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
+- **GMRT Download**: Optional download of GMRT bathymetry GeoTIFF when importing surveys (Calibration, Reference, Line tabs; configurable buffer)
 - **Dynamic Resolution**: Automatically adjust GeoTIFF resolution based on zoom level
-- **Interactive Plotting**: Pan, zoom, and interact with survey plans on the map
+- **Interactive Plotting**: Pan (middle mouse), zoom (scroll), and interact with survey plans on the map (no toolbar)
 - **Real-time Statistics**: Calculate survey distances, times, and comprehensive statistics
 - **Elevation Profiles**: View elevation and slope profiles for drawn lines
+- **Activity Log**: Fixed on the right side (380 px wide) below the map, next to the profile/options strip
 - **Export Capabilities**: Export survey plans in CSV and Shapefile formats
+- **Survey Import**: Import calibration/reference/line plans from DDD, DMS, DMM, LNW, CSV, and GeoJSON
 
 ### Calibration Survey Planning
 - Draw pitch and roll calibration lines interactively
@@ -27,6 +32,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Calculate heading line offset based on median depth
 - Display pitch line depth statistics (shallowest, maximum, mean, median)
 - Configure turn time for accurate time estimates
+- Import calibration surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON); optional GMRT download after import (checkbox + buffer)
 - Comprehensive statistics with survey time, transit time, and turn time breakdowns
 - Validation warning when heading line offset exceeds 2x shallowest depth
 - Export calibration survey plans with detailed statistics
@@ -35,6 +41,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Generate parallel survey lines with customizable parameters
 - Auto-regenerate plans when parameters change (with debounce)
 - Configure line length, spacing, heading, speed, and turn time
+- Import reference surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON); optional GMRT download after import (checkbox + buffer)
 - Calculate comprehensive survey statistics with time breakdowns
 - Survey time breakdown showing main lines, crossline, transit, and turn times
 - Export reference survey plans with detailed statistics
@@ -43,7 +50,8 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Interactive line drawing with waypoint support
 - Real-time elevation profiles as you draw
 - Edit existing lines by dragging waypoints
-- Import/export line plans
+- Import/export line plans (DDD, DMS, DMM, LNW, CSV, GeoJSON; single polyline, no assignment dialog)
+- Optional GMRT download after import (checkbox + buffer)
 - Calculate survey statistics for drawn lines
 
 ### GeoTIFF Visualization
@@ -70,8 +78,9 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - shapely
 - fiona
 
-### Optional (for map overlays)
-- Pillow (PIL) – required for Imagery Basemap and NOAA ENC Charts overlays
+### Optional
+- **Pillow (PIL)** – for Imagery Basemap and NOAA ENC Charts overlays
+- **requests** – for GMRT bathymetry download when using “Download GMRT” on import
 
 ## Project structure
 
@@ -86,9 +95,11 @@ The application is organized as a package plus a launcher:
     - **BasemapMixin** – Imagery basemap and NOAA ENC Charts overlays.
     - **GeoTIFFMixin** – Load/remove GeoTIFF, display mode, dynamic resolution, contours.
     - **PlottingMixin** – Survey plan plot, limits, colorbars, DDM axis labels.
-    - **ReferenceMixin** – Reference tab, survey lines, export/import.
-    - **CalibrationMixin** – Calibration tab, pitch/roll/heading lines, export/import.
-    - **LinePlanningMixin** – Line planning tab, draw/edit, profile, statistics.
+    - **SurveyParsersMixin** – DDD/DMS/DMM/LNW parsers (lines and polylines), UTM zone dialog.
+    - **GMRTDownloadMixin** – GMRT GridServer download and load GeoTIFF.
+    - **ReferenceMixin** – Reference tab, survey lines, export/import, optional GMRT on import.
+    - **CalibrationMixin** – Calibration tab, pitch/roll/heading lines, export/import, optional GMRT on import.
+    - **LinePlanningMixin** – Line planning tab, draw/edit, profile, statistics, optional GMRT on import.
     - **ProfilesMixin** – Crossline, pitch, and line-planning elevation profiles.
     - **MapInteractionMixin** – Click, scroll, pan, zoom, pick center/pitch/roll.
     - **ExportImportMixin** – Save/load parameters, export survey files.
@@ -99,8 +110,8 @@ The application is organized as a package plus a launcher:
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `SAT_Planner_v2026.04.exe` (Windows) or newer
-- `SAT_Planner.app` (macOS) - if available
+- `SAT_Planner_v2026.08.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
+- `SAT_Planner.app` (macOS) — if available
 
 No installation required - just run the executable or app bundle.
 
@@ -116,8 +127,9 @@ cd SAT_Planner
 
 **Using pip:**
 ```bash
-pip install PyQt6 matplotlib numpy rasterio pyproj shapely fiona Pillow
+pip install PyQt6 matplotlib numpy rasterio pyproj shapely fiona Pillow requests
 ```
+(`requests` is used for GMRT bathymetry download.)
 
 **Using conda (recommended for Windows and macOS):**
 ```bash
@@ -261,21 +273,11 @@ The application saves configuration in:
 
 ## Navigation
 
-### Mouse Controls
-- **Left Click**: Add waypoint (in drawing mode)
+### Mouse Controls (no toolbar)
+- **Left Click**: Add waypoint (in drawing mode); pick points in calibration/reference/line modes
 - **Right Click**: Finish drawing line
 - **Middle Mouse Button**: Pan the map
 - **Scroll Wheel**: Zoom in/out
-- **Click and Drag**: Pan the map
-
-### Navigation Toolbar
-The navigation toolbar at the bottom of the map window provides:
-- **Home**: Reset to original view
-- **Back/Forward**: Navigate through previous views
-- **Pan**: Pan the map
-- **Zoom**: Zoom in/out with rectangular selection
-- **Configure Subplots**: Adjust subplot parameters
-- **Save**: Save the current figure
 
 ## Troubleshooting
 
@@ -310,6 +312,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.08**: Dark theme for Qt GUI (Fusion + dark palette). Activity Log moved to right side below map (380 px wide). GMRT download option on Calibration, Reference, and Line import (checkbox + buffer). Line plan import from DDD/DMS/DMM/LNW/CSV/GeoJSON. Navigation toolbar removed; zoom (scroll) and pan (middle mouse) only. Survey parsers and GMRT download in dedicated mixins.
 - **v2026.04**: Updated hover text to display coordinates in degrees and decimal minutes (DDM) format instead of decimal degrees. Changed default window height to 1110 pixels.
 - **v2026.02**: Added Turn Time parameter to Calibration and Reference Info tabs. Enhanced statistics displays with Total Survey Time and Total Transit Time breakdowns. Fixed autozoom issue when picking center from GeoTIFF. Added validation warning when heading line offset exceeds 2x shallowest depth. Updated export functions to include comprehensive statistics matching dialog displays.
 - **v2026.01**: Refactored into `sat_planner` package with mixins (Basemap, GeoTIFF, Plotting, Reference, Calibration, Line Planning, Profiles, Map Interaction, Export/Import, Config). Survey plan axes show DDM (degrees–decimal minutes) tick labels. Moved basemap/NOAA and geotiff/plotting helpers into mixins.
