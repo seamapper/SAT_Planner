@@ -547,7 +547,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 bottom_strip_layout.setContentsMargins(0, 0, 0, 0)
                 bottom_strip_layout.addWidget(profile_widget, 1)  # Left: profile + options, stretch with window
                 if hasattr(self, 'activity_log_groupbox'):
-                    self.activity_log_groupbox.setFixedWidth(380)
+                    self.activity_log_groupbox.setFixedWidth(320)
                     bottom_strip_layout.addWidget(self.activity_log_groupbox)  # Right: Activity Log, 420px
                 bottom_strip_widget = QWidget()
                 bottom_strip_widget.setLayout(bottom_strip_layout)

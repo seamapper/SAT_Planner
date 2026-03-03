@@ -563,8 +563,13 @@ class GeoTIFFMixin:
             self._show_message("error", "GeoTIFF Error", f"An unexpected error occurred while loading GeoTIFF: {e}")
             self._clear_plot(full_clear=True)
 
-        # Draw crossline profile
-        self._draw_crossline_profile()
+        # Update profile window for active tab and refresh canvas
+        if hasattr(self, '_draw_current_profile'):
+            self._draw_current_profile()
+        else:
+            self._draw_crossline_profile()
+        if hasattr(self, 'profile_canvas'):
+            self.profile_canvas.draw()
 
     def _on_geotiff_display_mode_changed(self, mode_text):
         """Handle display mode selection from combo box."""
