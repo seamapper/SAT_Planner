@@ -56,7 +56,6 @@ a = Analysis(
         'sat_planner.gmrt_dialog.main_window',
         'sat_planner.gmrt_dialog.map_widget',
         'sat_planner.gmrt_dialog.config',
-        'sat_planner.gmrt_dialog.converters',
         'sat_planner.gmrt_dialog.workers',
         'sat_planner.gmrt_dialog.workers.download_worker',
         'sat_planner.gmrt_dialog.workers.map_worker',
