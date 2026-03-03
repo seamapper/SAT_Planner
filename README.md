@@ -18,11 +18,12 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **Dark Theme**: Qt GUI always uses a dark theme; map (matplotlib) keeps default styling
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
 - **GMRT Download**: Optional download of GMRT bathymetry GeoTIFF when importing surveys (Calibration, Reference, Line tabs; configurable buffer)
+- **Download GMRT GeoTIFF**: Button opens a separate "Download GMRT Grid" dialog to fetch GMRT bathymetry as GeoTIFF; when split (topo/bathy) is used, SAT Planner loads the bathy grid
 - **Dynamic Resolution**: Automatically adjust GeoTIFF resolution based on zoom level
 - **Interactive Plotting**: Pan (middle mouse), zoom (scroll), and interact with survey plans on the map (no toolbar)
 - **Real-time Statistics**: Calculate survey distances, times, and comprehensive statistics
 - **Elevation Profiles**: View elevation and slope profiles for drawn lines
-- **Activity Log**: Fixed on the right side (380 px wide) below the map, next to the profile/options strip
+- **Activity Log**: Fixed on the right side (320 px wide) below the map, next to the profile/options strip
 - **Export Capabilities**: Export survey plans in CSV and Shapefile formats
 - **Survey Import**: Import calibration/reference/line plans from DDD, DMS, DMM, LNW, CSV, and GeoJSON
 
@@ -80,7 +81,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 
 ### Optional
 - **Pillow (PIL)** – for Imagery Basemap and NOAA ENC Charts overlays
-- **requests** – for GMRT bathymetry download when using “Download GMRT” on import
+- **requests** – for GMRT bathymetry download (dialog and on import) – for GMRT bathymetry download when using “Download GMRT” on import
 
 ## Project structure
 
@@ -91,6 +92,7 @@ The application is organized as a package plus a launcher:
   - **`constants.py`** – Version, config path, geospatial library availability.
   - **`utils_geo.py`** – Coordinate helpers (e.g. decimal degrees to DDM).
   - **`utils_ui.py`** – UI helpers (message boxes, confirmations).
+  - **`gmrt_dialog/`** – Embedded GMRT Download dialog (config, workers, map_widget, main_window); GeoTIFF-only output, optional split into topo/bathy.
   - **`mixins/`** – Feature mixins used by the main window:
     - **BasemapMixin** – Imagery basemap and NOAA ENC Charts overlays.
     - **GeoTIFFMixin** – Load/remove GeoTIFF, display mode, dynamic resolution, contours.
@@ -204,7 +206,7 @@ create-dmg dist/SAT_Planner.app dist/
 
 ### Basic Workflow
 
-1. **Load GeoTIFF** (optional): Click "Load GeoTIFF" to load elevation data for visualization
+1. **Load GeoTIFF** (optional): Click "Load GeoTIFF" to load elevation data, or click "Download GMRT GeoTIFF" to open the GMRT dialog and download bathymetry (GeoTIFF-only; if you use split, the app loads the bathy grid)
 2. **Enable Map Overlays** (optional): Toggle Imagery Basemap or NOAA ENC Charts checkboxes and adjust opacity sliders
 3. **Select Planning Mode**: Choose between Calibration, Reference, or Line tabs
 4. **Configure Parameters**: Set survey parameters in the appropriate tab
@@ -246,6 +248,18 @@ create-dmg dist/SAT_Planner.app dist/
 5. Edit by clicking "Edit Line Planning" and dragging waypoints
 6. View elevation profile and statistics
 7. Export the line plan
+
+### Download GMRT Grid Dialog
+
+Click **"Download GMRT GeoTIFF"** in the GeoTIFF Control section to open the **Download GMRT Grid** window (separate from the main app). In the dialog you can:
+
+- Set the area of interest (North/South/East/West or draw on the map)
+- Choose **Cell Resolution**: 100 m, 200 m, 400 m, or **Custom** (e.g. 50 m); default is 100 m
+- Optionally **Split Grid Into Bathymetry and Topography**; when enabled, SAT Planner loads the bathymetry grid after download
+- A warning (orange text) appears when estimated pixels exceed 16,000,000
+- Use **"Close GMRT Downloader"** at the bottom to close the dialog
+
+Downloads are always GeoTIFF. The dialog uses its own config: `~/.gmrtgrab_sat_planner_config.json`.
 
 ### Map Overlays
 
@@ -312,6 +326,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.09** (or later): Integrated GMRT Download dialog: "Download GMRT GeoTIFF" button opens a separate "Download GMRT Grid" window. Dialog is GeoTIFF-only (no output format selector); cell resolution 100/200/400 m or Custom (default 50 m), default preset 100 m. Large-area warning when estimated pixels > 16,000,000 (orange). When split (topo/bathy) is used, SAT Planner loads the bathy grid. "Close GMRT Downloader" button at bottom of dialog. Activity Log width 320 px.
 - **v2026.08**: Dark theme for Qt GUI (Fusion + dark palette). Activity Log moved to right side below map (380 px wide). GMRT download option on Calibration, Reference, and Line import (checkbox + buffer). Line plan import from DDD/DMS/DMM/LNW/CSV/GeoJSON. Navigation toolbar removed; zoom (scroll) and pan (middle mouse) only. Survey parsers and GMRT download in dedicated mixins.
 - **v2026.04**: Updated hover text to display coordinates in degrees and decimal minutes (DDM) format instead of decimal degrees. Changed default window height to 1110 pixels.
 - **v2026.02**: Added Turn Time parameter to Calibration and Reference Info tabs. Enhanced statistics displays with Total Survey Time and Total Transit Time breakdowns. Fixed autozoom issue when picking center from GeoTIFF. Added validation warning when heading line offset exceeds 2x shallowest depth. Updated export functions to include comprehensive statistics matching dialog displays.
