@@ -359,6 +359,14 @@ For questions or issues, please contact:
 - Email: pjohnson@ccom.unh.edu
 - Organization: UNH/CCOM-JHC
 
+## GMRT
+
+Bathymetry/topography data available through the Download GMRT Grid dialog and the GMRT download-on-import options are from the Global Multi-Resolution Topography (GMRT) synthesis:
+
+Ryan, W. B. F., S.M. Carbotte, J. Coplan, S. O'Hara, A. Melkonian, R. Arko, R.A. Weissel, V. Ferrini, A. Goodwillie, F. Nitsche, J. Bonczkowski, and R. Zemsky (2009), Global Multi-Resolution Topography (GMRT) synthesis data set, *Geochem. Geophys. Geosyst.*, 10, Q03014, doi:[10.1029/2008GC002332](https://doi.org/10.1029/2008GC002332).
+
+Data doi: [10.1594/IEDA.100001](https://doi.org/10.1594/IEDA.100001).
+
 ## Acknowledgments
 
 Developed at the University of New Hampshire, Center for Coastal and Ocean Mapping - Joint Hydrographic Center (UNH/CCOM-JHC) under grant NA25NOSX400C0001-T1-01 from the National Oceanic and Atmospheric Administration (NOAA).
