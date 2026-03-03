@@ -44,6 +44,7 @@ from .mixins.profiles_mixin import ProfilesMixin
 from .mixins.map_interaction_mixin import MapInteractionMixin
 from .mixins.export_import_mixin import ExportImportMixin
 from .mixins.config_mixin import ConfigMixin
+from .gmrt_dialog import GMRTGrabber
 
 
 class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, QMainWindow):
@@ -598,6 +599,30 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             # Destroy the main window
             self.destroy()
 
+    def _open_gmrt_download_dialog(self):
+        """Open the embedded GMRT Download dialog (non-modal). When a GeoTIFF is downloaded, load it and refresh profile."""
+        try:
+            # Create with parent=None so it opens as a separate top-level window and does not overwrite the main app
+            dialog = GMRTGrabber(None)
+            dialog.geotiff_downloaded.connect(self._on_gmrt_dialog_geotiff_downloaded)
+            dialog.show()
+            dialog.raise_()
+            dialog.activateWindow()
+            if not hasattr(self, '_gmrt_dialogs'):
+                self._gmrt_dialogs = []
+            self._gmrt_dialogs.append(dialog)
+        except Exception as e:
+            self._show_message("error", "GMRT Dialog", f"Could not open GMRT Download dialog: {e}")
+
+    def _on_gmrt_dialog_geotiff_downloaded(self, path):
+        """Load the downloaded GeoTIFF into the map and refresh the profile."""
+        if path and hasattr(self, '_load_geotiff_from_path'):
+            self._load_geotiff_from_path(path)
+        if hasattr(self, '_draw_current_profile'):
+            self._draw_current_profile()
+        if hasattr(self, 'profile_canvas'):
+            self.profile_canvas.draw()
+
     def _on_tab_changed(self, event=None):
         """Handle tab change event - update profile plot for active tab."""
         if not hasattr(self, 'param_notebook'):
@@ -655,6 +680,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.remove_geotiff_btn.setEnabled(False)  # Disabled initially (no GeoTIFF loaded)
         geotiff_button_layout.addWidget(self.remove_geotiff_btn)
         geotiff_layout.addWidget(geotiff_button_frame)
+        geotiff_layout.addSpacing(3)
+
+        self.download_gmrt_btn = QPushButton("Download GMRT GeoTIFF")
+        self.download_gmrt_btn.clicked.connect(self._open_gmrt_download_dialog)
+        self.download_gmrt_btn.setToolTip("Open GMRT Bathymetry Grid Downloader to download and optionally load a GeoTIFF.")
+        geotiff_layout.addWidget(self.download_gmrt_btn)
         geotiff_layout.addSpacing(3)
 
         # Display mode dropdown - label and combo on same line

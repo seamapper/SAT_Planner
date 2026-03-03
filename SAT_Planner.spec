@@ -51,6 +51,16 @@ a = Analysis(
         'sat_planner.mixins.map_interaction_mixin',
         'sat_planner.mixins.export_import_mixin',
         'sat_planner.mixins.config_mixin',
+        # GMRT Download dialog (embedded copy)
+        'sat_planner.gmrt_dialog',
+        'sat_planner.gmrt_dialog.main_window',
+        'sat_planner.gmrt_dialog.map_widget',
+        'sat_planner.gmrt_dialog.config',
+        'sat_planner.gmrt_dialog.converters',
+        'sat_planner.gmrt_dialog.workers',
+        'sat_planner.gmrt_dialog.workers.download_worker',
+        'sat_planner.gmrt_dialog.workers.map_worker',
+        'sat_planner.gmrt_dialog.workers.mosaic_worker',
         # Geospatial: from working old.spec (do not add osgeo)
         'fiona', 'shapely', 'pyproj', 'rasterio',
         'rasterio.sample', 'rasterio.io', 'rasterio.warp', 'rasterio.transform',
