@@ -2,7 +2,7 @@
 
 ![Example Plot](media/SAT_Planner.jpg)
 
-A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) planning tool with GeoTIFF support, built with PyQt6. The GUI uses a consistent dark theme so the app works well in both light and dark system themes.
+A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing (QAT) planning tool with GeoTIFF support, built with PyQt6.
 
 ## Overview
 
