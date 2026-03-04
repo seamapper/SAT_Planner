@@ -492,11 +492,90 @@ class ReferenceMixin:
             default_directory=getattr(self, "last_ref_import_dir", None),
         )
 
+    def _compute_crossline_lead_from_import(self):
+        """Compute symmetric Crossline Lead-in/out (m) from imported ref lines and crossline.
+        Intersects crossline with first and last reference lines, then uses min of the two
+        end-distances so the regenerated crossline does not extend past the import.
+        Returns the value in meters, or None if not computable."""
+        if not pyproj or not LineString:
+            return None
+        if len(self.survey_lines_data) < 2 or not self.cross_line_data or len(self.cross_line_data) != 2:
+            return None
+        try:
+            geod = pyproj.Geod(ellps="WGS84")
+            all_pts = []
+            for line in self.survey_lines_data:
+                all_pts.extend(line)
+            all_pts.extend(self.cross_line_data)
+            if hasattr(self, "_compute_utm_zone_from_points"):
+                zone, hem = self._compute_utm_zone_from_points(all_pts)
+            else:
+                lats = [p[0] for p in all_pts]
+                lons = [p[1] for p in all_pts]
+                zone = max(1, min(60, int((sum(lons) / len(lons) + 180) / 6) + 1))
+                hem = "North" if (sum(lats) / len(lats)) >= 0 else "South"
+            utm_crs = f"EPSG:326{zone:02d}" if hem == "North" else f"EPSG:327{zone:02d}"
+            to_utm = pyproj.Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
+            from_utm = pyproj.Transformer.from_crs(utm_crs, "EPSG:4326", always_xy=True)
+
+            def to_utm_xy(lat, lon):
+                e, n = to_utm.transform(lon, lat)
+                return (e, n)
+
+            def from_utm_to_lonlat(e, n):
+                lon, lat = from_utm.transform(e, n)
+                return (lat, lon)
+
+            cross_a, cross_b = self.cross_line_data[0], self.cross_line_data[1]
+            cross_utm = LineString([to_utm_xy(cross_a[0], cross_a[1]), to_utm_xy(cross_b[0], cross_b[1])])
+            first_line = self.survey_lines_data[0]
+            first_utm = LineString([to_utm_xy(first_line[0][0], first_line[0][1]), to_utm_xy(first_line[1][0], first_line[1][1])])
+            last_line = self.survey_lines_data[-1]
+            last_utm = LineString([to_utm_xy(last_line[0][0], last_line[0][1]), to_utm_xy(last_line[1][0], last_line[1][1])])
+
+            inter_first = cross_utm.intersection(first_utm)
+            inter_last = cross_utm.intersection(last_utm)
+            if inter_first.is_empty or inter_last.is_empty:
+                return None
+
+            def one_point(geom):
+                if geom.geom_type == "Point":
+                    return (geom.x, geom.y)
+                if geom.geom_type in ("MultiPoint", "LineString") and len(geom.coords) > 0:
+                    return (geom.coords[0][0], geom.coords[0][1])
+                return None
+
+            pt_first_utm = one_point(inter_first)
+            pt_last_utm = one_point(inter_last)
+            if pt_first_utm is None or pt_last_utm is None:
+                return None
+
+            pt_first = from_utm_to_lonlat(pt_first_utm[0], pt_first_utm[1])
+            pt_last = from_utm_to_lonlat(pt_last_utm[0], pt_last_utm[1])
+
+            _, _, d_first_a = geod.inv(pt_first[1], pt_first[0], cross_a[1], cross_a[0])
+            _, _, d_first_b = geod.inv(pt_first[1], pt_first[0], cross_b[1], cross_b[0])
+            lead_in = min(d_first_a, d_first_b)
+
+            _, _, d_last_a = geod.inv(pt_last[1], pt_last[0], cross_a[1], cross_a[0])
+            _, _, d_last_b = geod.inv(pt_last[1], pt_last[0], cross_b[1], cross_b[0])
+            lead_out = min(d_last_a, d_last_b)
+
+            return min(lead_in, lead_out)
+        except Exception:
+            return None
+
     def _ref_import_post_import(self, file_path):
         """Shared post-import: validate, load params, populate fields, plot, message."""
         if not self.survey_lines_data and not self.cross_line_data:
             self._show_message("warning", "Import Warning", "No valid survey lines found in the selected file.")
             return
+        # Set Crossline Lead-in/out from imported geometry (symmetric) so regenerated crossline matches import
+        bisect_lead = self._compute_crossline_lead_from_import()
+        if bisect_lead is not None and hasattr(self, "bisect_lead_entry"):
+            self.bisect_lead_entry.blockSignals(True)
+            self.bisect_lead_entry.setText(f"{bisect_lead:.1f}")
+            self.bisect_lead_entry.blockSignals(False)
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         dir_name = os.path.dirname(file_path)
         metadata_path = os.path.join(dir_name, f"{base_name}_params.json")
