@@ -124,6 +124,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.line_length_multiplier = 8.0  # Default multiplier
         # Variable for the new distance between lines multiplier slider
         self.dist_between_lines_multiplier = 1.0  # Default multiplier
+        # Depth at last picked point (from GeoTIFF click); used so separation multiplier updates distance when sliding
+        self._depth_at_picked_point = None
 
         # Initialize the picking mode state
         self.pick_center_mode = False
@@ -866,7 +868,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.multiplier_slider_len.setMinimum(10)  # 1.0 * 10
         self.multiplier_slider_len.setMaximum(100)  # 10.0 * 10
         self.multiplier_slider_len.setValue(int(self.line_length_multiplier * 10))
-        self.multiplier_slider_len.valueChanged.connect(lambda val: [setattr(self, 'line_length_multiplier', val/10.0), self._update_multiplier_label_len(val/10.0), self._on_parameter_changed()])
+        self.multiplier_slider_len.valueChanged.connect(self._on_line_length_multiplier_changed)
         slider_layout_len.addWidget(self.multiplier_slider_len)
         self.multiplier_label_len = QLabel(f"{self.line_length_multiplier:.1f}")
         slider_layout_len.addWidget(self.multiplier_label_len)
@@ -881,7 +883,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.multiplier_slider_dist.setMinimum(0)  # 0.0 * 10
         self.multiplier_slider_dist.setMaximum(20)  # 2.0 * 10
         self.multiplier_slider_dist.setValue(int(self.dist_between_lines_multiplier * 10))
-        self.multiplier_slider_dist.valueChanged.connect(lambda val: [setattr(self, 'dist_between_lines_multiplier', val/10.0), self._update_multiplier_label_dist(val/10.0), self._on_parameter_changed()])
+        self.multiplier_slider_dist.valueChanged.connect(self._on_separation_multiplier_changed)
         slider_layout_dist.addWidget(self.multiplier_slider_dist)
         self.multiplier_label_dist = QLabel(f"{self.dist_between_lines_multiplier:.1f}")
         slider_layout_dist.addWidget(self.multiplier_label_dist)

@@ -670,6 +670,39 @@ class ReferenceMixin:
                             self.dist_between_lines_entry.setText(f"{dist:.1f}")
                         except Exception:
                             pass
+                    # Line Length and Separation multipliers from GeoTIFF depth at centroid (no metadata)
+                    if (getattr(self, "geotiff_data_array", None) is not None
+                            and hasattr(self, "_get_depth_at_point")
+                            and len(self.survey_lines_data) >= 1):
+                        try:
+                            central_lat = float(self.central_lat_entry.text())
+                            central_lon = float(self.central_lon_entry.text())
+                            depth_val = self._get_depth_at_point(central_lat, central_lon)
+                            depth_m = abs(float(depth_val)) if depth_val is not None and not (isinstance(depth_val, float) and np.isnan(depth_val)) else 0.0
+                            if depth_m > 0:
+                                line_length_m = float(self.line_length_entry.text())
+                                len_mult = line_length_m / depth_m
+                                len_mult = max(1.0, min(10.0, len_mult))
+                                self.line_length_multiplier = len_mult
+                                if hasattr(self, "multiplier_slider_len"):
+                                    self.multiplier_slider_len.blockSignals(True)
+                                    self.multiplier_slider_len.setValue(int(round(len_mult * 10)))
+                                    self.multiplier_slider_len.blockSignals(False)
+                                if hasattr(self, "_update_multiplier_label_len"):
+                                    self._update_multiplier_label_len(len_mult)
+                            if depth_m > 0 and len(self.survey_lines_data) > 1:
+                                dist_between_m = float(self.dist_between_lines_entry.text())
+                                dist_mult = dist_between_m / depth_m
+                                dist_mult = max(0.0, min(2.0, dist_mult))
+                                self.dist_between_lines_multiplier = dist_mult
+                                if hasattr(self, "multiplier_slider_dist"):
+                                    self.multiplier_slider_dist.blockSignals(True)
+                                    self.multiplier_slider_dist.setValue(int(round(dist_mult * 10)))
+                                    self.multiplier_slider_dist.blockSignals(False)
+                                if hasattr(self, "_update_multiplier_label_dist"):
+                                    self._update_multiplier_label_dist(dist_mult)
+                        except (ValueError, TypeError, ZeroDivisionError):
+                            pass
                 if not self.export_name_entry.text().strip():
                     self.export_name_entry.clear()
                     self.export_name_entry.setText(base_name)
@@ -1507,9 +1540,41 @@ class ReferenceMixin:
         """Updates the label next to the line length multiplier slider."""
         self.multiplier_label_len.setText(f"{float(val):.1f}")
 
+    def _on_line_length_multiplier_changed(self, val):
+        """Update line length multiplier; if depth-at-picked-point is set, recompute line length and trigger plan regenerate."""
+        mult = val / 10.0
+        self.line_length_multiplier = mult
+        self._update_multiplier_label_len(mult)
+        depth = getattr(self, "_depth_at_picked_point", None)
+        if depth is not None and depth > 0:
+            calculated_line_length = depth * mult
+            if calculated_line_length > 0:
+                self.line_length_entry.blockSignals(True)
+                self.line_length_entry.setText(f"{calculated_line_length:.2f}")
+                self.line_length_entry.blockSignals(False)
+        self._on_parameter_changed()
+
     def _update_multiplier_label_dist(self, val):
         """Updates the label next to the distance between lines multiplier slider."""
         self.multiplier_label_dist.setText(f"{float(val):.1f}")
+
+    def _on_separation_multiplier_changed(self, val):
+        """Update separation multiplier; if depth-at-picked-point is set, recompute distance between lines and bisect lead, then trigger plan regenerate."""
+        mult = val / 10.0
+        self.dist_between_lines_multiplier = mult
+        self._update_multiplier_label_dist(mult)
+        depth = getattr(self, "_depth_at_picked_point", None)
+        if depth is not None and depth > 0:
+            calculated_dist_between_lines = depth * mult
+            if calculated_dist_between_lines > 0:
+                self.dist_between_lines_entry.blockSignals(True)
+                self.dist_between_lines_entry.setText(f"{calculated_dist_between_lines:.2f}")
+                self.dist_between_lines_entry.blockSignals(False)
+                bisect_lead = 0.2 * calculated_dist_between_lines
+                self.bisect_lead_entry.blockSignals(True)
+                self.bisect_lead_entry.setText(f"{bisect_lead:.2f}")
+                self.bisect_lead_entry.blockSignals(False)
+        self._on_parameter_changed()
 
     def _on_parameter_changed(self):
         """Handle parameter changes by restarting the auto-regenerate timer."""

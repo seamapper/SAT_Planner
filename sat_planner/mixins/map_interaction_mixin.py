@@ -245,6 +245,9 @@ class MapInteractionMixin:
                     # Using abs(z_value) for multipliers to ensure positive length/distance
                     if not np.isnan(z_value) and z_value <= 0:
 
+                        # Store depth so separation multiplier slider can update distance/bisect when slid
+                        self._depth_at_picked_point = abs(z_value)
+
                         # Apply Distance Between Lines Multiplier
                         dist_multiplier = self.dist_between_lines_multiplier
                         # Use absolute value of Z for calculation, as depth is positive for multipliers
@@ -286,11 +289,13 @@ class MapInteractionMixin:
                                                    "Calculated Line Length is not positive. Not setting Line Length automatically.")
                             print("DEBUG: Warning: Calculated Line Length is not positive after multiplication.")
                     else:
+                        self._depth_at_picked_point = None
                         self._show_message("warning","GeoTIFF Warning",
                                                f"Invalid Z-value ({z_value}) at clicked location (NaN or positive elevation). Line spacing and length not set.")
                         print(
                             f"DEBUG: Warning: Z-value is NaN or positive ({z_value}). Conditions for setting parameters not met.")
                 else:
+                    self._depth_at_picked_point = None
                     self._show_message("warning","GeoTIFF Warning",
                                            f"Clicked location (row={row}, col={col}) is outside GeoTIFF bounds (height={self.geotiff_dataset_original.height}, width={self.geotiff_dataset_original.width}). Line spacing and length not set.")
                     print(f"DEBUG: Warning: Clicked location ({row}, {col}) is outside GeoTIFF bounds.")
@@ -301,6 +306,7 @@ class MapInteractionMixin:
                 print(f"DEBUG ERROR: Failed to read Z-value from GeoTIFF: {e}")
                 traceback.print_exc()  # Print full traceback for deeper debugging
         else:
+            self._depth_at_picked_point = None
             print("DEBUG: self.geotiff_dataset_original is None. GeoTIFF not loaded.")
 
         # Set export name if calculated
