@@ -774,27 +774,77 @@ class CalibrationMixin:
         self.last_export_dir = export_dir
         self._save_last_export_dir()
         try:
-            csv_file_path = os.path.join(export_dir, f"{export_name}_DD.csv")
+            csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
             with open(csv_file_path, 'w', newline='', encoding='utf-8') as csvfile:
                 csv_writer = csv.writer(csvfile)
-                csv_writer.writerow(['Line Number', 'Point Label', 'Line Name', 'Latitude', 'Longitude'])
+                csv_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude', 'Longitude'])
                 for num, name, pts in lines:
                     if name.lower().startswith('pitch'):
-                        start_label, end_label = 'PLS', 'PLE'
+                        line_name, start_label, end_label = 'Pitch', 'PLS', 'PLE'
                     elif name.lower().startswith('roll'):
-                        start_label, end_label = 'RLS', 'RLE'
+                        line_name, start_label, end_label = 'Roll', 'RLS', 'RLE'
                     elif name.lower().startswith('heading'):
                         m = re.search(r'(\d+)', name)
-                        n = m.group(1) if m else ''
-                        start_label, end_label = f'H{n}S', f'H{n}E'
+                        n = m.group(1) if m else '1'
+                        line_name, start_label, end_label = f'Heading{n}', f'H{n}S', f'H{n}E'
                     else:
-                        start_label, end_label = 'START', 'END'
-                    csv_writer.writerow([num, start_label, name, pts[0][0], pts[0][1]])
-                    csv_writer.writerow([num, end_label, name, pts[1][0], pts[1][1]])
-            ddm_file_path = os.path.join(export_dir, f"{export_name}_DM.csv")
+                        line_name, start_label, end_label = name, 'START', 'END'
+                    csv_writer.writerow([num, line_name, start_label, pts[0][0], pts[0][1]])
+                    csv_writer.writerow([num, line_name, end_label, pts[1][0], pts[1][1]])
+            def _deg_min(d):
+                deg = int(d)
+                min_val = (abs(d) - abs(deg)) * 60.0
+                return deg, min_val
+            def _deg_min_sec(d):
+                deg = int(d)
+                total_mins = (abs(d) - abs(deg)) * 60.0
+                mins = int(total_mins)
+                secs = (total_mins - mins) * 60.0
+                return deg, mins, secs
+            ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
             with open(ddm_file_path, 'w', newline='', encoding='utf-8') as ddmfile:
                 ddm_writer = csv.writer(ddmfile)
-                ddm_writer.writerow(['Line Number', 'Point Label', 'Latitude with Decimal Minutes', 'Longitude with Decimal Minutes'])
+                ddm_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Longitude (Deg)', 'Longitude (Min)'])
+                for num, name, pts in lines:
+                    if name.lower().startswith('pitch'):
+                        line_name, start_label, end_label = 'Pitch', 'PLS', 'PLE'
+                    elif name.lower().startswith('roll'):
+                        line_name, start_label, end_label = 'Roll', 'RLS', 'RLE'
+                    elif name.lower().startswith('heading'):
+                        m = re.search(r'(\d+)', name)
+                        n = m.group(1) if m else '1'
+                        line_name, start_label, end_label = f'Heading{n}', f'H{n}S', f'H{n}E'
+                    else:
+                        line_name, start_label, end_label = name, 'START', 'END'
+                    lat_deg, lat_min = _deg_min(pts[0][0])
+                    lon_deg, lon_min = _deg_min(pts[0][1])
+                    ddm_writer.writerow([num, line_name, start_label, lat_deg, lat_min, lon_deg, lon_min])
+                    lat_deg, lat_min = _deg_min(pts[1][0])
+                    lon_deg, lon_min = _deg_min(pts[1][1])
+                    ddm_writer.writerow([num, line_name, end_label, lat_deg, lat_min, lon_deg, lon_min])
+            dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
+            with open(dms_file_path, 'w', newline='', encoding='utf-8') as dmsfile:
+                dms_writer = csv.writer(dmsfile)
+                dms_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Latitude (Sec)', 'Longitude (Deg)', 'Longitude (Min)', 'Longitude (Sec)'])
+                for num, name, pts in lines:
+                    if name.lower().startswith('pitch'):
+                        line_name, start_label, end_label = 'Pitch', 'PLS', 'PLE'
+                    elif name.lower().startswith('roll'):
+                        line_name, start_label, end_label = 'Roll', 'RLS', 'RLE'
+                    elif name.lower().startswith('heading'):
+                        m = re.search(r'(\d+)', name)
+                        n = m.group(1) if m else '1'
+                        line_name, start_label, end_label = f'Heading{n}', f'H{n}S', f'H{n}E'
+                    else:
+                        line_name, start_label, end_label = name, 'START', 'END'
+                    lat_d, lat_m, lat_s = _deg_min_sec(pts[0][0])
+                    lon_d, lon_m, lon_s = _deg_min_sec(pts[0][1])
+                    dms_writer.writerow([num, line_name, start_label, lat_d, lat_m, lat_s, lon_d, lon_m, lon_s])
+                    lat_d, lat_m, lat_s = _deg_min_sec(pts[1][0])
+                    lon_d, lon_m, lon_s = _deg_min_sec(pts[1][1])
+                    dms_writer.writerow([num, line_name, end_label, lat_d, lat_m, lat_s, lon_d, lon_m, lon_s])
+            ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
+            with open(ddm_txt_file_path, 'w', encoding='utf-8') as ddm_txt_file:
                 for num, name, pts in lines:
                     if name.lower().startswith('pitch'):
                         start_label, end_label = 'PLS', 'PLE'
@@ -806,12 +856,31 @@ class CalibrationMixin:
                         start_label, end_label = f'H{n}S', f'H{n}E'
                     else:
                         start_label, end_label = 'START', 'END'
-                    start_lat_ddm = decimal_degrees_to_ddm(pts[0][0], is_latitude=True)
-                    start_lon_ddm = decimal_degrees_to_ddm(pts[0][1], is_latitude=False)
-                    end_lat_ddm = decimal_degrees_to_ddm(pts[1][0], is_latitude=True)
-                    end_lon_ddm = decimal_degrees_to_ddm(pts[1][1], is_latitude=False)
-                    ddm_writer.writerow([num, start_label, start_lat_ddm, start_lon_ddm])
-                    ddm_writer.writerow([num, end_label, end_lat_ddm, end_lon_ddm])
+                    lat_d, lat_m = _deg_min(pts[0][0])
+                    lon_d, lon_m = _deg_min(pts[0][1])
+                    ddm_txt_file.write(f"{start_label} {lat_d} {lat_m} {lon_d} {lon_m}\n")
+                    lat_d, lat_m = _deg_min(pts[1][0])
+                    lon_d, lon_m = _deg_min(pts[1][1])
+                    ddm_txt_file.write(f"{end_label} {lat_d} {lat_m} {lon_d} {lon_m}\n")
+            dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
+            with open(dms_txt_file_path, 'w', encoding='utf-8') as dms_txt_file:
+                for num, name, pts in lines:
+                    if name.lower().startswith('pitch'):
+                        start_label, end_label = 'PLS', 'PLE'
+                    elif name.lower().startswith('roll'):
+                        start_label, end_label = 'RLS', 'RLE'
+                    elif name.lower().startswith('heading'):
+                        m = re.search(r'(\d+)', name)
+                        n = m.group(1) if m else ''
+                        start_label, end_label = f'H{n}S', f'H{n}E'
+                    else:
+                        start_label, end_label = 'START', 'END'
+                    lat_d, lat_m, lat_s = _deg_min_sec(pts[0][0])
+                    lon_d, lon_m, lon_s = _deg_min_sec(pts[0][1])
+                    dms_txt_file.write(f"{start_label} {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
+                    lat_d, lat_m, lat_s = _deg_min_sec(pts[1][0])
+                    lon_d, lon_m, lon_s = _deg_min_sec(pts[1][1])
+                    dms_txt_file.write(f"{end_label} {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
             schema = {'geometry': 'LineString', 'properties': {'line_num': 'int', 'line_name': 'str'}}
             crs_epsg = 'EPSG:4326'
             features = []
@@ -846,7 +915,7 @@ class CalibrationMixin:
                 for line_index, (num, name, pts) in enumerate(lines):
                     coords = " ".join(f"{lat:.6f} {lon:.6f}" for lat, lon in pts)
                     f.write(f'_LINE {name} {line_index} {ts} 0 {coords} "\n')
-            txt_file_path = os.path.join(export_dir, f"{export_name}_DD.txt")
+            txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
             with open(txt_file_path, 'w', encoding='utf-8') as f:
                 for num, name, pts in lines:
                     if name.lower().startswith('pitch'):
@@ -861,14 +930,19 @@ class CalibrationMixin:
                         start_label, end_label = 'START', 'END'
                     f.write(f"{start_label} {pts[0][0]:.6f} {pts[0][1]:.6f}\n")
                     f.write(f"{end_label} {pts[1][0]:.6f} {pts[1][1]:.6f}\n")
+            stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
             stats = self._calculate_calibration_survey_statistics()
-            stats_file_path = None
             if stats:
-                stats_file_path = os.path.join(export_dir, f"{export_name}_stats.txt")
                 stats_text = self._format_calibration_statistics_text(stats, include_export_date=True, export_name=export_name)
                 if stats_text:
                     with open(stats_file_path, 'w', encoding='utf-8') as f:
                         f.write(stats_text)
+                else:
+                    with open(stats_file_path, 'w', encoding='utf-8') as f:
+                        f.write("Calibration survey info.\nNo statistics available for this export.\n")
+            else:
+                with open(stats_file_path, 'w', encoding='utf-8') as f:
+                    f.write("Calibration survey info.\nNo statistics available for this export.\n")
             try:
                 params = {}
                 try:
@@ -899,8 +973,9 @@ class CalibrationMixin:
             if lnw_file_path:
                 success_msg += f"- {os.path.basename(lnw_file_path)}\n"
             success_msg += f"- {os.path.basename(sis_file_path)}\n"
-            if stats_file_path:
-                success_msg += f"- {os.path.basename(stats_file_path)}\n"
+            success_msg += f"- {os.path.basename(ddm_txt_file_path)}\n"
+            success_msg += f"- {os.path.basename(dms_txt_file_path)}\n"
+            success_msg += f"- {os.path.basename(stats_file_path)}\n"
             if json_metadata_path:
                 success_msg += f"- {os.path.basename(json_metadata_path)}\n"
             success_msg += f"- {os.path.basename(map_png_path)}\n"
@@ -917,7 +992,7 @@ class CalibrationMixin:
             self,
             "Select Survey File to Import",
             self.last_cal_import_dir,
-            "Known Calibration Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DD.csv *.csv *.geojson *.json *.lnw);;Hypack LNW files (*.lnw);;Degrees Minutes Seconds Text files (*_DMS.txt);;Degrees Decimal Minutes Text files (*_DMM.txt);;Decimal Degrees Text files (*_DDD.txt);;Decimal Degree CSV files (*_DD.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json)"
+            "Known Calibration Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *.csv *.geojson *.json *.lnw);;Hypack LNW files (*.lnw);;Degrees Minutes Seconds Text files (*_DMS.txt);;Degrees Decimal Minutes Text files (*_DMM.txt);;Decimal Degrees Text files (*_DDD.txt);;Decimal Degree CSV files (*_DDD.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json)"
         )
         if not file_path:
             return

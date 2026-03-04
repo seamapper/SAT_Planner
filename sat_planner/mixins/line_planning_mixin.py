@@ -261,26 +261,54 @@ class LinePlanningMixin:
         else:
             export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
         try:
-            csv_file_path = os.path.join(export_dir, f"{export_name}_DD.csv")
+            csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
             with open(csv_file_path, 'w', newline='') as csvfile:
                 csv_writer = csv.writer(csvfile)
-                csv_writer.writerow(['Point Label', 'Latitude', 'Longitude'])
+                csv_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude', 'Longitude'])
                 for i, (lat, lon) in enumerate(self.line_planning_points):
-                    csv_writer.writerow([i + 1, lat, lon])
-            ddm_file_path = os.path.join(export_dir, f"{export_name}_DM.csv")
+                    csv_writer.writerow([1, export_name, i + 1, lat, lon])
+            txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
+            with open(txt_file_path, 'w', encoding='utf-8') as f:
+                for i, (lat, lon) in enumerate(self.line_planning_points):
+                    f.write(f"{i + 1} {lat:.6f} {lon:.6f}\n")
+            def _deg_min(d):
+                deg = int(d)
+                min_val = (abs(d) - abs(deg)) * 60.0
+                return deg, min_val
+            def _deg_min_sec(d):
+                deg = int(d)
+                total_mins = (abs(d) - abs(deg)) * 60.0
+                mins = int(total_mins)
+                secs = (total_mins - mins) * 60.0
+                return deg, mins, secs
+            ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
             with open(ddm_file_path, 'w', newline='', encoding='utf-8') as ddmfile:
                 ddm_writer = csv.writer(ddmfile)
-                ddm_writer.writerow(['Line Number', 'Point Label', 'Latitude with Decimal Minutes', 'Longitude with Decimal Minutes'])
+                ddm_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Longitude (Deg)', 'Longitude (Min)'])
                 for i, (lat, lon) in enumerate(self.line_planning_points):
-                    lat_ddm = decimal_degrees_to_ddm(lat, is_latitude=True)
-                    lon_ddm = decimal_degrees_to_ddm(lon, is_latitude=False)
-                    ddm_writer.writerow([1, i + 1, lat_ddm, lon_ddm])
-            ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DM.txt")
+                    lat_deg, lat_min = _deg_min(lat)
+                    lon_deg, lon_min = _deg_min(lon)
+                    ddm_writer.writerow([1, export_name, i + 1, lat_deg, lat_min, lon_deg, lon_min])
+            dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
+            with open(dms_file_path, 'w', newline='', encoding='utf-8') as dmsfile:
+                dms_writer = csv.writer(dmsfile)
+                dms_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Latitude (Sec)', 'Longitude (Deg)', 'Longitude (Min)', 'Longitude (Sec)'])
+                for i, (lat, lon) in enumerate(self.line_planning_points):
+                    lat_d, lat_m, lat_s = _deg_min_sec(lat)
+                    lon_d, lon_m, lon_s = _deg_min_sec(lon)
+                    dms_writer.writerow([1, export_name, i + 1, lat_d, lat_m, lat_s, lon_d, lon_m, lon_s])
+            ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
             with open(ddm_txt_file_path, 'w', encoding='utf-8') as ddm_txt_file:
                 for i, (lat, lon) in enumerate(self.line_planning_points):
-                    lat_ddm = decimal_degrees_to_ddm(lat, is_latitude=True)
-                    lon_ddm = decimal_degrees_to_ddm(lon, is_latitude=False)
-                    ddm_txt_file.write(f"{i + 1}, {lat_ddm}, {lon_ddm}\n")
+                    lat_d, lat_m = _deg_min(lat)
+                    lon_d, lon_m = _deg_min(lon)
+                    ddm_txt_file.write(f"{i + 1} {lat_d} {lat_m} {lon_d} {lon_m}\n")
+            dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
+            with open(dms_txt_file_path, 'w', encoding='utf-8') as dms_txt_file:
+                for i, (lat, lon) in enumerate(self.line_planning_points):
+                    lat_d, lat_m, lat_s = _deg_min_sec(lat)
+                    lon_d, lon_m, lon_s = _deg_min_sec(lon)
+                    dms_txt_file.write(f"{i + 1} {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
             shapefile_path = None
             if LineString and fiona and _shapely_mapping:
                 schema = {'geometry': 'LineString', 'properties': {'name': 'str'}}
@@ -314,10 +342,9 @@ class LinePlanningMixin:
             if hasattr(self, 'profile_fig') and self.profile_fig is not None:
                 profile_png_path = os.path.join(export_dir, f"{export_name}_profile.png")
                 self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+            stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
             stats = self._calculate_line_planning_statistics()
-            stats_file_path = None
             if stats:
-                stats_file_path = os.path.join(export_dir, f"{export_name}_statistics.txt")
                 with open(stats_file_path, 'w') as f:
                     f.write("LINE PLANNING STATISTICS\n" + "=" * 30 + "\n\n")
                     f.write(f"Number of Points: {stats['num_points']}\n")
@@ -340,17 +367,20 @@ class LinePlanningMixin:
                         f.write("\nWAYPOINTS\n" + "-" * 10 + "\n")
                         for i, (lat, lon) in enumerate(self.line_planning_points):
                             f.write(f"WP{i+1}: {decimal_degrees_to_ddm(lat, True)}, {decimal_degrees_to_ddm(lon, False)} ({lat:.6f}, {lon:.6f})\n")
-            success_msg = f"Line exported successfully to:\n- {os.path.basename(csv_file_path)}\n"
+            else:
+                with open(stats_file_path, 'w') as f:
+                    f.write("Line planning info.\nNo statistics available for this export.\n")
+            success_msg = f"Line exported successfully to:\n- {os.path.basename(csv_file_path)}\n- {os.path.basename(txt_file_path)}\n"
             if shapefile_path:
                 success_msg += f"- {os.path.basename(shapefile_path)} (and associated files)\n"
             success_msg += f"- {os.path.basename(geojson_file_path)}\n"
             if lnw_file_path:
                 success_msg += f"- {os.path.basename(lnw_file_path)}\n"
-            success_msg += f"- {os.path.basename(sis_file_path)}\n- {os.path.basename(map_png_path)}\n"
+            success_msg += f"- {os.path.basename(sis_file_path)}\n"
+            success_msg += f"- {os.path.basename(dms_txt_file_path)}\n- {os.path.basename(map_png_path)}\n"
             if profile_png_path:
                 success_msg += f"- {os.path.basename(profile_png_path)}\n"
-            if stats_file_path:
-                success_msg += f"- {os.path.basename(stats_file_path)}\n"
+            success_msg += f"- {os.path.basename(stats_file_path)}\n"
             success_msg += f"in directory: {export_dir}"
             self.set_line_info_text(success_msg, append=False)
         except Exception as e:
@@ -389,9 +419,9 @@ class LinePlanningMixin:
     def _import_drawn_line(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Line Plan File to Import", self.last_line_import_dir,
-            "Known Line Plan Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DD.csv *.csv *.geojson *.json);;"
+            "Known Line Plan Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DDD.csv *.csv *.geojson *.json);;"
             "Decimal Degrees (*_DDD.txt);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
-            "Hypack LNW (*.lnw);;Decimal Degree CSV (*_DD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;All files (*.*)")
+            "Hypack LNW (*.lnw);;Decimal Degree CSV (*_DDD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;All files (*.*)")
         if not file_path:
             return
         import_dir = os.path.dirname(file_path)
@@ -465,7 +495,7 @@ class LinePlanningMixin:
                 return
             if hasattr(self, 'line_export_name_entry'):
                 file_basename = os.path.splitext(os.path.basename(file_path))[0]
-                for suffix in ['_DD', '_DM', '_DDD', '_DMS', '_DMM', '.geojson', '.shp', '.lnw']:
+                for suffix in ['_DDD', '_DMM', '_DM', '_DD', '_DMS', '.geojson', '.shp', '.lnw']:
                     if file_basename.endswith(suffix):
                         file_basename = file_basename[:-len(suffix)]
                 self.line_export_name_entry.setText(file_basename)
