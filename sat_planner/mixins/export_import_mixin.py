@@ -327,40 +327,22 @@ class ExportImportMixin:
             ref_msg += f"in directory: {export_dir}"
             self.set_ref_info_text(ref_msg, append=False)
 
-            # --- Export to SIS ASCII Plan format ---
+            # --- Export to Kongsberg SIS ASCII Plan format ---
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
+            ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
             with open(sis_file_path, 'w') as f:
-                f.write("SIS ASCII Plan\n")
-                # Main survey lines
-                for i, line in enumerate(self.survey_lines_data):
-                    line_num = i + 1
-                    # Start point
-                    lat1, lon1 = line[0]
-                    lat2, lon2 = line[1]
-                    # Get depth from GeoTIFF if available
-                    depth1 = self._get_depth_at_point(lat1, lon1) if self.geotiff_data_array is not None else 0.0
-                    depth2 = self._get_depth_at_point(lat2, lon2) if self.geotiff_data_array is not None else 0.0
-                    # Get speed from survey speed entry
-                    try:
-                        speed = float(self.survey_speed_entry.text()) if self.survey_speed_entry.text() else 8.0
-                    except:
-                        speed = 8.0
-                    f.write(f"LINE{line_num:03d}_001, {lat1:.6f}, {lon1:.6f}, {abs(depth1):.1f}, {speed:.1f}, {line_num}, {line_num}\n")
-                    f.write(f"LINE{line_num:03d}_002, {lat2:.6f}, {lon2:.6f}, {abs(depth2):.1f}, {speed:.1f}, {line_num}, {line_num}\n")
-                
-                # Crossline if present
+                f.write("DEG\n\n0 0 0 0\n")
+                line_index = 0
+                # Crossline first (index 0) if present
                 if self.cross_line_data:
-                    lat1, lon1 = self.cross_line_data[0]
-                    lat2, lon2 = self.cross_line_data[1]
-                    depth1 = self._get_depth_at_point(lat1, lon1) if self.geotiff_data_array is not None else 0.0
-                    depth2 = self._get_depth_at_point(lat2, lon2) if self.geotiff_data_array is not None else 0.0
-                    try:
-                        speed = float(self.survey_speed_entry.text()) if self.survey_speed_entry.text() else 8.0
-                    except:
-                        speed = 8.0
-                    crossline_num = len(self.survey_lines_data) + 1
-                    f.write(f"CROSSLINE_001, {lat1:.6f}, {lon1:.6f}, {abs(depth1):.1f}, {speed:.1f}, {crossline_num}, {crossline_num}\n")
-                    f.write(f"CROSSLINE_002, {lat2:.6f}, {lon2:.6f}, {abs(depth2):.1f}, {speed:.1f}, {crossline_num}, {crossline_num}\n")
+                    p0, p1 = self.cross_line_data[0], self.cross_line_data[1]
+                    f.write(f'_LINE Crossline {line_index} {ts} 0 {p0[0]:.6f} {p0[1]:.6f} {p1[0]:.6f} {p1[1]:.6f} "\n')
+                    line_index += 1
+                # Reference lines (Reference1, Reference2, ...)
+                for i, line in enumerate(self.survey_lines_data):
+                    p0, p1 = line[0], line[1]
+                    f.write(f'_LINE Reference{i + 1} {line_index} {ts} 0 {p0[0]:.6f} {p0[1]:.6f} {p1[0]:.6f} {p1[1]:.6f} "\n')
+                    line_index += 1
 
             # Update success message to include SIS
             ref_msg2 = (f"Survey exported successfully to:\n"

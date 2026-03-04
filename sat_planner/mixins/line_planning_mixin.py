@@ -303,15 +303,11 @@ class LinePlanningMixin:
                 lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
                 self._write_lnw_file(lnw_file_path, lnw_lines)
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
+            ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
             with open(sis_file_path, 'w') as f:
-                f.write("SIS ASCII Plan\n")
-                for i, (lat, lon) in enumerate(self.line_planning_points):
-                    try:
-                        speed_knots = float(self.line_survey_speed_entry.text()) if self.line_survey_speed_entry.text() else 8.0
-                    except Exception:
-                        speed_knots = 8.0
-                    depth = self._get_depth_at_point(lat, lon)
-                    f.write(f"WAYPOINT_{i+1:03d}, {lat:.6f}, {lon:.6f}, {depth:.1f}, {speed_knots:.1f}, 1, 1\n")
+                f.write("DEG\n\n0 0 0 0\n")
+                coords = " ".join(f"{lat:.6f} {lon:.6f}" for lat, lon in self.line_planning_points)
+                f.write(f'_LINE {export_name} 0 {ts} 0 {coords} "\n')
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
             self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
             profile_png_path = None

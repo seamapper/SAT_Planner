@@ -840,17 +840,12 @@ class CalibrationMixin:
                 lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
                 self._write_lnw_file(lnw_file_path, lnw_lines)
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
+            ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
             with open(sis_file_path, 'w') as f:
-                f.write("SIS ASCII Plan\n")
-                for num, name, pts in lines:
-                    try:
-                        speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
-                    except Exception:
-                        speed_knots = 8.0
-                    depth1 = self._get_depth_at_point(pts[0][0], pts[0][1])
-                    depth2 = self._get_depth_at_point(pts[1][0], pts[1][1])
-                    f.write(f"{name}_001, {pts[0][0]:.6f}, {pts[0][1]:.6f}, {depth1:.1f}, {speed_knots:.1f}, {num}, {num}\n")
-                    f.write(f"{name}_002, {pts[1][0]:.6f}, {pts[1][1]:.6f}, {depth2:.1f}, {speed_knots:.1f}, {num}, {num}\n")
+                f.write("DEG\n\n0 0 0 0\n")
+                for line_index, (num, name, pts) in enumerate(lines):
+                    coords = " ".join(f"{lat:.6f} {lon:.6f}" for lat, lon in pts)
+                    f.write(f'_LINE {name} {line_index} {ts} 0 {coords} "\n')
             txt_file_path = os.path.join(export_dir, f"{export_name}_DD.txt")
             with open(txt_file_path, 'w', encoding='utf-8') as f:
                 for num, name, pts in lines:
