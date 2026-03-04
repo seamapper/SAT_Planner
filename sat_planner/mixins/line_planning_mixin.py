@@ -295,16 +295,13 @@ class LinePlanningMixin:
                 geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
                 with open(geojson_file_path, 'w') as f:
                     json.dump({"type": "FeatureCollection", "features": [geojson_feature]}, f, indent=2)
-            lnw_file_path = os.path.join(export_dir, f"{export_name}.lnw")
-            with open(lnw_file_path, 'w') as f:
-                f.write("LNW 1.0\n")
-                for i, (lat, lon) in enumerate(self.line_planning_points):
-                    depth = self._get_depth_at_point(lat, lon) if self.geotiff_data_array is not None else 0.0
-                    try:
-                        speed = float(self.line_survey_speed_entry.text()) if self.line_survey_speed_entry.text() else 8.0
-                    except Exception:
-                        speed = 8.0
-                    f.write(f"WAYPOINT_{i+1:03d},{lat:.6f},{lon:.6f},{abs(depth):.1f},{speed:.1f},50.0,1,1\n")
+            lnw_file_path = None
+            lnw_lines = [(export_name, list(self.line_planning_points))]
+            if hasattr(self, '_write_lnw_file') and hasattr(self, '_compute_utm_zone_from_points') and len(self.line_planning_points) >= 2:
+                zone, hem = self._compute_utm_zone_from_points(self.line_planning_points)
+                utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
+                lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
+                self._write_lnw_file(lnw_file_path, lnw_lines)
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
             with open(sis_file_path, 'w') as f:
                 f.write("SIS ASCII Plan\n")
@@ -350,7 +347,10 @@ class LinePlanningMixin:
             success_msg = f"Line exported successfully to:\n- {os.path.basename(csv_file_path)}\n"
             if shapefile_path:
                 success_msg += f"- {os.path.basename(shapefile_path)} (and associated files)\n"
-            success_msg += f"- {os.path.basename(geojson_file_path)}\n- {os.path.basename(lnw_file_path)}\n- {os.path.basename(sis_file_path)}\n- {os.path.basename(map_png_path)}\n"
+            success_msg += f"- {os.path.basename(geojson_file_path)}\n"
+            if lnw_file_path:
+                success_msg += f"- {os.path.basename(lnw_file_path)}\n"
+            success_msg += f"- {os.path.basename(sis_file_path)}\n- {os.path.basename(map_png_path)}\n"
             if profile_png_path:
                 success_msg += f"- {os.path.basename(profile_png_path)}\n"
             if stats_file_path:

@@ -306,46 +306,26 @@ class ExportImportMixin:
                 f"- {os.path.basename(geojson_file_path)}\n"
                 f"in directory: {export_dir}", append=False)
 
-            # --- Export to Hypack LNW format ---
-            lnw_file_path = os.path.join(export_dir, f"{export_name}.lnw")
-            with open(lnw_file_path, 'w') as f:
-                f.write("LNW 1.0\n")
-                # Main survey lines
-                for i, line in enumerate(self.survey_lines_data):
-                    line_num = i + 1
-                    # Start point
-                    lat1, lon1 = line[0]
-                    lat2, lon2 = line[1]
-                    # Get depth from GeoTIFF if available
-                    depth1 = self._get_depth_at_point(lat1, lon1) if self.geotiff_data_array is not None else 0.0
-                    depth2 = self._get_depth_at_point(lat2, lon2) if self.geotiff_data_array is not None else 0.0
-                    # Get speed from survey speed entry
-                    try:
-                        speed = float(self.survey_speed_entry.text()) if self.survey_speed_entry.text() else 8.0
-                    except:
-                        speed = 8.0
-                    f.write(f"LINE{line_num:03d}_001,{lat1:.6f},{lon1:.6f},{abs(depth1):.1f},{speed:.1f},50.0,{line_num},1\n")
-                    f.write(f"LINE{line_num:03d}_002,{lat2:.6f},{lon2:.6f},{abs(depth2):.1f},{speed:.1f},50.0,{line_num},1\n")
-                # Crossline
-                if self.cross_line_data:
-                    lat1, lon1 = self.cross_line_data[0]
-                    lat2, lon2 = self.cross_line_data[1]
-                    depth1 = self._get_depth_at_point(lat1, lon1) if self.geotiff_data_array is not None else 0.0
-                    depth2 = self._get_depth_at_point(lat2, lon2) if self.geotiff_data_array is not None else 0.0
-                    try:
-                        speed = float(self.survey_speed_entry.text()) if self.survey_speed_entry.text() else 8.0
-                    except:
-                        speed = 8.0
-                    f.write(f"CROSS_001,{lat1:.6f},{lon1:.6f},{abs(depth1):.1f},{speed:.1f},50.0,0,2\n")
-                    f.write(f"CROSS_002,{lat2:.6f},{lon2:.6f},{abs(depth2):.1f},{speed:.1f},50.0,0,2\n")
+            # --- Export to Hypack LNW format (LIN/PTS/UTM), filename includes UTM zone ---
+            lnw_file_path = None
+            lnw_lines = [(f"LINE{i+1:03d}", [line[0], line[1]]) for i, line in enumerate(self.survey_lines_data)]
+            if self.cross_line_data:
+                lnw_lines.append(("CROSS", [self.cross_line_data[0], self.cross_line_data[1]]))
+            if hasattr(self, '_write_lnw_file') and hasattr(self, '_compute_utm_zone_from_points') and lnw_lines:
+                all_pts = [p for _name, pts in lnw_lines for p in pts]
+                zone, hem = self._compute_utm_zone_from_points(all_pts)
+                utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
+                lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
+                self._write_lnw_file(lnw_file_path, lnw_lines)
 
-            self.set_ref_info_text(
-                f"Survey exported successfully to:\n"
+            ref_msg = (f"Survey exported successfully to:\n"
                 f"- {os.path.basename(csv_file_path)}\n"
                 f"- {os.path.basename(shapefile_path)} (and associated files)\n"
-                f"- {os.path.basename(geojson_file_path)}\n"
-                f"- {os.path.basename(lnw_file_path)}\n"
-                f"in directory: {export_dir}", append=False)
+                f"- {os.path.basename(geojson_file_path)}\n")
+            if lnw_file_path:
+                ref_msg += f"- {os.path.basename(lnw_file_path)}\n"
+            ref_msg += f"in directory: {export_dir}"
+            self.set_ref_info_text(ref_msg, append=False)
 
             # --- Export to SIS ASCII Plan format ---
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
@@ -383,14 +363,15 @@ class ExportImportMixin:
                     f.write(f"CROSSLINE_002, {lat2:.6f}, {lon2:.6f}, {abs(depth2):.1f}, {speed:.1f}, {crossline_num}, {crossline_num}\n")
 
             # Update success message to include SIS
-            self.set_ref_info_text(
-                f"Survey exported successfully to:\n"
+            ref_msg2 = (f"Survey exported successfully to:\n"
                 f"- {os.path.basename(csv_file_path)}\n"
                 f"- {os.path.basename(shapefile_path)} (and associated files)\n"
-                f"- {os.path.basename(geojson_file_path)}\n"
-                f"- {os.path.basename(lnw_file_path)}\n"
-                f"- {os.path.basename(sis_file_path)}\n"
-                f"in directory: {export_dir}", append=False)
+                f"- {os.path.basename(geojson_file_path)}\n")
+            if lnw_file_path:
+                ref_msg2 += f"- {os.path.basename(lnw_file_path)}\n"
+            ref_msg2 += f"- {os.path.basename(sis_file_path)}\n"
+            ref_msg2 += f"in directory: {export_dir}"
+            self.set_ref_info_text(ref_msg2, append=False)
 
             # --- Export Comprehensive Survey Statistics ---
             stats_file_path = os.path.join(export_dir, f"{export_name}_stats.txt")
@@ -688,14 +669,17 @@ class ExportImportMixin:
                 f"- {os.path.basename(csv_file_path)}",
                 f"- {os.path.basename(shapefile_path)} (and associated files)",
                 f"- {os.path.basename(geojson_file_path)}",
-                f"- {os.path.basename(lnw_file_path)}",
+            ]
+            if lnw_file_path:
+                success_files.append(f"- {os.path.basename(lnw_file_path)}")
+            success_files.extend([
                 f"- {os.path.basename(sis_file_path)}",
                 f"- {os.path.basename(txt_file_path)}",
                 f"- {os.path.basename(ddm_file_path)}",
                 f"- {os.path.basename(ddm_txt_file_path)}",
                 f"- {os.path.basename(stats_file_path)}",
                 f"- {os.path.basename(survey_plan_png_path)}"
-            ]
+            ])
             
             # Add metadata JSON if it was created
             try:

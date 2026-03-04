@@ -831,18 +831,14 @@ class CalibrationMixin:
                 })
             with open(geojson_file_path, 'w', encoding='utf-8') as f:
                 json.dump({"type": "FeatureCollection", "features": geojson_features}, f, indent=2)
-            lnw_file_path = os.path.join(export_dir, f"{export_name}.lnw")
-            with open(lnw_file_path, 'w') as f:
-                f.write("LNW 1.0\n")
-                for num, name, pts in lines:
-                    try:
-                        speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
-                    except Exception:
-                        speed_knots = 8.0
-                    depth1 = self._get_depth_at_point(pts[0][0], pts[0][1])
-                    depth2 = self._get_depth_at_point(pts[1][0], pts[1][1])
-                    f.write(f"{name}_001, {pts[0][0]:.6f}, {pts[0][1]:.6f}, {depth1:.1f}, {speed_knots:.1f}, 50.0, {num}, {num}\n")
-                    f.write(f"{name}_002, {pts[1][0]:.6f}, {pts[1][1]:.6f}, {depth2:.1f}, {speed_knots:.1f}, 50.0, {num}, {num}\n")
+            lnw_file_path = None
+            lnw_lines = [(name, list(pts)) for _num, name, pts in lines]
+            if hasattr(self, '_write_lnw_file') and hasattr(self, '_compute_utm_zone_from_points') and lnw_lines:
+                all_pts = [p for _name, pts in lnw_lines for p in pts]
+                zone, hem = self._compute_utm_zone_from_points(all_pts)
+                utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
+                lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
+                self._write_lnw_file(lnw_file_path, lnw_lines)
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
             with open(sis_file_path, 'w') as f:
                 f.write("SIS ASCII Plan\n")
@@ -904,7 +900,10 @@ class CalibrationMixin:
             if hasattr(self, 'profile_fig') and self.profile_fig is not None:
                 profile_png_path = os.path.join(export_dir, f"{export_name}_profile.png")
                 self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
-            success_msg = f"Survey exported successfully to:\n- {os.path.basename(csv_file_path)}\n- {os.path.basename(shapefile_path)}\n- {os.path.basename(geojson_file_path)}\n- {os.path.basename(lnw_file_path)}\n- {os.path.basename(sis_file_path)}\n"
+            success_msg = f"Survey exported successfully to:\n- {os.path.basename(csv_file_path)}\n- {os.path.basename(shapefile_path)}\n- {os.path.basename(geojson_file_path)}\n"
+            if lnw_file_path:
+                success_msg += f"- {os.path.basename(lnw_file_path)}\n"
+            success_msg += f"- {os.path.basename(sis_file_path)}\n"
             if stats_file_path:
                 success_msg += f"- {os.path.basename(stats_file_path)}\n"
             if json_metadata_path:

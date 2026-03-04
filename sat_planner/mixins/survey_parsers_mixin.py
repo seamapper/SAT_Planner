@@ -518,3 +518,53 @@ class SurveyParsersMixin:
         except Exception as e:
             self._show_message("error", "Import Error", f"Failed to parse LNW file: {e}")
             return None
+
+    def _compute_utm_zone_from_points(self, points):
+        """From a list of (lat, lon) in WGS84, return (utm_zone, hemisphere) for LNW export.
+        points: list of (lat, lon). Returns (zone 1-60, 'North' or 'South')."""
+        if not points or pyproj is None:
+            return (18, "North")
+        lats = [p[0] for p in points]
+        lons = [p[1] for p in points]
+        lon_centroid = sum(lons) / len(lons)
+        lat_centroid = sum(lats) / len(lats)
+        zone = int((lon_centroid + 180) / 6) + 1
+        zone = max(1, min(60, zone))
+        hemisphere = "North" if lat_centroid >= 0 else "South"
+        return (zone, hemisphere)
+
+    def _write_lnw_file(self, file_path, lines_with_names):
+        """Write proper HYPACK LNW format (LIN/PTS/UTM) to file_path.
+        lines_with_names: list of (line_name, [(lat, lon), ...]) with at least 2 points per line.
+        Coordinates are converted to UTM from centroid of all points."""
+        if not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
+            return False
+        all_points = []
+        for _name, pts in lines_with_names:
+            all_points.extend(pts)
+        if not all_points:
+            return False
+        zone, hemisphere = self._compute_utm_zone_from_points(all_points)
+        utm_crs = f"EPSG:326{zone:02d}" if hemisphere == "North" else f"EPSG:327{zone:02d}"
+        try:
+            transformer = pyproj.Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
+        except Exception:
+            return False
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write("LNW 1.0\n")
+            for name, pts in lines_with_names:
+                if len(pts) < 2:
+                    continue
+                utm_pts = []
+                for lat, lon in pts:
+                    try:
+                        easting, northing = transformer.transform(lon, lat)
+                        utm_pts.append((easting, northing))
+                    except Exception:
+                        return False
+                f.write(f"LIN {len(utm_pts)}\n")
+                for easting, northing in utm_pts:
+                    f.write(f"PTS {easting:.4f} {northing:.4f}\n")
+                f.write(f"LNN {name}\n")
+                f.write("EOL\n")
+        return True
