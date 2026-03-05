@@ -92,6 +92,8 @@ class ReferenceLineAssignmentDialog(QDialog):
         assignment_layout.addWidget(assignment_label)
 
         suggested_cross = _suggest_crossline_index(imported_lines)
+        # Non-crossline indices in file order → suggest as Reference Line 1, 2, 3, ...
+        ref_order_indices = [i for i in range(len(imported_lines)) if i != suggested_cross]
         line_colors = ['red', 'blue', 'green', 'purple', 'orange', 'cyan', 'magenta', 'yellow']
         num_lines = len(imported_lines)
         ref_options = ["Reference Line " + str(i + 1) for i in range(num_lines)]
@@ -110,6 +112,10 @@ class ReferenceLineAssignmentDialog(QDialog):
                 combo.addItem(opt)
             if i == suggested_cross:
                 combo.setCurrentIndex(1)  # Crossline
+            else:
+                # Suggest reference lines in file order: first non-crossline → Reference Line 1, etc.
+                ref_rank = ref_order_indices.index(i)
+                combo.setCurrentIndex(2 + ref_rank)  # 2 = first Reference Line option
             self.comboboxes.append(combo)
             line_layout.addWidget(combo)
             color_label = QLabel("●")
