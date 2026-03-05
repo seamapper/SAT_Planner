@@ -264,12 +264,13 @@ class ExportImportMixin:
             lnw_lines = [(f"LINE{i+1:03d}", [line[0], line[1]]) for i, line in enumerate(self.survey_lines_data)]
             if self.cross_line_data:
                 lnw_lines.append(("CROSS", [self.cross_line_data[0], self.cross_line_data[1]]))
-            if hasattr(self, '_write_lnw_file') and hasattr(self, '_compute_utm_zone_from_points') and lnw_lines:
+            if lnw_lines:
                 all_pts = [p for _name, pts in lnw_lines for p in pts]
-                zone, hem = self._compute_utm_zone_from_points(all_pts)
+                zone, hem = export_utils.compute_utm_zone_from_points(all_pts)
                 utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
                 lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
-                self._write_lnw_file(lnw_file_path, lnw_lines)
+                if not export_utils.write_lnw(lnw_file_path, lnw_lines):
+                    lnw_file_path = None
 
             ref_msg = (f"Survey exported successfully to:\n"
                 f"- {os.path.basename(csv_file_path)}\n"
@@ -282,20 +283,12 @@ class ExportImportMixin:
 
             # --- Export to Kongsberg SIS ASCII Plan format ---
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
-            ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-            with open(sis_file_path, 'w') as f:
-                f.write("DEG\n\n0 0 0 0\n")
-                line_index = 0
-                # Crossline first (index 0) if present
-                if self.cross_line_data:
-                    p0, p1 = self.cross_line_data[0], self.cross_line_data[1]
-                    f.write(f'_LINE Crossline {line_index} {ts} 0 {p0[0]:.6f} {p0[1]:.6f} {p1[0]:.6f} {p1[1]:.6f} "\n')
-                    line_index += 1
-                # Reference lines (Reference1, Reference2, ...)
-                for i, line in enumerate(self.survey_lines_data):
-                    p0, p1 = line[0], line[1]
-                    f.write(f'_LINE Reference{i + 1} {line_index} {ts} 0 {p0[0]:.6f} {p0[1]:.6f} {p1[0]:.6f} {p1[1]:.6f} "\n')
-                    line_index += 1
+            ref_ascii_lines = []
+            if self.cross_line_data:
+                ref_ascii_lines.append(('Crossline', [self.cross_line_data[0], self.cross_line_data[1]]))
+            for i, line in enumerate(self.survey_lines_data):
+                ref_ascii_lines.append((f'Reference{i + 1}', [line[0], line[1]]))
+            export_utils.write_asciiplan(sis_file_path, ref_ascii_lines)
 
             # Update success message to include SIS
             ref_msg2 = (f"Survey exported successfully to:\n"

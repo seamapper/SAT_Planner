@@ -822,19 +822,16 @@ class CalibrationMixin:
                 json.dump({"type": "FeatureCollection", "features": geojson_features}, f, indent=2)
             lnw_file_path = None
             lnw_lines = [(name, list(pts)) for _num, name, pts in lines]
-            if hasattr(self, '_write_lnw_file') and hasattr(self, '_compute_utm_zone_from_points') and lnw_lines:
+            if lnw_lines:
                 all_pts = [p for _name, pts in lnw_lines for p in pts]
-                zone, hem = self._compute_utm_zone_from_points(all_pts)
+                zone, hem = export_utils.compute_utm_zone_from_points(all_pts)
                 utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
                 lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
-                self._write_lnw_file(lnw_file_path, lnw_lines)
+                if not export_utils.write_lnw(lnw_file_path, lnw_lines):
+                    lnw_file_path = None
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
-            ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-            with open(sis_file_path, 'w') as f:
-                f.write("DEG\n\n0 0 0 0\n")
-                for line_index, (num, name, pts) in enumerate(lines):
-                    coords = " ".join(f"{lat:.6f} {lon:.6f}" for lat, lon in pts)
-                    f.write(f'_LINE {name} {line_index} {ts} 0 {coords} "\n')
+            cal_ascii_lines = [(name, list(pts)) for _num, name, pts in lines]
+            export_utils.write_asciiplan(sis_file_path, cal_ascii_lines)
             txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
             export_utils.write_ddd_txt(txt_file_path, cal_rows)
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")

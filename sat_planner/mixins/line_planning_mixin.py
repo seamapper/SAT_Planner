@@ -293,17 +293,14 @@ class LinePlanningMixin:
                     json.dump({"type": "FeatureCollection", "features": [geojson_feature]}, f, indent=2)
             lnw_file_path = None
             lnw_lines = [(export_name, list(self.line_planning_points))]
-            if hasattr(self, '_write_lnw_file') and hasattr(self, '_compute_utm_zone_from_points') and len(self.line_planning_points) >= 2:
-                zone, hem = self._compute_utm_zone_from_points(self.line_planning_points)
+            if len(self.line_planning_points) >= 2:
+                zone, hem = export_utils.compute_utm_zone_from_points(self.line_planning_points)
                 utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
                 lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
-                self._write_lnw_file(lnw_file_path, lnw_lines)
+                if not export_utils.write_lnw(lnw_file_path, lnw_lines):
+                    lnw_file_path = None
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
-            ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-            with open(sis_file_path, 'w') as f:
-                f.write("DEG\n\n0 0 0 0\n")
-                coords = " ".join(f"{lat:.6f} {lon:.6f}" for lat, lon in self.line_planning_points)
-                f.write(f'_LINE {export_name} 0 {ts} 0 {coords} "\n')
+            export_utils.write_asciiplan(sis_file_path, [(export_name, list(self.line_planning_points))])
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
             self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
             profile_png_path = None
