@@ -30,30 +30,36 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ### Calibration Survey Planning
 - Draw pitch and roll calibration lines interactively
 - Generate heading calibration lines from pitch line
+- **Reverse Line Direction**: Flip start/end of any calibration line(s) (Pitch, Roll, Heading1, Heading2) via checkboxes
 - Calculate heading line offset based on median depth
 - Display pitch line depth statistics (shallowest, maximum, mean, median)
 - Configure turn time for accurate time estimates
-- Import calibration surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON); optional GMRT download after import (checkbox + buffer)
+- Import calibration surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON); **suggested line assignment** from file labels or geometry (Pitch = middle parallel line, Roll = non-parallel, Heading1/2 by file order); optional GMRT download after import (checkbox + buffer)
+- **Calibration Survey Info** dialog and *_info.txt with **Calibration Waypoints (DMM)** and **Calibration Waypoints (DDD)** sections (Pitch/Roll/Heading1/Heading2 start and end)
 - Comprehensive statistics with survey time, transit time, and turn time breakdowns
 - Validation warning when heading line offset exceeds 2x shallowest depth
-- Export calibration survey plans with detailed statistics
+- Export calibration survey plans with detailed statistics (shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`)
 
 ### Reference Survey Planning
 - Generate parallel survey lines with customizable parameters
 - Auto-regenerate plans when parameters change (with debounce)
 - Configure line length, spacing, heading, speed, and turn time
-- Import reference surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON); optional GMRT download after import (checkbox + buffer)
+- Import reference surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON); **suggested crossline and reference line order** (crossline by orientation, reference lines in file order); optional GMRT download after import (checkbox + buffer)
+- **Reference Survey Info** dialog and *_info.txt with **Reference Waypoints (DMM)** and **Reference Waypoints (DDD)** sections (L1S/L1E, L2S/L2E, …, CLS/CLE)
 - Calculate comprehensive survey statistics with time breakdowns
 - Survey time breakdown showing main lines, crossline, transit, and turn times
-- Export reference survey plans with detailed statistics
+- Export reference survey plans with detailed statistics (shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`)
 
 ### Line Planning
 - Interactive line drawing with waypoint support
+- **Reverse Line Direction**: Flip start and end of the line (one click)
 - Real-time elevation profiles as you draw
 - Edit existing lines by dragging waypoints
 - Import/export line plans (DDD, DMS, DMM, LNW, CSV, GeoJSON; single polyline, no assignment dialog)
 - Optional GMRT download after import (checkbox + buffer)
+- **Survey Info** dialog and *_info.txt with **Line Plan Waypoints (DMM)** and **Line Plan Waypoints (DDD)** sections (WP1, WP2, …)
 - Calculate survey statistics for drawn lines
+- Export uses shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`
 
 ### GeoTIFF Visualization
 - Display elevation data with color mapping
@@ -90,6 +96,7 @@ The application is organized as a package plus a launcher:
 - **`SAT_Planner_PyQt.py`** – Entry point; creates the main window and runs the app (`python SAT_Planner_PyQt.py`).
 - **`sat_planner/`** – Core package:
   - **`constants.py`** – Version, config path, geospatial library availability.
+  - **`export_utils.py`** – Shared export writers: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points (used by Calibration, Reference, Line planning).
   - **`utils_geo.py`** – Coordinate helpers (e.g. decimal degrees to DDM).
   - **`utils_ui.py`** – UI helpers (message boxes, confirmations).
   - **`gmrt_dialog/`** – Embedded GMRT Download dialog (config, workers, map_widget, main_window); GeoTIFF-only output, optional split into topo/bathy.
@@ -112,7 +119,7 @@ The application is organized as a package plus a launcher:
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `SAT_Planner_v2026.08.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
+- `SAT_Planner_v2026.10.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
 - `SAT_Planner.app` (macOS) — if available
 
 No installation required - just run the executable or app bundle.
@@ -152,55 +159,23 @@ python SAT_Planner_PyQt.py
 pip install pyinstaller
 ```
 
-2. Run the build script (edit `build_exe.bat` to set `PYTHON_PATH` and the spec filename if needed):
+2. Run the build script (edit `build_exe.bat` to set `PYTHON_PATH` if needed):
 ```bash
 build_exe.bat
 ```
 
-Or build manually with a PyInstaller spec file; the executable will be created in the `dist` folder.
+Or build manually: `pyinstaller SAT_Planner.spec`. The executable is created in `dist` as `SAT_Planner_v<version>.exe` (version from `sat_planner/constants.py`).
 
 ### Building for macOS
 
-To build a macOS application (.app bundle):
+To build a macOS application (.app bundle), create a PyInstaller spec (one-file or one-folder) that includes the `sat_planner` package and `SAT_Planner_PyQt.py` as the entry point. If a macOS spec file is present in the repo (e.g. `Sat_Planner_macOS.spec`), run:
 
-1. **Install PyInstaller**:
 ```bash
 pip install pyinstaller
-```
-
-2. **Prepare the icon file** (if needed):
-   - The spec file uses `media/CCOM.icns` for the app icon
-   - If you only have `CCOM.ico`, convert it to `.icns` format:
-```bash
-# Using sips (built into macOS):
-sips -s format icns media/CCOM.ico --out media/CCOM.icns
-```
-
-3. **Build the app bundle** using the provided macOS spec file:
-```bash
 pyinstaller Sat_Planner_macOS.spec
 ```
 
-4. **The app bundle will be created** in the `dist` folder as `SAT_Planner.app`
-
-5. **Optional: Code signing** (recommended for distribution):
-```bash
-codesign --deep --force --verify --verbose --sign "Developer ID Application: Your Name" dist/SAT_Planner.app
-```
-
-6. **Optional: Create a DMG for distribution**:
-   - Use Disk Utility or a tool like `create-dmg` to create a disk image
-   - Example with create-dmg:
-```bash
-npm install -g create-dmg
-create-dmg dist/SAT_Planner.app dist/
-```
-
-**Notes for macOS builds:**
-- Use `.icns` format for icons (convert `.ico` files using `sips` or online converters)
-- The app bundle can be distributed as-is or packaged in a DMG
-- Code signing is optional but recommended to avoid macOS security warnings
-- Test the app bundle on a clean macOS system to ensure all dependencies are included
+Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns media/CCOM.ico --out media/CCOM.icns` if needed). The app bundle will be in `dist/`. Code signing and DMG packaging are optional for distribution.
 
 ## Usage
 
@@ -211,7 +186,7 @@ create-dmg dist/SAT_Planner.app dist/
 3. **Select Planning Mode**: Choose between Calibration, Reference, or Line tabs
 4. **Configure Parameters**: Set survey parameters in the appropriate tab
 5. **Generate/Plan**: Create survey lines based on parameters or draw interactively
-6. **View Statistics**: Click "Show [Type] Test Info" to view survey statistics
+6. **View Statistics**: Click the survey info button to open **Calibration Survey Info**, **Reference Survey Info**, or **Survey Info** (Line tab) dialogs
 7. **Export**: Save survey plans using the Export buttons
 
 ### Calibration Survey Planning
@@ -281,9 +256,12 @@ The application saves configuration in:
 
 ## Export Formats
 
-- **CSV**: Survey lines with coordinates and metadata
+- **CSV (DDD/DMM/DMS)**: Survey lines with coordinates and metadata (row format: line number, line name, point label, lat, lon)
+- **TXT (DDD/DMM/DMS)**: Same coordinate formats as plain text
+- **SIS asciiplan**: ASCII plan format for SIS
+- **Hypack LNW**: LNW format for Hypack (UTM zone computed from survey points when needed)
 - **Shapefile**: Geospatial vector format for GIS applications
-- **Statistics Reports**: Text reports with distances, timing, and survey details
+- **Statistics / *_info.txt**: Text reports with distances, timing, survey details, and waypoint sections (DMM then DDD) for Calibration, Reference, and Line plans
 
 ## Navigation
 
@@ -326,6 +304,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.10**: Shared export utilities (`sat_planner/export_utils.py`): DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points. Calibration/Reference/Line planning use these writers. Calibration: **Reverse Line Direction** (Pitch/Roll/Heading1/Heading2); **import suggestion** from metadata (PLS/PLE, RLS/RLE, H1S/H1E, H2S/H2E) or geometry (Pitch = middle parallel, Roll = fourth line, Heading1/2 = outer two). Reference: **import suggestion** (crossline + reference lines). Line planning: **Reverse Line Direction**. Survey info dialogs: **Calibration Survey Info**, **Reference Survey Info**, **Survey Info** (Line); *_info.txt waypoints as **Calibration Waypoints (DMM/DDD)**, **Reference Waypoints (DMM/DDD)**, **Line Plan Waypoints (DMM/DDD)**. Exe build uses version from `sat_planner/constants.py`; output `dist/SAT_Planner_v2026.10.exe`.
 - **v2026.09** (or later): Integrated GMRT Download dialog: "Download GMRT GeoTIFF" button opens a separate "Download GMRT Grid" window. Dialog is GeoTIFF-only (no output format selector); cell resolution 100/200/400 m or Custom (default 50 m), default preset 100 m. Large-area warning when estimated pixels > 16,000,000 (orange). When split (topo/bathy) is used, SAT Planner loads the bathy grid. "Close GMRT Downloader" button at bottom of dialog. Activity Log width 320 px.
 - **v2026.08**: Dark theme for Qt GUI (Fusion + dark palette). Activity Log moved to right side below map (380 px wide). GMRT download option on Calibration, Reference, and Line import (checkbox + buffer). Line plan import from DDD/DMS/DMM/LNW/CSV/GeoJSON. Navigation toolbar removed; zoom (scroll) and pan (middle mouse) only. Survey parsers and GMRT download in dedicated mixins.
 - **v2026.04**: Updated hover text to display coordinates in degrees and decimal minutes (DDM) format instead of decimal degrees. Changed default window height to 1110 pixels.

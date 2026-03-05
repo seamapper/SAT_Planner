@@ -24,26 +24,30 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **Real-time Statistics**: Survey distances, times, and comprehensive statistics
 - **Elevation Profiles**: View elevation and slope profiles for drawn lines
 - **Activity Log**: Fixed on the right (320 px) below the map
-- **Export**: CSV and Shapefile; statistics reports
+- **Export**: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW, Shapefile; statistics and *_info.txt with waypoint sections (DMM then DDD)
 - **Survey Import**: DDD, DMS, DMM, LNW, CSV, GeoJSON
 
 ### Calibration Survey Planning
 - Draw pitch and roll calibration lines; generate heading lines from pitch line
+- **Reverse Line Direction**: Flip start/end of Pitch, Roll, Heading1, Heading2 (checkboxes)
 - Turn time parameter; optional GMRT download on import (checkbox + buffer)
-- Import from DDD/DMS/DMM/LNW, CSV, GeoJSON
+- Import from DDD/DMS/DMM/LNW, CSV, GeoJSON; **suggested line assignment** (metadata labels or geometry: Pitch = middle parallel, Roll = fourth line, Heading1/2 = outer two)
+- **Calibration Survey Info** dialog and *_info.txt: **Calibration Waypoints (DMM)** and **Calibration Waypoints (DDD)** (Pitch/Roll/Heading1/Heading2 start and end)
 - Validation when heading offset > 2× shallowest depth
-- Export with detailed statistics
+- Export via shared `export_utils` (DDD/DMM/DMS CSV/TXT, asciiplan, LNW)
 
 ### Reference Survey Planning
 - Parallel lines with line length, spacing, heading, speed, turn time
-- Optional GMRT download on import; import from DDD/DMS/DMM/LNW, CSV, GeoJSON
+- Optional GMRT download on import; import from DDD/DMS/DMM/LNW, CSV, GeoJSON; **suggested crossline and reference line order**
+- **Reference Survey Info** dialog and *_info.txt: **Reference Waypoints (DMM)** and **Reference Waypoints (DDD)** (L1S/L1E, …, CLS/CLE)
 - Survey time breakdown (main lines, crossline, transit, turn)
-- Export with detailed statistics
+- Export via shared `export_utils`
 
 ### Line Planning
-- Interactive line drawing; real-time elevation profiles; edit by dragging waypoints
+- Interactive line drawing; **Reverse Line Direction** (flip line start/end); real-time elevation profiles; edit by dragging waypoints
 - Optional GMRT download on import; import/export (DDD, DMS, DMM, LNW, CSV, GeoJSON)
-- Survey statistics for drawn lines
+- **Survey Info** dialog and *_info.txt: **Line Plan Waypoints (DMM)** and **Line Plan Waypoints (DDD)** (WP1, WP2, …)
+- Survey statistics for drawn lines; export via shared `export_utils`
 
 ### GeoTIFF Visualization
 - Elevation/slope display; hillshade; dynamic resolution; multiple CRS
@@ -68,7 +72,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ## Installation
 
 ### Pre-built Executable
-- Download from [Releases](https://github.com/seamapper/SAT_Planner/releases): e.g. `SAT_Planner_v2026.08.exe` (Windows) or newer; see `sat_planner/constants.py` for version.
+- Download from [Releases](https://github.com/seamapper/SAT_Planner/releases): e.g. `SAT_Planner_v2026.10.exe` (Windows) or newer; version in filename from `sat_planner/constants.py`.
 
 ### From Source
 1. Clone: `git clone https://github.com/seamapper/SAT_Planner.git && cd SAT_Planner`
@@ -77,8 +81,8 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 
 ## Building from Source
 
-- **Windows**: `pip install pyinstaller` then run `build_exe.bat` (or use a PyInstaller spec); output in `dist/`.
-- **macOS**: Use the provided macOS spec; icon `media/CCOM.icns` if available.
+- **Windows**: `pip install pyinstaller` then run `build_exe.bat` or `pyinstaller SAT_Planner.spec`; output in `dist/` as `SAT_Planner_v<version>.exe` (version from `sat_planner/constants.py`).
+- **macOS**: Create or use a PyInstaller spec that includes `sat_planner` and `SAT_Planner_PyQt.py`; icon `media/CCOM.icns` if available.
 
 ## Usage
 
@@ -102,12 +106,14 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **`SAT_Planner_PyQt.py`** – Entry point.
 - **`sat_planner/`** – Core package:
   - **`constants.py`** – Version, config path.
+  - **`export_utils.py`** – Shared export: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points (used by Calibration, Reference, Line planning).
   - **`utils_geo.py`**, **`utils_ui.py`** – Helpers.
   - **`gmrt_dialog/`** – Embedded GMRT Download dialog (GeoTIFF-only, optional split).
   - **`mixins/`** – Basemap, GeoTIFF, Plotting, SurveyParsers, GMRTDownload, Reference, Calibration, LinePlanning, Profiles, MapInteraction, ExportImport, Config.
 
 ## Version History
 
+- **v2026.10**: Shared `export_utils` (DDD/DMM/DMS CSV/TXT, asciiplan, LNW; UTM from points). Calibration: Reverse Line Direction, import suggestion (metadata/geometry), Calibration Survey Info + Calibration Waypoints (DMM/DDD) in dialog and *_info.txt. Reference: import suggestion, Reference Survey Info + Reference Waypoints (DMM/DDD). Line planning: Reverse Line Direction, Survey Info + Line Plan Waypoints (DMM/DDD). Exe build uses version from constants; output `SAT_Planner_v2026.10.exe`.
 - **v2026.09+**: GMRT dialog ("Download GMRT GeoTIFF"), "Download GMRT Grid" window, GeoTIFF-only, cell resolution 100/200/400/Custom (50 m), large-area warning >16M pixels, split → load bathy, "Close GMRT Downloader" button, Activity Log 320 px.
 - **v2026.08**: Dark theme, Activity Log on right, GMRT on import (Calibration/Reference/Line), Line import DDD/DMS/DMM/LNW/CSV/GeoJSON, no nav toolbar (scroll zoom, middle-mouse pan).
 - **v2026.04**: Hover coordinates in DDM; default window height 1110 px.
