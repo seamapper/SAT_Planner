@@ -521,6 +521,22 @@ class LinePlanningMixin:
         has_line_planning = hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 2
         if hasattr(self, 'line_edit_btn'):
             self.line_edit_btn.setEnabled(has_line_planning)
+        if hasattr(self, 'line_reverse_direction_btn'):
+            self.line_reverse_direction_btn.setEnabled(has_line_planning)
+
+    def _on_reverse_line_planning_direction_clicked(self):
+        """Flip start and end of the line planning polyline (reverse point order)."""
+        if not getattr(self, 'line_planning_points', None) or len(self.line_planning_points) < 2:
+            self._show_message("info", "Reverse Line Direction", "Draw a line with at least two points first.")
+            return
+        if getattr(self, 'edit_line_planning_mode', False):
+            self._toggle_edit_line_planning_mode()
+        self.line_planning_points = list(reversed(self.line_planning_points))
+        self._plot_survey_plan(preserve_view_limits=True)
+        if hasattr(self, '_draw_line_planning_profile'):
+            self._draw_line_planning_profile()
+        self._update_line_planning_button_states()
+        self.set_line_info_text("Line direction reversed (start and end swapped).", append=False)
 
     def _toggle_edit_line_planning_mode(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:

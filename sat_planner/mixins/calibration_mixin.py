@@ -9,7 +9,7 @@ import re
 import datetime
 
 from PyQt6.QtWidgets import (QFileDialog, QDialog, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QComboBox, QPushButton, QWidget, QLineEdit, QSpinBox)
+                             QLabel, QComboBox, QPushButton, QWidget, QLineEdit, QSpinBox, QCheckBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat
 
@@ -24,6 +24,48 @@ try:
     from .survey_parsers_mixin import UTMZoneDialog
 except ImportError:
     UTMZoneDialog = None
+
+
+class ReverseLineDirectionDialog(QDialog):
+    """Dialog to choose which calibration line(s) to reverse (flip start/end points)."""
+    LINE_KEYS = ['pitch', 'roll', 'heading1', 'heading2']
+    LINE_LABELS = {'pitch': 'Pitch Line', 'roll': 'Roll Line', 'heading1': 'Heading Line 1', 'heading2': 'Heading Line 2'}
+
+    def __init__(self, parent, available_lines):
+        super().__init__(parent)
+        self.setWindowTitle("Reverse Line Direction")
+        self.setModal(True)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("Select which line(s) to reverse (start and end points will be swapped):"))
+        self.checkboxes = {}
+        for key in self.LINE_KEYS:
+            if key not in available_lines:
+                continue
+            cb = QCheckBox(self.LINE_LABELS[key])
+            self.checkboxes[key] = cb
+            layout.addWidget(cb)
+        if not self.checkboxes:
+            layout.addWidget(QLabel("No calibration lines available to reverse."))
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+        ok_btn = QPushButton("Reverse")
+        ok_btn.clicked.connect(self._on_reverse)
+        btn_layout.addWidget(ok_btn)
+        layout.addLayout(btn_layout)
+
+    def _on_reverse(self):
+        from PyQt6.QtWidgets import QMessageBox
+        if not any(cb.isChecked() for cb in self.checkboxes.values()):
+            QMessageBox.warning(self, "Reverse Line Direction", "Select at least one line to reverse.")
+            return
+        self.accept()
+
+    def get_selected_lines(self):
+        """Return list of line keys that are checked."""
+        return [key for key, cb in self.checkboxes.items() if cb.isChecked()]
 
 
 class LineAssignmentDialog(QDialog):
@@ -661,11 +703,95 @@ class CalibrationMixin:
             self.edit_pitch_line_btn.setEnabled(has_pitch_line)
         if hasattr(self, 'add_heading_lines_btn'):
             self.add_heading_lines_btn.setEnabled(has_pitch_line)
+        self._update_reverse_line_button_states()
 
     def _update_roll_line_button_states(self):
         has_roll_line = hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2
         if hasattr(self, 'edit_roll_line_btn'):
             self.edit_roll_line_btn.setEnabled(has_roll_line)
+        self._update_reverse_line_button_states()
+
+    def _update_reverse_line_button_states(self):
+        has_pitch = hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2
+        has_roll = hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2
+        has_h1 = hasattr(self, 'heading_lines') and len(self.heading_lines) >= 1
+        has_h2 = hasattr(self, 'heading_lines') and len(self.heading_lines) >= 2
+        if hasattr(self, 'reverse_line_direction_btn'):
+            self.reverse_line_direction_btn.setEnabled(has_pitch or has_roll or has_h1 or has_h2)
+
+    def _on_reverse_line_direction_clicked(self):
+        available = []
+        if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
+            available.append('pitch')
+        if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
+            available.append('roll')
+        if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 1:
+            available.append('heading1')
+        if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 2:
+            available.append('heading2')
+        if not available:
+            self._show_message("info", "Reverse Line Direction", "No calibration lines to reverse.")
+            return
+        dialog = ReverseLineDirectionDialog(self, available)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = dialog.get_selected_lines()
+        if not selected:
+            return
+        for line_type in selected:
+            self._reverse_calibration_line(line_type, redraw=False)
+        self._plot_survey_plan(preserve_view_limits=True)
+        if hasattr(self, '_draw_pitch_line_profile'):
+            self._draw_pitch_line_profile()
+        if hasattr(self, '_draw_roll_line_profile'):
+            self._draw_roll_line_profile()
+        if hasattr(self, '_update_cal_line_times'):
+            self._update_cal_line_times()
+        stats = self._calculate_calibration_survey_statistics()
+        labels = [ReverseLineDirectionDialog.LINE_LABELS.get(k, k) for k in selected]
+        if stats:
+            self.set_cal_info_text(
+                f"Reversed: {', '.join(labels)}. Calibration Test Info has been updated (travel and total time may have changed).",
+                append=False
+            )
+        else:
+            self.set_cal_info_text(f"Reversed: {', '.join(labels)}.", append=False)
+
+    def _reverse_calibration_line(self, line_type, *, redraw=True):
+        """Swap start and end points for the given calibration line. If redraw is True, redraws plot and updates info."""
+        if line_type == 'pitch':
+            if getattr(self, 'edit_pitch_line_mode', False):
+                self._toggle_edit_pitch_line_mode()
+            if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
+                self.pitch_line_points = [self.pitch_line_points[1], self.pitch_line_points[0]]
+        elif line_type == 'roll':
+            if getattr(self, 'edit_roll_line_mode', False):
+                self._toggle_edit_roll_line_mode()
+            if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
+                self.roll_line_points = [self.roll_line_points[1], self.roll_line_points[0]]
+        elif line_type == 'heading1' and hasattr(self, 'heading_lines') and len(self.heading_lines) >= 1:
+            self.heading_lines[0] = [self.heading_lines[0][1], self.heading_lines[0][0]]
+        elif line_type == 'heading2' and hasattr(self, 'heading_lines') and len(self.heading_lines) >= 2:
+            self.heading_lines[1] = [self.heading_lines[1][1], self.heading_lines[1][0]]
+        else:
+            return
+        if redraw:
+            self._plot_survey_plan(preserve_view_limits=True)
+            if hasattr(self, '_draw_pitch_line_profile'):
+                self._draw_pitch_line_profile()
+            if hasattr(self, '_draw_roll_line_profile'):
+                self._draw_roll_line_profile()
+            if hasattr(self, '_update_cal_line_times'):
+                self._update_cal_line_times()
+            label = ReverseLineDirectionDialog.LINE_LABELS.get(line_type, line_type)
+            stats = self._calculate_calibration_survey_statistics()
+            if stats:
+                self.set_cal_info_text(
+                    f"{label} direction reversed. Calibration Test Info has been updated (travel and total time may have changed).",
+                    append=False
+                )
+            else:
+                self.set_cal_info_text(f"{label} direction reversed.", append=False)
 
     def _update_cal_line_times(self):
         try:

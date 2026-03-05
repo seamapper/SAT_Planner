@@ -1086,6 +1086,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_line_params_layout.addWidget(self.edit_roll_line_btn, cal_line_row, 0, 1, 2)
         cal_line_row += 1
 
+        self.reverse_line_direction_btn = QPushButton("Reverse Line Direction")
+        self.reverse_line_direction_btn.setEnabled(False)
+        self.reverse_line_direction_btn.clicked.connect(self._on_reverse_line_direction_clicked)
+        cal_line_params_layout.addWidget(self.reverse_line_direction_btn, cal_line_row, 0, 1, 2)
+        cal_line_row += 1
+
         self.clear_cal_lines_btn = QPushButton("Clear Lines")
         self.clear_cal_lines_btn.clicked.connect(self._clear_calibration_lines)
         cal_line_params_layout.addWidget(self.clear_cal_lines_btn, cal_line_row, 0, 1, 2)
@@ -1256,6 +1262,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.line_edit_btn = QPushButton("Edit Line Planning")
         self.line_edit_btn.clicked.connect(self._toggle_edit_line_planning_mode)
         line_planning_groupbox_layout.addWidget(self.line_edit_btn)
+        line_planning_groupbox_layout.addSpacing(3)
+
+        self.line_reverse_direction_btn = QPushButton("Reverse Line Direction")
+        self.line_reverse_direction_btn.setEnabled(False)
+        self.line_reverse_direction_btn.clicked.connect(self._on_reverse_line_planning_direction_clicked)
+        line_planning_groupbox_layout.addWidget(self.line_reverse_direction_btn)
         line_planning_groupbox_layout.addSpacing(3)
 
         self.line_clear_btn = QPushButton("Clear Line")
