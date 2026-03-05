@@ -1464,9 +1464,10 @@ class ReferenceMixin:
             stats_text += f"3. Run crossline ({stats['num_crossline_passes']} passes)\n"
         stats_text += "\n"
 
-        # Waypoints with labels
-        stats_text += "WAYPOINTS\n"
-        stats_text += "-" * 10 + "\n"
+        # Reference Waypoints (DMM)
+        dmm_heading = "Reference Waypoints (DMM)"
+        stats_text += f"\n{dmm_heading}\n"
+        stats_text += "-" * len(dmm_heading) + "\n"
         if self.survey_lines_data:
             for i, line in enumerate(self.survey_lines_data):
                 if i % 2 == 0:
@@ -1479,18 +1480,36 @@ class ReferenceMixin:
                 start_lon_ddm = decimal_degrees_to_ddm(start[1], is_latitude=False)
                 end_lat_ddm = decimal_degrees_to_ddm(end[0], is_latitude=True)
                 end_lon_ddm = decimal_degrees_to_ddm(end[1], is_latitude=False)
-                stats_text += f"{start_label}: {start_lat_ddm}, {start_lon_ddm} ({start[0]:.6f}, {start[1]:.6f})\n"
-                stats_text += f"{end_label}: {end_lat_ddm}, {end_lon_ddm} ({end[0]:.6f}, {end[1]:.6f})\n"
+                stats_text += f"{start_label}: {start_lat_ddm}, {start_lon_ddm}\n"
+                stats_text += f"{end_label}: {end_lat_ddm}, {end_lon_ddm}\n"
         if self.cross_line_data:
             cls_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
             cls_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
             cle_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
             cle_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
-            stats_text += f"CLS: {cls_lat_ddm}, {cls_lon_ddm} ({self.cross_line_data[0][0]:.6f}, {self.cross_line_data[0][1]:.6f})\n"
-            stats_text += f"CLE: {cle_lat_ddm}, {cle_lon_ddm} ({self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f})\n"
+            stats_text += f"CLS: {cls_lat_ddm}, {cls_lon_ddm}\n"
+            stats_text += f"CLE: {cle_lat_ddm}, {cle_lon_ddm}\n"
+
+        # Reference Waypoints (DDD)
+        ddd_heading = "Reference Waypoints (DDD)"
+        stats_text += f"\n{ddd_heading}\n"
+        stats_text += "-" * len(ddd_heading) + "\n"
+        if self.survey_lines_data:
+            for i, line in enumerate(self.survey_lines_data):
+                if i % 2 == 0:
+                    start, end = line[0], line[1]
+                else:
+                    start, end = line[1], line[0]
+                start_label = f'L{i+1}S'
+                end_label = f'L{i+1}E'
+                stats_text += f"{start_label}: {start[0]:.6f}, {start[1]:.6f}\n"
+                stats_text += f"{end_label}: {end[0]:.6f}, {end[1]:.6f}\n"
+        if self.cross_line_data:
+            stats_text += f"CLS: {self.cross_line_data[0][0]:.6f}, {self.cross_line_data[0][1]:.6f}\n"
+            stats_text += f"CLE: {self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f}\n"
 
         # Create custom dialog window with copy functionality
-        show_statistics_dialog(self, "Reference Planning Statistics", stats_text)
+        show_statistics_dialog(self, "Reference Survey Info", stats_text)
 
     def _update_multiplier_label_len(self, val):
         """Updates the label next to the line length multiplier slider."""

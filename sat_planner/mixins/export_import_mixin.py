@@ -445,15 +445,15 @@ class ExportImportMixin:
                 f.write("- After completing all main lines, travel to crossline start\n")
                 f.write("- Complete crossline survey with specified number of passes\n\n")
                 
-                # Waypoints with labels
-                f.write("WAYPOINTS\n")
-                f.write("-" * 10 + "\n")
+                # Reference Waypoints (DMM)
+                dmm_heading = "Reference Waypoints (DMM)"
+                f.write(f"\n{dmm_heading}\n")
+                f.write("-" * len(dmm_heading) + "\n")
                 if self.survey_lines_data:
                     for i, line in enumerate(self.survey_lines_data):
-                        # Determine start and end based on zigzag pattern
-                        if i % 2 == 0:  # Even lines - normal order
+                        if i % 2 == 0:
                             start, end = line[0], line[1]
-                        else:  # Odd lines - flipped order
+                        else:
                             start, end = line[1], line[0]
                         start_label = f'L{i+1}S'
                         end_label = f'L{i+1}E'
@@ -461,15 +461,33 @@ class ExportImportMixin:
                         start_lon_ddm = decimal_degrees_to_ddm(start[1], is_latitude=False)
                         end_lat_ddm = decimal_degrees_to_ddm(end[0], is_latitude=True)
                         end_lon_ddm = decimal_degrees_to_ddm(end[1], is_latitude=False)
-                        f.write(f"{start_label}: {start_lat_ddm}, {start_lon_ddm} ({start[0]:.6f}, {start[1]:.6f})\n")
-                        f.write(f"{end_label}: {end_lat_ddm}, {end_lon_ddm} ({end[0]:.6f}, {end[1]:.6f})\n")
+                        f.write(f"{start_label}: {start_lat_ddm}, {start_lon_ddm}\n")
+                        f.write(f"{end_label}: {end_lat_ddm}, {end_lon_ddm}\n")
                 if self.cross_line_data:
                     cls_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
                     cls_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
                     cle_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
                     cle_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
-                    f.write(f"CLS: {cls_lat_ddm}, {cls_lon_ddm} ({self.cross_line_data[0][0]:.6f}, {self.cross_line_data[0][1]:.6f})\n")
-                    f.write(f"CLE: {cle_lat_ddm}, {cle_lon_ddm} ({self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f})\n")
+                    f.write(f"CLS: {cls_lat_ddm}, {cls_lon_ddm}\n")
+                    f.write(f"CLE: {cle_lat_ddm}, {cle_lon_ddm}\n")
+
+                # Reference Waypoints (DDD)
+                ddd_heading = "Reference Waypoints (DDD)"
+                f.write(f"\n{ddd_heading}\n")
+                f.write("-" * len(ddd_heading) + "\n")
+                if self.survey_lines_data:
+                    for i, line in enumerate(self.survey_lines_data):
+                        if i % 2 == 0:
+                            start, end = line[0], line[1]
+                        else:
+                            start, end = line[1], line[0]
+                        start_label = f'L{i+1}S'
+                        end_label = f'L{i+1}E'
+                        f.write(f"{start_label}: {start[0]:.6f}, {start[1]:.6f}\n")
+                        f.write(f"{end_label}: {end[0]:.6f}, {end[1]:.6f}\n")
+                if self.cross_line_data:
+                    f.write(f"CLS: {self.cross_line_data[0][0]:.6f}, {self.cross_line_data[0][1]:.6f}\n")
+                    f.write(f"CLE: {self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f}\n")
                 f.write("\n")
                 
                 f.write("NOTES\n")

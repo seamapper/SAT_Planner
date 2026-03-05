@@ -329,9 +329,16 @@ class LinePlanningMixin:
                                 f.write(f"Segment {i+1}: {dist:.1f} m ({dist/1000:.3f} km, {dist/1852:.3f} nm) - Heading: {fwd_az % 360:.1f}°\n")
                             else:
                                 f.write(f"Segment {i+1}: {stats['segment_distances'][i]:.1f} m - Heading: Unable to calculate\n")
-                        f.write("\nWAYPOINTS\n" + "-" * 10 + "\n")
+                        dmm_heading = "Line Plan Waypoints (DMM)"
+                        f.write(f"\n{dmm_heading}\n")
+                        f.write("-" * len(dmm_heading) + "\n")
                         for i, (lat, lon) in enumerate(self.line_planning_points):
-                            f.write(f"WP{i+1}: {decimal_degrees_to_ddm(lat, True)}, {decimal_degrees_to_ddm(lon, False)} ({lat:.6f}, {lon:.6f})\n")
+                            f.write(f"WP{i+1}: {decimal_degrees_to_ddm(lat, True)}, {decimal_degrees_to_ddm(lon, False)}\n")
+                        ddd_heading = "Line Plan Waypoints (DDD)"
+                        f.write(f"\n{ddd_heading}\n")
+                        f.write("-" * len(ddd_heading) + "\n")
+                        for i, (lat, lon) in enumerate(self.line_planning_points):
+                            f.write(f"WP{i+1}: {lat:.6f}, {lon:.6f}\n")
             else:
                 with open(stats_file_path, 'w') as f:
                     f.write("Line planning info.\nNo statistics available for this export.\n")
@@ -826,7 +833,14 @@ class LinePlanningMixin:
                 else:
                     stats_text += f"Segment {i+1}: {stats['segment_distances'][i]:.1f} m - Heading: Unable to calculate\n"
         if self.line_planning_points:
-            stats_text += "\nWAYPOINTS\n" + "-" * 10 + "\n"
+            dmm_heading = "Line Plan Waypoints (DMM)"
+            stats_text += f"\n{dmm_heading}\n"
+            stats_text += "-" * len(dmm_heading) + "\n"
             for i, (lat, lon) in enumerate(self.line_planning_points):
-                stats_text += f"WP{i+1}: {decimal_degrees_to_ddm(lat, True)}, {decimal_degrees_to_ddm(lon, False)} ({lat:.6f}, {lon:.6f})\n"
-        show_statistics_dialog(self, "Line Planning Statistics", stats_text)
+                stats_text += f"WP{i+1}: {decimal_degrees_to_ddm(lat, True)}, {decimal_degrees_to_ddm(lon, False)}\n"
+            ddd_heading = "Line Plan Waypoints (DDD)"
+            stats_text += f"\n{ddd_heading}\n"
+            stats_text += "-" * len(ddd_heading) + "\n"
+            for i, (lat, lon) in enumerate(self.line_planning_points):
+                stats_text += f"WP{i+1}: {lat:.6f}, {lon:.6f}\n"
+        show_statistics_dialog(self, "Survey Info", stats_text)
