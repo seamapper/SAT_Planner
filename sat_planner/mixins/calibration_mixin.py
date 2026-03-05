@@ -25,6 +25,117 @@ try:
 except ImportError:
     UTMZoneDialog = None
 
+# Combo index to assignment type: 0=unset, 1=pitch, 2=roll, 3=heading1, 4=heading2
+_CAL_ASSIGNMENT_TO_COMBO = {'pitch': 1, 'roll': 2, 'heading1': 3, 'heading2': 4}
+
+
+def _suggest_calibration_assignments_from_metadata(file_path, file_basename, num_lines):
+    """If the file has point labels (PLS/PLE, RLS/RLE, H1S/H1E, H2S/H2E), return suggested {line_idx: role} or None.
+    Only for *_DDD.txt, *_DMM.txt, *_DMS.txt. Requires exactly 4 lines."""
+    if num_lines != 4:
+        return None
+    file_basename_lower = file_basename.lower()
+    if not (file_basename_lower.endswith('_ddd.txt') or file_basename_lower.endswith('_dmm.txt') or file_basename_lower.endswith('_dms.txt')):
+        return None
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+    except Exception:
+        return None
+    lines = [line.strip() for line in content.replace('\r\n', '\n').replace('\r', '\n').split('\n') if line.strip()]
+    # Each calibration line = 2 rows. First row's first token is start label (PLS, RLS, H1S, H2S).
+    if len(lines) < 8:
+        return None
+    def label_to_role(first_token):
+        t = (first_token or '').upper()
+        if t in ('PLS', 'PLE'):
+            return 'pitch'
+        if t in ('RLS', 'RLE'):
+            return 'roll'
+        if t in ('H1S', 'H1E'):
+            return 'heading1'
+        if t in ('H2S', 'H2E'):
+            return 'heading2'
+        return None
+    suggestion = {}
+    for line_idx in range(4):
+        row_idx = line_idx * 2
+        if row_idx >= len(lines):
+            return None
+        parts = lines[row_idx].split()
+        if not parts:
+            return None
+        role = label_to_role(parts[0])
+        if role is None:
+            return None
+        suggestion[line_idx] = role
+    if len(suggestion) != 4 or len(set(suggestion.values())) != 4:
+        return None
+    return suggestion
+
+
+def _suggest_calibration_assignments_from_geometry(imported_lines):
+    """Suggest calibration line roles from geometry: 3 parallel lines (Pitch + Heading1 + Heading2), 1 Roll.
+    Pitch = spatially in the middle between the two heading lines. Heading1 vs Heading2 = file order.
+    Returns {line_idx: 'pitch'|'roll'|'heading1'|'heading2'} or None."""
+    if not imported_lines or len(imported_lines) != 4 or not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
+        return None
+    try:
+        geod = pyproj.Geod(ellps="WGS84")
+    except Exception:
+        return None
+    # Compute for each line: length (m), orientation (0-180), midpoint (lat, lon)
+    orientations = []
+    lengths = []
+    midpoints = []
+    for line in imported_lines:
+        if len(line) != 2:
+            return None
+        (lat1, lon1), (lat2, lon2) = line[0], line[1]
+        _, _, dist = geod.inv(lon1, lat1, lon2, lat2)
+        fwd_az, _, _ = geod.inv(lon1, lat1, lon2, lat2)
+        orient = fwd_az % 180.0
+        mid = ((lat1 + lat2) / 2.0, (lon1 + lon2) / 2.0)
+        orientations.append(orient)
+        lengths.append(dist)
+        midpoints.append(mid)
+    orientations = np.array(orientations)
+    # Roll = the line whose orientation differs most from the median (the one not parallel to the other 3)
+    median_orient = np.median(orientations)
+    diffs = np.abs(orientations - median_orient)
+    diffs = np.minimum(diffs, 180.0 - diffs)
+    roll_idx = int(np.argmax(diffs))
+    parallel_indices = [i for i in range(4) if i != roll_idx]
+    if len(parallel_indices) != 3:
+        return None
+    # Common orientation of the 3 parallel lines (average)
+    theta = float(np.mean(orientations[parallel_indices]))
+    theta_rad = np.deg2rad(theta)
+    # Across direction = perpendicular to line direction (theta + 90)
+    across_rad = theta_rad + np.pi / 2.0
+    across_lat = np.cos(across_rad)
+    across_lon = np.sin(across_rad)
+    centroid_lat = np.mean([midpoints[i][0] for i in parallel_indices])
+    centroid_lon = np.mean([midpoints[i][1] for i in parallel_indices])
+    # Across position: project each midpoint onto the across direction (approx for ordering)
+    across_positions = []
+    for i in parallel_indices:
+        lat, lon = midpoints[i]
+        pos = (lat - centroid_lat) * across_lat + (lon - centroid_lon) * across_lon * np.cos(np.deg2rad(centroid_lat))
+        across_positions.append((i, pos))
+    across_positions.sort(key=lambda x: x[1])
+    # Middle (index 1) = Pitch, outer two = Heading1 and Heading2 by file order
+    pitch_idx = across_positions[1][0]
+    heading_indices = [across_positions[0][0], across_positions[2][0]]
+    heading_indices.sort()
+    heading1_idx, heading2_idx = heading_indices[0], heading_indices[1]
+    return {
+        pitch_idx: 'pitch',
+        roll_idx: 'roll',
+        heading1_idx: 'heading1',
+        heading2_idx: 'heading2',
+    }
+
 
 class ReverseLineDirectionDialog(QDialog):
     """Dialog to choose which calibration line(s) to reverse (flip start/end points)."""
@@ -71,11 +182,12 @@ class ReverseLineDirectionDialog(QDialog):
 class LineAssignmentDialog(QDialog):
     """Dialog for assigning imported lines to calibration line types (pitch, roll, heading)."""
     
-    def __init__(self, parent, imported_lines):
+    def __init__(self, parent, imported_lines, suggested_assignments=None):
         """
         Args:
             parent: Parent widget
             imported_lines: List of 4 lines, each as [(lat1, lon1), (lat2, lon2)]
+            suggested_assignments: Optional dict {line_idx: 'pitch'|'roll'|'heading1'|'heading2'} to pre-fill combos
         """
         super().__init__(parent)
         self.setWindowTitle("Assign Calibration Lines")
@@ -84,6 +196,7 @@ class LineAssignmentDialog(QDialog):
         
         self.imported_lines = imported_lines
         self.assignments = {}  # Will store {line_idx: assignment_type}
+        self._suggested_assignments = suggested_assignments
         
         # Create main layout
         main_layout = QVBoxLayout(self)
@@ -143,6 +256,13 @@ class LineAssignmentDialog(QDialog):
             line_layout.addWidget(color_label)
             
             assignment_layout.addWidget(line_widget)
+        
+        # Apply suggestion if provided (pre-fill combos)
+        if self._suggested_assignments:
+            for line_idx, role in self._suggested_assignments.items():
+                if 0 <= line_idx < len(self.comboboxes) and role in _CAL_ASSIGNMENT_TO_COMBO:
+                    self.comboboxes[line_idx].setCurrentIndex(_CAL_ASSIGNMENT_TO_COMBO[role])
+                    self.assignments[line_idx] = role
         
         main_layout.addWidget(assignment_widget)
         
@@ -1050,9 +1170,8 @@ class CalibrationMixin:
                 imported_lines = self._parse_lnw_file(file_path, utm_zone, hemisphere)
                 if imported_lines is None:
                     return  # Error already shown
-                
-                # Show assignment dialog
-                dialog = LineAssignmentDialog(self, imported_lines)
+                suggested = _suggest_calibration_assignments_from_geometry(imported_lines)
+                dialog = LineAssignmentDialog(self, imported_lines, suggested)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return  # User cancelled
                 
@@ -1088,8 +1207,11 @@ class CalibrationMixin:
                     self._show_message("error", "Calibration Import",
                                      f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
                     return
-                # Show assignment dialog
-                dialog = LineAssignmentDialog(self, imported_lines)
+                file_basename = os.path.basename(file_path)
+                suggested = _suggest_calibration_assignments_from_metadata(file_path, file_basename, len(imported_lines))
+                if suggested is None:
+                    suggested = _suggest_calibration_assignments_from_geometry(imported_lines)
+                dialog = LineAssignmentDialog(self, imported_lines, suggested)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return  # User cancelled
                 
@@ -1125,7 +1247,11 @@ class CalibrationMixin:
                     self._show_message("error", "Calibration Import",
                                      f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
                     return
-                dialog = LineAssignmentDialog(self, imported_lines)
+                file_basename = os.path.basename(file_path)
+                suggested = _suggest_calibration_assignments_from_metadata(file_path, file_basename, len(imported_lines))
+                if suggested is None:
+                    suggested = _suggest_calibration_assignments_from_geometry(imported_lines)
+                dialog = LineAssignmentDialog(self, imported_lines, suggested)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return  # User cancelled
                 
@@ -1159,8 +1285,11 @@ class CalibrationMixin:
                     self._show_message("error", "Calibration Import",
                                      f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
                     return
-                # Show assignment dialog
-                dialog = LineAssignmentDialog(self, imported_lines)
+                file_basename = os.path.basename(file_path)
+                suggested = _suggest_calibration_assignments_from_metadata(file_path, file_basename, len(imported_lines))
+                if suggested is None:
+                    suggested = _suggest_calibration_assignments_from_geometry(imported_lines)
+                dialog = LineAssignmentDialog(self, imported_lines, suggested)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return  # User cancelled
                 
@@ -1601,16 +1730,56 @@ class CalibrationMixin:
         stats_text += f"Total Transit Time: {stats['total_transit_time_min']:.1f} min ({stats['total_transit_time_hours']:.2f} hr)\n"
         stats_text += f"Total Turn Time: {total_turn_time_min:.1f} min ({num_turns} turns × {turn_time_min:.1f} min)\n"
         stats_text += f"Total Time: {stats['total_time_min']:.1f} min ({stats['total_time_hours']:.2f} hr)\n"
+
+        # Calibration Waypoints (DMM)
+        dmm_heading = "Calibration Waypoints (DMM)"
+        stats_text += f"\n{dmm_heading}\n"
+        stats_text += "-" * len(dmm_heading) + "\n"
         if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
             pitch_start = self.pitch_line_points[0]
             pitch_end = self.pitch_line_points[1]
-            stats_text += f"\nPitch Start: {decimal_degrees_to_ddm(pitch_start[0], True)}, {decimal_degrees_to_ddm(pitch_start[1], False)}\n"
+            stats_text += f"Pitch Start: {decimal_degrees_to_ddm(pitch_start[0], True)}, {decimal_degrees_to_ddm(pitch_start[1], False)}\n"
             stats_text += f"Pitch End: {decimal_degrees_to_ddm(pitch_end[0], True)}, {decimal_degrees_to_ddm(pitch_end[1], False)}\n"
         if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
             roll_start = self.roll_line_points[0]
             roll_end = self.roll_line_points[1]
             stats_text += f"Roll Start: {decimal_degrees_to_ddm(roll_start[0], True)}, {decimal_degrees_to_ddm(roll_start[1], False)}\n"
             stats_text += f"Roll End: {decimal_degrees_to_ddm(roll_end[0], True)}, {decimal_degrees_to_ddm(roll_end[1], False)}\n"
+        if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 1:
+            h1_start = self.heading_lines[0][0]
+            h1_end = self.heading_lines[0][1]
+            stats_text += f"Heading1 Start: {decimal_degrees_to_ddm(h1_start[0], True)}, {decimal_degrees_to_ddm(h1_start[1], False)}\n"
+            stats_text += f"Heading1 End: {decimal_degrees_to_ddm(h1_end[0], True)}, {decimal_degrees_to_ddm(h1_end[1], False)}\n"
+        if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 2:
+            h2_start = self.heading_lines[1][0]
+            h2_end = self.heading_lines[1][1]
+            stats_text += f"Heading2 Start: {decimal_degrees_to_ddm(h2_start[0], True)}, {decimal_degrees_to_ddm(h2_start[1], False)}\n"
+            stats_text += f"Heading2 End: {decimal_degrees_to_ddm(h2_end[0], True)}, {decimal_degrees_to_ddm(h2_end[1], False)}\n"
+
+        # Calibration Waypoints (DDD)
+        ddd_heading = "Calibration Waypoints (DDD)"
+        stats_text += f"\n{ddd_heading}\n"
+        stats_text += "-" * len(ddd_heading) + "\n"
+        if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
+            pitch_start = self.pitch_line_points[0]
+            pitch_end = self.pitch_line_points[1]
+            stats_text += f"Pitch Start: {pitch_start[0]:.6f}, {pitch_start[1]:.6f}\n"
+            stats_text += f"Pitch End: {pitch_end[0]:.6f}, {pitch_end[1]:.6f}\n"
+        if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
+            roll_start = self.roll_line_points[0]
+            roll_end = self.roll_line_points[1]
+            stats_text += f"Roll Start: {roll_start[0]:.6f}, {roll_start[1]:.6f}\n"
+            stats_text += f"Roll End: {roll_end[0]:.6f}, {roll_end[1]:.6f}\n"
+        if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 1:
+            h1_start = self.heading_lines[0][0]
+            h1_end = self.heading_lines[0][1]
+            stats_text += f"Heading1 Start: {h1_start[0]:.6f}, {h1_start[1]:.6f}\n"
+            stats_text += f"Heading1 End: {h1_end[0]:.6f}, {h1_end[1]:.6f}\n"
+        if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 2:
+            h2_start = self.heading_lines[1][0]
+            h2_end = self.heading_lines[1][1]
+            stats_text += f"Heading2 Start: {h2_start[0]:.6f}, {h2_start[1]:.6f}\n"
+            stats_text += f"Heading2 End: {h2_end[0]:.6f}, {h2_end[1]:.6f}\n"
 
         return stats_text
 
@@ -1623,7 +1792,7 @@ class CalibrationMixin:
 
         stats_text = self._format_calibration_statistics_text(stats)
         if stats_text:
-            show_statistics_dialog(self, "Calibration Planning Statistics", stats_text)
+            show_statistics_dialog(self, "Calibration Survey Info", stats_text)
 
     def _update_cal_line_offset_from_pitch_line(self):
         """Calculate heading line offset from median depth along pitch line."""
