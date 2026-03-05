@@ -17,7 +17,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj
-from sat_planner import decimal_degrees_to_ddm
+from sat_planner import decimal_degrees_to_ddm, export_utils
 from sat_planner.utils_ui import show_statistics_dialog
 
 try:
@@ -774,113 +774,33 @@ class CalibrationMixin:
         self.last_export_dir = export_dir
         self._save_last_export_dir()
         try:
+            # --- Build common rows and write DDD/DMM/DMS CSV and TXT via export_utils ---
+            cal_rows = []
+            for num, name, pts in lines:
+                if name.lower().startswith('pitch'):
+                    line_name, start_label, end_label = 'Pitch', 'PLS', 'PLE'
+                elif name.lower().startswith('roll'):
+                    line_name, start_label, end_label = 'Roll', 'RLS', 'RLE'
+                elif name.lower().startswith('heading'):
+                    m = re.search(r'(\d+)', name)
+                    n = m.group(1) if m else '1'
+                    line_name, start_label, end_label = f'Heading{n}', f'H{n}S', f'H{n}E'
+                else:
+                    line_name, start_label, end_label = name, 'START', 'END'
+                cal_rows.append((num, line_name, start_label, pts[0][0], pts[0][1]))
+                cal_rows.append((num, line_name, end_label, pts[1][0], pts[1][1]))
+
             csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
-            with open(csv_file_path, 'w', newline='', encoding='utf-8') as csvfile:
-                csv_writer = csv.writer(csvfile)
-                csv_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude', 'Longitude'])
-                for num, name, pts in lines:
-                    if name.lower().startswith('pitch'):
-                        line_name, start_label, end_label = 'Pitch', 'PLS', 'PLE'
-                    elif name.lower().startswith('roll'):
-                        line_name, start_label, end_label = 'Roll', 'RLS', 'RLE'
-                    elif name.lower().startswith('heading'):
-                        m = re.search(r'(\d+)', name)
-                        n = m.group(1) if m else '1'
-                        line_name, start_label, end_label = f'Heading{n}', f'H{n}S', f'H{n}E'
-                    else:
-                        line_name, start_label, end_label = name, 'START', 'END'
-                    csv_writer.writerow([num, line_name, start_label, pts[0][0], pts[0][1]])
-                    csv_writer.writerow([num, line_name, end_label, pts[1][0], pts[1][1]])
-            def _deg_min(d):
-                deg = int(d)
-                min_val = (abs(d) - abs(deg)) * 60.0
-                return deg, min_val
-            def _deg_min_sec(d):
-                deg = int(d)
-                total_mins = (abs(d) - abs(deg)) * 60.0
-                mins = int(total_mins)
-                secs = (total_mins - mins) * 60.0
-                return deg, mins, secs
+            export_utils.write_ddd_csv(csv_file_path, cal_rows)
             ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
-            with open(ddm_file_path, 'w', newline='', encoding='utf-8') as ddmfile:
-                ddm_writer = csv.writer(ddmfile)
-                ddm_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Longitude (Deg)', 'Longitude (Min)'])
-                for num, name, pts in lines:
-                    if name.lower().startswith('pitch'):
-                        line_name, start_label, end_label = 'Pitch', 'PLS', 'PLE'
-                    elif name.lower().startswith('roll'):
-                        line_name, start_label, end_label = 'Roll', 'RLS', 'RLE'
-                    elif name.lower().startswith('heading'):
-                        m = re.search(r'(\d+)', name)
-                        n = m.group(1) if m else '1'
-                        line_name, start_label, end_label = f'Heading{n}', f'H{n}S', f'H{n}E'
-                    else:
-                        line_name, start_label, end_label = name, 'START', 'END'
-                    lat_deg, lat_min = _deg_min(pts[0][0])
-                    lon_deg, lon_min = _deg_min(pts[0][1])
-                    ddm_writer.writerow([num, line_name, start_label, lat_deg, lat_min, lon_deg, lon_min])
-                    lat_deg, lat_min = _deg_min(pts[1][0])
-                    lon_deg, lon_min = _deg_min(pts[1][1])
-                    ddm_writer.writerow([num, line_name, end_label, lat_deg, lat_min, lon_deg, lon_min])
+            export_utils.write_dmm_csv(ddm_file_path, cal_rows)
             dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
-            with open(dms_file_path, 'w', newline='', encoding='utf-8') as dmsfile:
-                dms_writer = csv.writer(dmsfile)
-                dms_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Latitude (Sec)', 'Longitude (Deg)', 'Longitude (Min)', 'Longitude (Sec)'])
-                for num, name, pts in lines:
-                    if name.lower().startswith('pitch'):
-                        line_name, start_label, end_label = 'Pitch', 'PLS', 'PLE'
-                    elif name.lower().startswith('roll'):
-                        line_name, start_label, end_label = 'Roll', 'RLS', 'RLE'
-                    elif name.lower().startswith('heading'):
-                        m = re.search(r'(\d+)', name)
-                        n = m.group(1) if m else '1'
-                        line_name, start_label, end_label = f'Heading{n}', f'H{n}S', f'H{n}E'
-                    else:
-                        line_name, start_label, end_label = name, 'START', 'END'
-                    lat_d, lat_m, lat_s = _deg_min_sec(pts[0][0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(pts[0][1])
-                    dms_writer.writerow([num, line_name, start_label, lat_d, lat_m, lat_s, lon_d, lon_m, lon_s])
-                    lat_d, lat_m, lat_s = _deg_min_sec(pts[1][0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(pts[1][1])
-                    dms_writer.writerow([num, line_name, end_label, lat_d, lat_m, lat_s, lon_d, lon_m, lon_s])
+            export_utils.write_dms_csv(dms_file_path, cal_rows)
             ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
-            with open(ddm_txt_file_path, 'w', encoding='utf-8') as ddm_txt_file:
-                for num, name, pts in lines:
-                    if name.lower().startswith('pitch'):
-                        start_label, end_label = 'PLS', 'PLE'
-                    elif name.lower().startswith('roll'):
-                        start_label, end_label = 'RLS', 'RLE'
-                    elif name.lower().startswith('heading'):
-                        m = re.search(r'(\d+)', name)
-                        n = m.group(1) if m else ''
-                        start_label, end_label = f'H{n}S', f'H{n}E'
-                    else:
-                        start_label, end_label = 'START', 'END'
-                    lat_d, lat_m = _deg_min(pts[0][0])
-                    lon_d, lon_m = _deg_min(pts[0][1])
-                    ddm_txt_file.write(f"{start_label} {lat_d} {lat_m} {lon_d} {lon_m}\n")
-                    lat_d, lat_m = _deg_min(pts[1][0])
-                    lon_d, lon_m = _deg_min(pts[1][1])
-                    ddm_txt_file.write(f"{end_label} {lat_d} {lat_m} {lon_d} {lon_m}\n")
+            export_utils.write_dmm_txt(ddm_txt_file_path, cal_rows)
             dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
-            with open(dms_txt_file_path, 'w', encoding='utf-8') as dms_txt_file:
-                for num, name, pts in lines:
-                    if name.lower().startswith('pitch'):
-                        start_label, end_label = 'PLS', 'PLE'
-                    elif name.lower().startswith('roll'):
-                        start_label, end_label = 'RLS', 'RLE'
-                    elif name.lower().startswith('heading'):
-                        m = re.search(r'(\d+)', name)
-                        n = m.group(1) if m else ''
-                        start_label, end_label = f'H{n}S', f'H{n}E'
-                    else:
-                        start_label, end_label = 'START', 'END'
-                    lat_d, lat_m, lat_s = _deg_min_sec(pts[0][0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(pts[0][1])
-                    dms_txt_file.write(f"{start_label} {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
-                    lat_d, lat_m, lat_s = _deg_min_sec(pts[1][0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(pts[1][1])
-                    dms_txt_file.write(f"{end_label} {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
+            export_utils.write_dms_txt(dms_txt_file_path, cal_rows)
+
             schema = {'geometry': 'LineString', 'properties': {'line_num': 'int', 'line_name': 'str'}}
             crs_epsg = 'EPSG:4326'
             features = []
@@ -916,20 +836,7 @@ class CalibrationMixin:
                     coords = " ".join(f"{lat:.6f} {lon:.6f}" for lat, lon in pts)
                     f.write(f'_LINE {name} {line_index} {ts} 0 {coords} "\n')
             txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
-            with open(txt_file_path, 'w', encoding='utf-8') as f:
-                for num, name, pts in lines:
-                    if name.lower().startswith('pitch'):
-                        start_label, end_label = 'PLS', 'PLE'
-                    elif name.lower().startswith('roll'):
-                        start_label, end_label = 'RLS', 'RLE'
-                    elif name.lower().startswith('heading'):
-                        m = re.search(r'(\d+)', name)
-                        n = m.group(1) if m else ''
-                        start_label, end_label = f'H{n}S', f'H{n}E'
-                    else:
-                        start_label, end_label = 'START', 'END'
-                    f.write(f"{start_label} {pts[0][0]:.6f} {pts[0][1]:.6f}\n")
-                    f.write(f"{end_label} {pts[1][0]:.6f} {pts[1][1]:.6f}\n")
+            export_utils.write_ddd_txt(txt_file_path, cal_rows)
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
             stats = self._calculate_calibration_survey_statistics()
             if stats:

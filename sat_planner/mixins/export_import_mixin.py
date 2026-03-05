@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QFileDialog
 
 from sat_planner import GEOSPATIAL_LIBS_AVAILABLE, decimal_degrees_to_ddm
 from sat_planner.constants import LineString, fiona, pyproj
+from sat_planner import export_utils
 
 try:
     from shapely.geometry import mapping
@@ -157,141 +158,32 @@ class ExportImportMixin:
             if mapping is None:
                 raise ImportError("shapely.geometry.mapping is required for shapefile export")
 
-            # --- Export to CSV ---
-            # CSV files for decimal degrees always use _DD suffix
-            csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
-            with open(csv_file_path, 'w', newline='') as csvfile:
-                csv_writer = csv.writer(csvfile)
-                csv_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude', 'Longitude'])
-                # Main survey lines
-                for i, line in enumerate(self.survey_lines_data):
-                    if i % 2 == 0:  # Even lines - normal order
-                        start, end = line[0], line[1]
-                    else:  # Odd lines - flipped order
-                        start, end = line[1], line[0]
-                    start_label = f'L{i+1}S'
-                    end_label = f'L{i+1}E'
-                    line_name = f'ReferenceLine{i + 1}'
-                    csv_writer.writerow([i + 1, line_name, start_label, start[0], start[1]])
-                    csv_writer.writerow([i + 1, line_name, end_label, end[0], end[1]])
-                # Crossline
-                if self.cross_line_data:
-                    csv_writer.writerow([0, 'Crossline', 'CLS', self.cross_line_data[0][0], self.cross_line_data[0][1]])
-                    csv_writer.writerow([0, 'Crossline', 'CLE', self.cross_line_data[1][0], self.cross_line_data[1][1]])
-            
-            # --- Export to DDM format (Decimal Minutes): deg and min columns ---
-            def _deg_min(d):
-                deg = int(d)
-                min_val = (abs(d) - abs(deg)) * 60.0
-                return deg, min_val
-            def _deg_min_sec(d):
-                deg = int(d)
-                total_mins = (abs(d) - abs(deg)) * 60.0
-                mins = int(total_mins)
-                secs = (total_mins - mins) * 60.0
-                return deg, mins, secs
-            ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
-            with open(ddm_file_path, 'w', newline='', encoding='utf-8') as ddmfile:
-                ddm_writer = csv.writer(ddmfile)
-                ddm_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Longitude (Deg)', 'Longitude (Min)'])
-                # Main survey lines
-                for i, line in enumerate(self.survey_lines_data):
-                    if i % 2 == 0:  # Even lines - normal order
-                        start, end = line[0], line[1]
-                    else:  # Odd lines - flipped order
-                        start, end = line[1], line[0]
-                    start_label = f'L{i+1}S'
-                    end_label = f'L{i+1}E'
-                    line_name = f'ReferenceLine{i + 1}'
-                    lat_deg, lat_min = _deg_min(start[0])
-                    lon_deg, lon_min = _deg_min(start[1])
-                    ddm_writer.writerow([i + 1, line_name, start_label, lat_deg, lat_min, lon_deg, lon_min])
-                    lat_deg, lat_min = _deg_min(end[0])
-                    lon_deg, lon_min = _deg_min(end[1])
-                    ddm_writer.writerow([i + 1, line_name, end_label, lat_deg, lat_min, lon_deg, lon_min])
-                # Crossline
-                if self.cross_line_data:
-                    lat_deg, lat_min = _deg_min(self.cross_line_data[0][0])
-                    lon_deg, lon_min = _deg_min(self.cross_line_data[0][1])
-                    ddm_writer.writerow([0, 'Crossline', 'CLS', lat_deg, lat_min, lon_deg, lon_min])
-                    lat_deg, lat_min = _deg_min(self.cross_line_data[1][0])
-                    lon_deg, lon_min = _deg_min(self.cross_line_data[1][1])
-                    ddm_writer.writerow([0, 'Crossline', 'CLE', lat_deg, lat_min, lon_deg, lon_min])
-            
-            # --- Export to DMS format (Degrees Minutes Seconds): deg, min, sec columns ---
-            dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
-            with open(dms_file_path, 'w', newline='', encoding='utf-8') as dmsfile:
-                dms_writer = csv.writer(dmsfile)
-                dms_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Latitude (Sec)', 'Longitude (Deg)', 'Longitude (Min)', 'Longitude (Sec)'])
-                for i, line in enumerate(self.survey_lines_data):
-                    if i % 2 == 0:
-                        start, end = line[0], line[1]
-                    else:
-                        start, end = line[1], line[0]
-                    start_label = f'L{i+1}S'
-                    end_label = f'L{i+1}E'
-                    line_name = f'ReferenceLine{i + 1}'
-                    lat_d, lat_m, lat_s = _deg_min_sec(start[0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(start[1])
-                    dms_writer.writerow([i + 1, line_name, start_label, lat_d, lat_m, lat_s, lon_d, lon_m, lon_s])
-                    lat_d, lat_m, lat_s = _deg_min_sec(end[0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(end[1])
-                    dms_writer.writerow([i + 1, line_name, end_label, lat_d, lat_m, lat_s, lon_d, lon_m, lon_s])
-                if self.cross_line_data:
-                    lat_d, lat_m, lat_s = _deg_min_sec(self.cross_line_data[0][0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(self.cross_line_data[0][1])
-                    dms_writer.writerow([0, 'Crossline', 'CLS', lat_d, lat_m, lat_s, lon_d, lon_m, lon_s])
-                    lat_d, lat_m, lat_s = _deg_min_sec(self.cross_line_data[1][0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(self.cross_line_data[1][1])
-                    dms_writer.writerow([0, 'Crossline', 'CLE', lat_d, lat_m, lat_s, lon_d, lon_m, lon_s])
-            
-            # --- Export to _DMM.txt: no header, space-separated Point Label, Lat (deg), Lat (min), Lon (deg), Lon (min) ---
-            ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
-            with open(ddm_txt_file_path, 'w', encoding='utf-8') as ddm_txt_file:
-                for i, line in enumerate(self.survey_lines_data):
-                    if i % 2 == 0:
-                        start, end = line[0], line[1]
-                    else:
-                        start, end = line[1], line[0]
-                    start_label = f'L{i+1}S'
-                    end_label = f'L{i+1}E'
-                    lat_d, lat_m = _deg_min(start[0])
-                    lon_d, lon_m = _deg_min(start[1])
-                    ddm_txt_file.write(f"{start_label} {lat_d} {lat_m} {lon_d} {lon_m}\n")
-                    lat_d, lat_m = _deg_min(end[0])
-                    lon_d, lon_m = _deg_min(end[1])
-                    ddm_txt_file.write(f"{end_label} {lat_d} {lat_m} {lon_d} {lon_m}\n")
-                if self.cross_line_data:
-                    lat_d, lat_m = _deg_min(self.cross_line_data[0][0])
-                    lon_d, lon_m = _deg_min(self.cross_line_data[0][1])
-                    ddm_txt_file.write(f"CLS {lat_d} {lat_m} {lon_d} {lon_m}\n")
-                    lat_d, lat_m = _deg_min(self.cross_line_data[1][0])
-                    lon_d, lon_m = _deg_min(self.cross_line_data[1][1])
-                    ddm_txt_file.write(f"CLE {lat_d} {lat_m} {lon_d} {lon_m}\n")
+            # --- Build common rows (line_num, line_name, point_label, lat, lon) for reference survey ---
+            ref_rows = []
+            for i, line in enumerate(self.survey_lines_data):
+                if i % 2 == 0:
+                    start, end = line[0], line[1]
+                else:
+                    start, end = line[1], line[0]
+                line_name = f'ReferenceLine{i + 1}'
+                ref_rows.append((i + 1, line_name, f'L{i+1}S', start[0], start[1]))
+                ref_rows.append((i + 1, line_name, f'L{i+1}E', end[0], end[1]))
+            if self.cross_line_data:
+                ref_rows.append((0, 'Crossline', 'CLS', self.cross_line_data[0][0], self.cross_line_data[0][1]))
+                ref_rows.append((0, 'Crossline', 'CLE', self.cross_line_data[1][0], self.cross_line_data[1][1]))
 
-            # --- Export to _DMS.txt: no header, space-separated Point Label, Lat (deg), Lat (min), Lat (sec), Lon (deg), Lon (min), Lon (sec) ---
+            csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
+            export_utils.write_ddd_csv(csv_file_path, ref_rows, newline='')
+            ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
+            export_utils.write_dmm_csv(ddm_file_path, ref_rows)
+            dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
+            export_utils.write_dms_csv(dms_file_path, ref_rows)
+            ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
+            export_utils.write_dmm_txt(ddm_txt_file_path, ref_rows)
             dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
-            with open(dms_txt_file_path, 'w', encoding='utf-8') as dms_txt_file:
-                for i, line in enumerate(self.survey_lines_data):
-                    if i % 2 == 0:
-                        start, end = line[0], line[1]
-                    else:
-                        start, end = line[1], line[0]
-                    start_label = f'L{i+1}S'
-                    end_label = f'L{i+1}E'
-                    lat_d, lat_m, lat_s = _deg_min_sec(start[0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(start[1])
-                    dms_txt_file.write(f"{start_label} {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
-                    lat_d, lat_m, lat_s = _deg_min_sec(end[0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(end[1])
-                    dms_txt_file.write(f"{end_label} {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
-                if self.cross_line_data:
-                    lat_d, lat_m, lat_s = _deg_min_sec(self.cross_line_data[0][0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(self.cross_line_data[0][1])
-                    dms_txt_file.write(f"CLS {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
-                    lat_d, lat_m, lat_s = _deg_min_sec(self.cross_line_data[1][0])
-                    lon_d, lon_m, lon_s = _deg_min_sec(self.cross_line_data[1][1])
-                    dms_txt_file.write(f"CLE {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
+            export_utils.write_dms_txt(dms_txt_file_path, ref_rows)
+            txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
+            export_utils.write_ddd_txt(txt_file_path, ref_rows)
 
             # --- Export to ESRI Shapefile (.shp) ---
             schema = {
@@ -593,24 +485,6 @@ class ExportImportMixin:
                 f.write("- Times calculated based on specified survey speed\n")
                 f.write("- Crossline lead-in/out distance extends beyond main survey area\n")
                 f.write("- Survey pattern optimized for efficiency\n")
-
-            # --- Export to Text format (point label, latitude, longitude) ---
-            txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
-            with open(txt_file_path, 'w') as f:
-                # Main survey lines
-                for i, line in enumerate(self.survey_lines_data):
-                    if i % 2 == 0:  # Even lines - normal order
-                        start, end = line[0], line[1]
-                    else:  # Odd lines - flipped order
-                        start, end = line[1], line[0]
-                    start_label = f'L{i+1}S'
-                    end_label = f'L{i+1}E'
-                    f.write(f"{start_label} {start[0]:.6f} {start[1]:.6f}\n")
-                    f.write(f"{end_label} {end[0]:.6f} {end[1]:.6f}\n")
-                # Crossline
-                if self.cross_line_data:
-                    f.write(f"CLS {self.cross_line_data[0][0]:.6f} {self.cross_line_data[0][1]:.6f}\n")
-                    f.write(f"CLE {self.cross_line_data[1][0]:.6f} {self.cross_line_data[1][1]:.6f}\n")
 
             # --- Export Survey Plan as PNG ---
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")

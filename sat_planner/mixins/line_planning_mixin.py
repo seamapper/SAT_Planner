@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextCursor
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, LineString, fiona
-from sat_planner import decimal_degrees_to_ddm
+from sat_planner import decimal_degrees_to_ddm, export_utils
 from sat_planner.utils_ui import show_statistics_dialog
 
 try:
@@ -261,54 +261,22 @@ class LinePlanningMixin:
         else:
             export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
         try:
+            # --- Build common rows and write DDD/DMM/DMS CSV and TXT via export_utils ---
+            line_planning_rows = [(1, export_name, i + 1, lat, lon) for i, (lat, lon) in enumerate(self.line_planning_points)]
+
             csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
-            with open(csv_file_path, 'w', newline='') as csvfile:
-                csv_writer = csv.writer(csvfile)
-                csv_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude', 'Longitude'])
-                for i, (lat, lon) in enumerate(self.line_planning_points):
-                    csv_writer.writerow([1, export_name, i + 1, lat, lon])
+            export_utils.write_ddd_csv(csv_file_path, line_planning_rows)
             txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
-            with open(txt_file_path, 'w', encoding='utf-8') as f:
-                for i, (lat, lon) in enumerate(self.line_planning_points):
-                    f.write(f"{i + 1} {lat:.6f} {lon:.6f}\n")
-            def _deg_min(d):
-                deg = int(d)
-                min_val = (abs(d) - abs(deg)) * 60.0
-                return deg, min_val
-            def _deg_min_sec(d):
-                deg = int(d)
-                total_mins = (abs(d) - abs(deg)) * 60.0
-                mins = int(total_mins)
-                secs = (total_mins - mins) * 60.0
-                return deg, mins, secs
+            export_utils.write_ddd_txt(txt_file_path, line_planning_rows)
             ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
-            with open(ddm_file_path, 'w', newline='', encoding='utf-8') as ddmfile:
-                ddm_writer = csv.writer(ddmfile)
-                ddm_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Longitude (Deg)', 'Longitude (Min)'])
-                for i, (lat, lon) in enumerate(self.line_planning_points):
-                    lat_deg, lat_min = _deg_min(lat)
-                    lon_deg, lon_min = _deg_min(lon)
-                    ddm_writer.writerow([1, export_name, i + 1, lat_deg, lat_min, lon_deg, lon_min])
+            export_utils.write_dmm_csv(ddm_file_path, line_planning_rows)
             dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
-            with open(dms_file_path, 'w', newline='', encoding='utf-8') as dmsfile:
-                dms_writer = csv.writer(dmsfile)
-                dms_writer.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Latitude (Sec)', 'Longitude (Deg)', 'Longitude (Min)', 'Longitude (Sec)'])
-                for i, (lat, lon) in enumerate(self.line_planning_points):
-                    lat_d, lat_m, lat_s = _deg_min_sec(lat)
-                    lon_d, lon_m, lon_s = _deg_min_sec(lon)
-                    dms_writer.writerow([1, export_name, i + 1, lat_d, lat_m, lat_s, lon_d, lon_m, lon_s])
+            export_utils.write_dms_csv(dms_file_path, line_planning_rows)
             ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
-            with open(ddm_txt_file_path, 'w', encoding='utf-8') as ddm_txt_file:
-                for i, (lat, lon) in enumerate(self.line_planning_points):
-                    lat_d, lat_m = _deg_min(lat)
-                    lon_d, lon_m = _deg_min(lon)
-                    ddm_txt_file.write(f"{i + 1} {lat_d} {lat_m} {lon_d} {lon_m}\n")
+            export_utils.write_dmm_txt(ddm_txt_file_path, line_planning_rows)
             dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
-            with open(dms_txt_file_path, 'w', encoding='utf-8') as dms_txt_file:
-                for i, (lat, lon) in enumerate(self.line_planning_points):
-                    lat_d, lat_m, lat_s = _deg_min_sec(lat)
-                    lon_d, lon_m, lon_s = _deg_min_sec(lon)
-                    dms_txt_file.write(f"{i + 1} {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
+            export_utils.write_dms_txt(dms_txt_file_path, line_planning_rows)
+
             shapefile_path = None
             if LineString and fiona and _shapely_mapping:
                 schema = {'geometry': 'LineString', 'properties': {'name': 'str'}}
