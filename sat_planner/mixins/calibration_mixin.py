@@ -1421,8 +1421,9 @@ class CalibrationMixin:
                     pass
             if not params or not isinstance(params, dict) or params.get('line_offset') is None:
                 self._update_cal_line_offset_from_pitch_line()
+            # Suggested export name: from params, else from loaded GeoTIFF, else defer if GMRT download, else pitch-line or generic
             if not params or not isinstance(params, dict) or not params.get('export_name'):
-                self._update_cal_export_name_from_pitch_line()
+                self._set_cal_export_name_after_import()
             self._update_pitch_line_button_states()
             self._update_roll_line_button_states()
             if hasattr(self, 'add_heading_lines_btn'):
@@ -1929,14 +1930,27 @@ class CalibrationMixin:
         if hasattr(self, 'set_cal_info_text'):
             self.set_cal_info_text("Heading lines have been added north and south of the pitch line.")
 
+    def _set_cal_export_name_after_import(self):
+        """Set suggested calibration export name after import using same convention as drawing: Cal_{offset}m_{heading}deg from pitch line."""
+        if not hasattr(self, 'cal_export_name_entry'):
+            return
+        # If Download GMRT is checked, leave empty; GMRT load completion will set name from pitch line (offset + heading) after GeoTIFF loads
+        if getattr(self, 'cal_download_gmrt_checkbox', None) and self.cal_download_gmrt_checkbox.isChecked():
+            return
+        # Use same naming as drawn survey: depth (offset) from pitch line + orientation (heading) from pitch line
+        self._update_cal_line_offset_from_pitch_line()  # fill offset from GeoTIFF if loaded
+        self._update_cal_export_name_from_pitch_line()
+        if not self.cal_export_name_entry.text().strip():
+            self.cal_export_name_entry.setText(f"Cal_import_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
     def _update_cal_export_name_from_pitch_line(self):
-        """Update calibration export name from pitch line and offset."""
+        """Update calibration export name from pitch line and offset (same convention as when drawing: Cal_{offset}m_{heading}deg)."""
         if not hasattr(self, 'pitch_line_points') or len(self.pitch_line_points) != 2:
             return
         try:
-            offset_val = float(self.cal_line_offset_entry.text())
-        except Exception:
-            return
+            offset_val = float(self.cal_line_offset_entry.text().strip() or "0")
+        except (ValueError, TypeError):
+            offset_val = 0
         (lat1, lon1), (lat2, lon2) = self.pitch_line_points
         try:
             geod = pyproj.Geod(ellps="WGS84")

@@ -148,6 +148,12 @@ class GMRTDownloadMixin:
             if hasattr(self, "_load_geotiff_from_path"):
                 self._load_geotiff_from_path(path_or_error)
             log_func("GMRT grid loaded.", append=True)
+            # If this was a calibration-import GMRT download, set suggested export name from pitch line (offset + heading), same as when drawing
+            if (hasattr(self, "param_notebook") and self.param_notebook.currentIndex() == 0
+                    and hasattr(self, "cal_export_name_entry") and not self.cal_export_name_entry.text().strip()
+                    and hasattr(self, "_update_cal_line_offset_from_pitch_line") and hasattr(self, "_update_cal_export_name_from_pitch_line")):
+                self._update_cal_line_offset_from_pitch_line()
+                self._update_cal_export_name_from_pitch_line()
         else:
             self._show_message("error", "GMRT Download", path_or_error)
             log_func(f"GMRT download failed: {path_or_error}", append=True)

@@ -1026,6 +1026,8 @@ class PlottingMixin:
             if self.geotiff_dataset_original:
                 self.geotiff_dataset_original.close()
                 self.geotiff_dataset_original = None
+            if hasattr(self, 'current_geotiff_path'):
+                self.current_geotiff_path = None
             self.geotiff_data_array = None
             self.geotiff_extent = None
             self.geotiff_original_extent = None

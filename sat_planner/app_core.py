@@ -91,6 +91,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.central_point_coords = (None, None)  # Stores (lat, lon) of central point
 
         self.geotiff_dataset_original = None  # Original rasterio dataset (keeps its CRS)
+        self.current_geotiff_path = None  # Path of the currently loaded GeoTIFF (for suggested export names)
         self.geotiff_data_array = None  # NumPy array of *reprojected* GeoTIFF elevation data (WGS84)
         self.geotiff_extent = None  # [left, right, bottom, top] of *reprojected* data
         self.geotiff_image_plot = None  # Matplotlib imshow object for GeoTIFF

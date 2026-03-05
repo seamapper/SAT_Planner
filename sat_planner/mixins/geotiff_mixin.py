@@ -504,6 +504,10 @@ class GeoTIFFMixin:
             # Close progress window
             progress_window.close()
 
+            # Remember path for suggested export names (e.g. after calibration import)
+            if hasattr(self, 'current_geotiff_path'):
+                self.current_geotiff_path = file_path
+
             # Enable Remove GeoTIFF, Pick Center, and Zoom to GeoTIFF buttons
             if hasattr(self, 'remove_geotiff_btn'):
                 self.remove_geotiff_btn.setEnabled(True)
