@@ -124,6 +124,18 @@ class GMRTDownloadMixin:
         if not save_path.lower().endswith((".tif", ".tiff")):
             save_path = save_path + ".tif"
 
+        # Use this directory as default for export dialogs (calibration, reference, line)
+        gmrt_dir = os.path.dirname(save_path)
+        if gmrt_dir and os.path.isdir(gmrt_dir):
+            if hasattr(self, "last_export_dir"):
+                self.last_export_dir = gmrt_dir
+                if hasattr(self, "_save_last_export_dir"):
+                    self._save_last_export_dir()
+            if hasattr(self, "last_used_dir"):
+                self.last_used_dir = gmrt_dir
+                if hasattr(self, "_save_last_used_dir"):
+                    self._save_last_used_dir()
+
         _log("Downloading GMRT grid...", append=True)
         params = {
             "west": west,
