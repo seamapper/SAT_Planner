@@ -170,6 +170,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         # Track previous tab for clearing on tab switch
         self.previous_tab_index = 0
         self.tab_switch_initialized = False  # Flag to prevent clearing on first tab change
+        self.activity_log_collapsed = True
 
         # Pitch/center/hover motion (line planning in LinePlanningMixin)
         def _on_pitch_line_motion(self, event):
@@ -508,6 +509,21 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         dialog.exec()
 
+    def _set_activity_log_collapsed(self, collapsed):
+        """Collapse/expand the activity log side panel."""
+        self.activity_log_collapsed = bool(collapsed)
+        if hasattr(self, 'activity_log_groupbox'):
+            self.activity_log_groupbox.setVisible(not self.activity_log_collapsed)
+        if hasattr(self, 'activity_log_toggle_btn'):
+            self.activity_log_toggle_btn.setText("▶" if self.activity_log_collapsed else "◀")
+            self.activity_log_toggle_btn.setChecked(not self.activity_log_collapsed)
+        if hasattr(self, 'activity_log_panel_widget'):
+            self.activity_log_panel_widget.setFixedWidth(22 if self.activity_log_collapsed else 350)
+
+    def _toggle_activity_log_panel(self):
+        """Toggle activity log panel visibility."""
+        self._set_activity_log_collapsed(not getattr(self, 'activity_log_collapsed', False))
+
     def _setup_layout(self):
         try:
             # Create vertical layout for right side (map + profile)
@@ -550,8 +566,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 bottom_strip_layout = QHBoxLayout()
                 bottom_strip_layout.setContentsMargins(0, 0, 0, 0)
                 if hasattr(self, 'activity_log_groupbox'):
-                    self.activity_log_groupbox.setFixedWidth(320)
-                    bottom_strip_layout.addWidget(self.activity_log_groupbox)  # Left: Activity Log
+                    if hasattr(self, 'activity_log_panel_widget'):
+                        bottom_strip_layout.addWidget(self.activity_log_panel_widget)  # Left: collapsible Activity Log panel
                 bottom_strip_layout.addWidget(profile_widget, 1)  # Right: profile + options, stretch with window
                 bottom_strip_widget = QWidget()
                 bottom_strip_widget.setLayout(bottom_strip_layout)
@@ -778,6 +794,19 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         param_layout.addWidget(test_planning_groupbox)
 
         # --- Activity Log GroupBox (reparented to right-side bottom strip in _setup_layout) ---
+        self.activity_log_panel_widget = QWidget()
+        activity_panel_layout = QHBoxLayout(self.activity_log_panel_widget)
+        activity_panel_layout.setContentsMargins(0, 0, 0, 0)
+        activity_panel_layout.setSpacing(2)
+
+        self.activity_log_toggle_btn = QPushButton("Activity\nLog\n▶")
+        self.activity_log_toggle_btn.setCheckable(True)
+        self.activity_log_toggle_btn.setChecked(False)
+        self.activity_log_toggle_btn.setFixedWidth(24)
+        self.activity_log_toggle_btn.setToolTip("Show/hide Activity Log")
+        self.activity_log_toggle_btn.clicked.connect(self._toggle_activity_log_panel)
+        activity_panel_layout.addWidget(self.activity_log_toggle_btn)
+
         self.activity_log_groupbox = QGroupBox("Activity Log")
         activity_log_layout = QVBoxLayout(self.activity_log_groupbox)
 
@@ -787,6 +816,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.activity_log_text.setStyleSheet("background-color: #2d2d2d; color: #e0e0e0;")
         # Let it expand to fill the groupbox - no height constraint
         activity_log_layout.addWidget(self.activity_log_text, 1)  # Stretch factor 1 to fill available space
+        activity_panel_layout.addWidget(self.activity_log_groupbox, 1)
+        self._set_activity_log_collapsed(getattr(self, 'activity_log_collapsed', True))
 
         self.param_scroll.setWidget(param_widget)
 
