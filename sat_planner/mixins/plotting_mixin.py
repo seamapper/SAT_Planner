@@ -980,17 +980,19 @@ class PlottingMixin:
                 # Fallback to auto if calculation fails
                 self.ax.set_aspect('auto')
 
-            # Remove any existing legend before adding a new one to prevent shrinking
-            handles, labels = self.ax.get_legend_handles_labels()
-            if handles and any(label and not label.startswith('_') for label in labels):
-                self.ax.legend()
-            else:
-                if self.ax.get_legend() is not None:
-                    self.ax.get_legend().remove()
-
             # Plot NOAA ENC Charts overlay if enabled (plot last so it overlays everything)
             if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
                 self._load_and_plot_noaa_charts(force_reload=True)
+
+            # Draw legend after all overlays so it sits above every layer.
+            handles, labels = self.ax.get_legend_handles_labels()
+            if handles and any(label and not label.startswith('_') for label in labels):
+                legend = self.ax.legend()
+                if legend is not None:
+                    legend.set_zorder(1000)
+            else:
+                if self.ax.get_legend() is not None:
+                    self.ax.get_legend().remove()
 
             self.canvas.draw_idle()
 

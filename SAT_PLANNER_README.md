@@ -8,22 +8,22 @@ A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing
 
 The SAT/QAT Planner is a desktop application designed for planning and visualizing multibeam testing operations. It supports three main planning modes:
 - **Calibration Survey Planning**: Plan pitch, roll, and heading calibration lines
-- **Reference Survey Planning**: Generate parallel survey lines with customizable parameters
+- **Accuracy Survey Planning**: Generate parallel survey lines with customizable parameters
 - **Line Planning**: Interactive line drawing with real-time elevation profiles
 
 ## Features
 
 ### Core Functionality
-- **Multi-tab Interface**: Separate tabs for Calibration, Reference, and Line planning (left panel)
+- **Multi-tab Interface**: Separate tabs for Calibration, Accuracy, and Line planning (left panel)
 - **Dark Theme**: Qt GUI uses a dark theme; map (matplotlib) keeps default styling
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
-- **GMRT Download**: Optional download of GMRT bathymetry GeoTIFF when importing surveys (Calibration, Reference, Line tabs; configurable buffer)
+- **GMRT Download**: Optional download of GMRT bathymetry GeoTIFF when importing surveys (Calibration, Accuracy, Line tabs; configurable buffer)
 - **Download GMRT GeoTIFF**: Button opens a separate "Download GMRT Grid" dialog; when split (topo/bathy) is used, SAT Planner loads the bathy grid
 - **Dynamic Resolution**: Automatically adjust GeoTIFF resolution based on zoom level
 - **Interactive Plotting**: Pan (middle mouse), zoom (scroll), no toolbar
 - **Real-time Statistics**: Survey distances, times, and comprehensive statistics
 - **Elevation Profiles**: View elevation and slope profiles for drawn lines
-- **Activity Log**: Fixed on the right (320 px) below the map
+- **Activity Log**: Collapsible side panel below the map
 - **Export**: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW, Shapefile; statistics and *_info.txt with waypoint sections (DMM then DDD)
 - **Survey Import**: DDD, DMS, DMM, LNW, CSV, GeoJSON
 
@@ -36,7 +36,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Validation when heading offset > 2× shallowest depth
 - Export via shared `export_utils` (DDD/DMM/DMS CSV/TXT, asciiplan, LNW)
 
-### Reference Survey Planning
+### Accuracy Survey Planning
 - Parallel lines with line length, spacing, heading, speed, turn time
 - Optional GMRT download on import; import from DDD/DMS/DMM/LNW, CSV, GeoJSON; **suggested crossline and reference line order**
 - **Reference Survey Info** dialog and *_info.txt: **Reference Waypoints (DMM)** and **Reference Waypoints (DDD)** (L1S/L1E, …, CLS/CLE)
@@ -52,6 +52,13 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ### GeoTIFF Visualization
 - Elevation/slope display; hillshade; dynamic resolution; multiple CRS
 - Axis labels in degrees–decimal minutes (DDM)
+- Contour interval and slope min/max updates are debounced while typing
+- Survey legend is drawn above map overlays/layers
+
+### GeoJSON Metadata
+- Calibration, Accuracy, and Line GeoJSON exports include `survey_speed`
+- Calibration, Accuracy, and Line GeoJSON exports include saved `geotiff_path`
+- On import, SAT Planner attempts to reload the saved GeoTIFF path; if unavailable, import continues with a warning
 
 ### Download GMRT Grid Dialog
 - **Download GMRT GeoTIFF** opens the "Download GMRT Grid" window (separate from main app)
@@ -87,11 +94,11 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ## Usage
 
 1. **Load GeoTIFF** (optional): "Load GeoTIFF" or "Download GMRT GeoTIFF" (opens GMRT dialog; if split used, app loads bathy grid).
-2. **Planning mode**: Calibration, Reference, or Line tab.
+2. **Planning mode**: Calibration, Accuracy, or Line tab.
 3. **Configure** parameters, generate or draw, view statistics, export.
 
 ### Map Controls (no toolbar)
-- **Left click**: Add waypoint (drawing); pick points in Calibration/Reference/Line.
+- **Left click**: Add waypoint (drawing); pick points in Calibration/Accuracy/Line.
 - **Right click**: Finish drawing line.
 - **Middle mouse**: Pan.
 - **Scroll**: Zoom.
@@ -106,13 +113,14 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **`SAT_Planner_PyQt.py`** – Entry point.
 - **`sat_planner/`** – Core package:
   - **`constants.py`** – Version, config path.
-  - **`export_utils.py`** – Shared export: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points (used by Calibration, Reference, Line planning).
+  - **`export_utils.py`** – Shared export: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points (used by Calibration, Accuracy, Line planning).
   - **`utils_geo.py`**, **`utils_ui.py`** – Helpers.
   - **`gmrt_dialog/`** – Embedded GMRT Download dialog (GeoTIFF-only, optional split).
-  - **`mixins/`** – Basemap, GeoTIFF, Plotting, SurveyParsers, GMRTDownload, Reference, Calibration, LinePlanning, Profiles, MapInteraction, ExportImport, Config.
+  - **`mixins/`** – Basemap, GeoTIFF, Plotting, SurveyParsers, GMRTDownload, Reference/Accuracy, Calibration, LinePlanning, Profiles, MapInteraction, ExportImport, Config.
 
 ## Version History
 
+- **v2026.11**: UI and workflow updates. Accuracy tab naming in UI/docs (formerly Reference). Import/Export button labels updated (Import/Export Accuracy Survey, Import/Export Calibration Survey, Import/Export Line Survey) and reordered on tabs. "Download GMRT" defaults to unchecked and placement updated in import/export groups. Activity Log changed to collapsible side panel. GeoJSON export/import now includes `survey_speed` and saved `geotiff_path` for Calibration/Accuracy/Line; missing GeoTIFF path does not block import (warning + continue). Contour interval and slope min/max redraws are debounced while typing. Survey legend now draws above all overlays.
 - **v2026.10**: Shared `export_utils` (DDD/DMM/DMS CSV/TXT, asciiplan, LNW; UTM from points). Calibration: Reverse Line Direction, import suggestion (metadata/geometry), Calibration Survey Info + Calibration Waypoints (DMM/DDD) in dialog and *_info.txt. Reference: import suggestion, Reference Survey Info + Reference Waypoints (DMM/DDD). Line planning: Reverse Line Direction, Survey Info + Line Plan Waypoints (DMM/DDD). Exe build uses version from constants; output `SAT_Planner_v2026.10.exe`.
 - **v2026.09+**: GMRT dialog ("Download GMRT GeoTIFF"), "Download GMRT Grid" window, GeoTIFF-only, cell resolution 100/200/400/Custom (50 m), large-area warning >16M pixels, split → load bathy, "Close GMRT Downloader" button, Activity Log 320 px.
 - **v2026.08**: Dark theme, Activity Log on right, GMRT on import (Calibration/Reference/Line), Line import DDD/DMS/DMM/LNW/CSV/GeoJSON, no nav toolbar (scroll zoom, middle-mouse pan).
