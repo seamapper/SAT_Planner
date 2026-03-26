@@ -683,10 +683,19 @@ class GeoTIFFMixin:
             pass  # Silently handle errors
 
     def _on_contour_interval_changed(self):
-        """Handle contour interval entry change. Keeps all entry fields synchronized."""
+        """Handle contour interval entry change with a short typing debounce."""
+        if not hasattr(self, '_contour_interval_update_timer'):
+            self._contour_interval_update_timer = QTimer()
+            self._contour_interval_update_timer.setSingleShot(True)
+            self._contour_interval_update_timer.timeout.connect(self._apply_contour_interval_changed)
+        self._contour_interval_update_timer.start(450)
+
+    def _apply_contour_interval_changed(self):
+        """Apply contour interval updates after debounce delay."""
+        # Keep all entry fields synchronized.
         # Sync all entry fields (calibration, reference, and line planning)
         try:
-            if hasattr(self, '_syncing_contour_interval'):
+            if getattr(self, '_syncing_contour_interval', False):
                 return  # Prevent infinite loop
             self._syncing_contour_interval = True
             try:
@@ -759,7 +768,15 @@ class GeoTIFFMixin:
             pass  # Silently handle errors
 
     def _on_slope_overlay_min_changed(self):
-        """Handle slope overlay min entry change."""
+        """Handle slope overlay min entry change with a short typing debounce."""
+        if not hasattr(self, '_slope_overlay_min_update_timer'):
+            self._slope_overlay_min_update_timer = QTimer()
+            self._slope_overlay_min_update_timer.setSingleShot(True)
+            self._slope_overlay_min_update_timer.timeout.connect(self._apply_slope_overlay_min_changed)
+        self._slope_overlay_min_update_timer.start(450)
+
+    def _apply_slope_overlay_min_changed(self):
+        """Apply slope overlay min updates after debounce delay."""
         if not (hasattr(self, 'show_slope_overlay_var') and self.show_slope_overlay_var):
             return  # Don't update if slope overlay is not enabled
 
@@ -782,7 +799,15 @@ class GeoTIFFMixin:
             pass  # Silently handle invalid input
 
     def _on_slope_overlay_max_changed(self):
-        """Handle slope overlay max entry change."""
+        """Handle slope overlay max entry change with a short typing debounce."""
+        if not hasattr(self, '_slope_overlay_max_update_timer'):
+            self._slope_overlay_max_update_timer = QTimer()
+            self._slope_overlay_max_update_timer.setSingleShot(True)
+            self._slope_overlay_max_update_timer.timeout.connect(self._apply_slope_overlay_max_changed)
+        self._slope_overlay_max_update_timer.start(450)
+
+    def _apply_slope_overlay_max_changed(self):
+        """Apply slope overlay max updates after debounce delay."""
         if not (hasattr(self, 'show_slope_overlay_var') and self.show_slope_overlay_var):
             return  # Don't update if slope overlay is not enabled
 

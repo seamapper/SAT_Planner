@@ -1001,20 +1001,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_import_export_layout.setSpacing(0)
         ref_import_export_layout.setContentsMargins(9, 9, 9, 9)
 
-        # Import/Export buttons on same row
-        ref_import_export_button_frame = QWidget()
-        ref_import_export_button_layout = QHBoxLayout(ref_import_export_button_frame)
-        ref_import_export_button_layout.setSpacing(3)
-        ref_import_export_button_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.import_survey_btn = QPushButton("Import Survey")
+        self.import_survey_btn = QPushButton("Import Accuracy Survey")
         self.import_survey_btn.clicked.connect(self._import_survey_files)
-        ref_import_export_button_layout.addWidget(self.import_survey_btn)
-        self.export_survey_btn = QPushButton("Export Survey")
-        self.export_survey_btn.clicked.connect(self._export_survey_files)
-        ref_import_export_button_layout.addWidget(self.export_survey_btn)
-
-        ref_import_export_layout.addWidget(ref_import_export_button_frame)
+        ref_import_export_layout.addWidget(self.import_survey_btn)
         ref_import_export_layout.addSpacing(3)
 
         # Download GMRT row (same as Calibration)
@@ -1036,6 +1025,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_gmrt_row_layout.addWidget(self.ref_gmrt_buffer_spin)
         ref_gmrt_row_layout.addStretch()
         ref_import_export_layout.addWidget(ref_gmrt_row)
+        ref_import_export_layout.addSpacing(3)
+
+        self.export_survey_btn = QPushButton("Export Accuracy Survey")
+        self.export_survey_btn.clicked.connect(self._export_survey_files)
+        ref_import_export_layout.addWidget(self.export_survey_btn)
         ref_import_export_layout.addSpacing(3)
 
         # Export Name at the bottom
@@ -1221,20 +1215,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_import_export_layout.setSpacing(0)
         cal_import_export_layout.setContentsMargins(9, 9, 9, 9)
 
-        # Import/Export buttons on same row
-        import_export_button_frame = QWidget()
-        import_export_button_layout = QHBoxLayout(import_export_button_frame)
-        import_export_button_layout.setSpacing(3)
-        import_export_button_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.cal_import_survey_btn = QPushButton("Import Survey")
+        self.cal_import_survey_btn = QPushButton("Import Calibration Survey")
         self.cal_import_survey_btn.clicked.connect(self._import_cal_survey_files)
-        import_export_button_layout.addWidget(self.cal_import_survey_btn)
-        self.cal_export_survey_btn = QPushButton("Export Survey")
-        self.cal_export_survey_btn.clicked.connect(self._export_cal_survey_files)
-        import_export_button_layout.addWidget(self.cal_export_survey_btn)
-
-        cal_import_export_layout.addWidget(import_export_button_frame)
+        cal_import_export_layout.addWidget(self.cal_import_survey_btn)
         cal_import_export_layout.addSpacing(3)
 
         gmrt_row = QWidget()
@@ -1257,6 +1240,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_import_export_layout.addWidget(gmrt_row)
         cal_import_export_layout.addSpacing(3)
 
+        self.cal_export_survey_btn = QPushButton("Export Calibration Survey")
+        self.cal_export_survey_btn.clicked.connect(self._export_cal_survey_files)
+        cal_import_export_layout.addWidget(self.cal_export_survey_btn)
+        cal_import_export_layout.addSpacing(3)
         # Export Name at the bottom
         export_name_frame = QWidget()
         export_name_layout = QGridLayout(export_name_frame)
@@ -1361,20 +1348,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         line_import_export_layout.setSpacing(0)
         line_import_export_layout.setContentsMargins(9, 9, 9, 9)
 
-        # Import/Export buttons on same row
-        line_import_export_button_frame = QWidget()
-        line_import_export_button_layout = QHBoxLayout(line_import_export_button_frame)
-        line_import_export_button_layout.setSpacing(3)
-        line_import_export_button_layout.setContentsMargins(0, 0, 0, 0)
-
-        self.line_import_btn = QPushButton("Import Survey")
+        self.line_import_btn = QPushButton("Import Line Survey")
         self.line_import_btn.clicked.connect(self._import_drawn_line)
-        line_import_export_button_layout.addWidget(self.line_import_btn)
-        self.line_export_btn = QPushButton("Export Survey")
-        self.line_export_btn.clicked.connect(self._export_drawn_line)
-        line_import_export_button_layout.addWidget(self.line_export_btn)
-
-        line_import_export_layout.addWidget(line_import_export_button_frame)
+        line_import_export_layout.addWidget(self.line_import_btn)
         line_import_export_layout.addSpacing(3)
 
         # Download GMRT row (same as Calibration / Reference)
@@ -1396,6 +1372,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         line_gmrt_row_layout.addWidget(self.line_plan_gmrt_buffer_spin)
         line_gmrt_row_layout.addStretch()
         line_import_export_layout.addWidget(line_gmrt_row)
+        line_import_export_layout.addSpacing(3)
+
+        self.line_export_btn = QPushButton("Export Line Survey")
+        self.line_export_btn.clicked.connect(self._export_drawn_line)
+        line_import_export_layout.addWidget(self.line_export_btn)
         line_import_export_layout.addSpacing(3)
 
         # Export Name at the bottom

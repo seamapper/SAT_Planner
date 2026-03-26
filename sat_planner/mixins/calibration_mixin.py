@@ -1958,7 +1958,7 @@ class CalibrationMixin:
             self.set_cal_info_text("Heading lines have been added north and south of the pitch line.")
 
     def _set_cal_export_name_after_import(self):
-        """Set suggested calibration export name after import using same convention as drawing: Cal_{offset}m_{heading}deg from pitch line."""
+        """Set suggested calibration export name after import using same convention as drawing: Calibration_{offset}m_{heading}deg from pitch line."""
         if not hasattr(self, 'cal_export_name_entry'):
             return
         # If Download GMRT is checked, leave empty; GMRT load completion will set name from pitch line (offset + heading) after GeoTIFF loads
@@ -1971,7 +1971,7 @@ class CalibrationMixin:
             self.cal_export_name_entry.setText(f"Cal_import_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}")
 
     def _update_cal_export_name_from_pitch_line(self):
-        """Update calibration export name from pitch line and offset (same convention as when drawing: Cal_{offset}m_{heading}deg)."""
+        """Update calibration export name from pitch line and offset (same convention as when drawing: Calibration_{offset}m_{heading}deg)."""
         if not hasattr(self, 'pitch_line_points') or len(self.pitch_line_points) != 2:
             return
         try:
@@ -1985,5 +1985,5 @@ class CalibrationMixin:
             heading = int(round(az12)) % 360
         except Exception:
             heading = 0
-        export_name = f"Cal_{int(round(offset_val))}m_{heading}deg"
+        export_name = f"Calibration_{int(round(offset_val))}m_{heading}deg"
         self.cal_export_name_entry.setText(export_name)
