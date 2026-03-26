@@ -434,7 +434,7 @@ class CalibrationMixin:
                 char_format.setForeground(QColor(255, 165, 0))
                 cursor.setCharFormat(char_format)
                 cursor.insertText("[Calibration] Left click the starting and ending points of the pitch line on the plot.\n")
-                char_format.setForeground(QColor(0, 0, 0))
+                char_format.setForeground(QColor(224, 224, 224))  # Light gray for dark mode; never black
                 cursor.setCharFormat(char_format)
                 self.activity_log_text.setTextCursor(cursor)
                 self.activity_log_text.setReadOnly(True)
@@ -534,7 +534,7 @@ class CalibrationMixin:
                 char_format.setForeground(QColor(255, 165, 0))
                 cursor.setCharFormat(char_format)
                 cursor.insertText("[Calibration] Left click the starting and ending points of the roll line on the plot.\n")
-                char_format.setForeground(QColor(0, 0, 0))
+                char_format.setForeground(QColor(224, 224, 224))  # Light gray for dark mode; never black
                 cursor.setCharFormat(char_format)
                 self.activity_log_text.setTextCursor(cursor)
                 self.activity_log_text.setReadOnly(True)
@@ -1057,15 +1057,19 @@ class CalibrationMixin:
             with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
                 collection.writerecords(features)
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
+            try:
+                cal_export_speed = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
+            except Exception:
+                cal_export_speed = 8.0
             geojson_features = []
             for num, name, pts in lines:
                 geojson_features.append({
                     "type": "Feature",
                     "geometry": {"type": "LineString", "coordinates": [[pts[0][1], pts[0][0]], [pts[1][1], pts[1][0]]]},
-                    "properties": {"line_num": num, "line_name": name}
+                    "properties": {"line_num": num, "line_name": name, "survey_speed": cal_export_speed, "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None)}
                 })
             with open(geojson_file_path, 'w', encoding='utf-8') as f:
-                json.dump({"type": "FeatureCollection", "features": geojson_features}, f, indent=2)
+                json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None)}, "features": geojson_features}, f, indent=2)
             lnw_file_path = None
             lnw_lines = [(name, list(pts)) for _num, name, pts in lines]
             if lnw_lines:
@@ -1114,6 +1118,8 @@ class CalibrationMixin:
                 print(f"Warning: Could not export metadata: {e}")
                 json_metadata_path = None
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
+            if hasattr(self, "_hide_map_hover_tooltip_for_export"):
+                self._hide_map_hover_tooltip_for_export()
             self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
             profile_png_path = None
             if hasattr(self, 'profile_fig') and self.profile_fig is not None:
@@ -1157,7 +1163,9 @@ class CalibrationMixin:
             file_ext = os.path.splitext(file_path)[1].lower()
             file_basename = os.path.basename(file_path)
             file_processed = False
-            
+            imported_geojson_survey_speed = None
+            imported_geojson_geotiff_path = None
+
             # Handle *.lnw format (Hypack LNW)
             if file_ext == '.lnw':
                 # Show UTM zone dialog
@@ -1368,6 +1376,7 @@ class CalibrationMixin:
                     return
                 if geojson_data.get('type') == 'FeatureCollection':
                     features = geojson_data.get('features', [])
+                    imported_geojson_geotiff_path = (geojson_data.get('properties') or {}).get('geotiff_path')
                 elif geojson_data.get('type') == 'Feature':
                     features = [geojson_data]
                 else:
@@ -1384,6 +1393,17 @@ class CalibrationMixin:
                     point1 = (coordinates[0][1], coordinates[0][0])
                     point2 = (coordinates[1][1], coordinates[1][0])
                     properties = feature.get('properties', {}) or {}
+                    if imported_geojson_geotiff_path is None:
+                        imported_geojson_geotiff_path = properties.get('geotiff_path')
+                    if imported_geojson_survey_speed is None:
+                        for _key in ('survey_speed', 'speed_knots', 'surveySpeed', 'speedKnots'):
+                            val = properties.get(_key)
+                            if val is not None:
+                                try:
+                                    imported_geojson_survey_speed = float(val)
+                                    break
+                                except (TypeError, ValueError):
+                                    pass
                     line_name = str(properties.get('line_name', '')).strip().lower()
                     if line_name.startswith('pitch'):
                         self.pitch_line_points = [point1, point2]
@@ -1419,6 +1439,13 @@ class CalibrationMixin:
                         self.cal_survey_speed_entry.setText(str(params['survey_speed']))
                 except Exception:
                     pass
+            if (not params or not isinstance(params, dict) or params.get('survey_speed') is None) and imported_geojson_survey_speed is not None:
+                self.cal_survey_speed_entry.setText(str(imported_geojson_survey_speed))
+            if imported_geojson_geotiff_path and hasattr(self, '_load_geotiff_from_path'):
+                if os.path.exists(imported_geojson_geotiff_path):
+                    self._load_geotiff_from_path(imported_geojson_geotiff_path)
+                else:
+                    self.set_cal_info_text(f"Saved GeoTIFF not found: {imported_geojson_geotiff_path}. Continuing without GeoTIFF.", append=True)
             if not params or not isinstance(params, dict) or params.get('line_offset') is None:
                 self._update_cal_line_offset_from_pitch_line()
             # Suggested export name: from params, else from loaded GeoTIFF, else defer if GMRT download, else pitch-line or generic

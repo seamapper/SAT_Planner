@@ -288,9 +288,13 @@ class LinePlanningMixin:
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
             if LineString and _shapely_mapping:
                 shapely_line = LineString([(lon, lat) for lat, lon in self.line_planning_points])
-                geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
+                try:
+                    export_speed = float(self.line_survey_speed_entry.text()) if hasattr(self, 'line_survey_speed_entry') and self.line_survey_speed_entry.text() else 8.0
+                except (ValueError, TypeError):
+                    export_speed = 8.0
+                geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "survey_speed": export_speed, "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
                 with open(geojson_file_path, 'w') as f:
-                    json.dump({"type": "FeatureCollection", "features": [geojson_feature]}, f, indent=2)
+                    json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None)}, "features": [geojson_feature]}, f, indent=2)
             lnw_file_path = None
             lnw_lines = [(export_name, list(self.line_planning_points))]
             if len(self.line_planning_points) >= 2:
@@ -302,6 +306,8 @@ class LinePlanningMixin:
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
             export_utils.write_asciiplan(sis_file_path, [(export_name, list(self.line_planning_points))])
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
+            if hasattr(self, "_hide_map_hover_tooltip_for_export"):
+                self._hide_map_hover_tooltip_for_export()
             self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
             profile_png_path = None
             if hasattr(self, 'profile_fig') and self.profile_fig is not None:
@@ -447,15 +453,39 @@ class LinePlanningMixin:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     geojson_data = json.load(f)
                 features = geojson_data.get('features', []) if geojson_data.get('type') == 'FeatureCollection' else [geojson_data] if geojson_data.get('type') == 'Feature' else []
+                imported_geotiff_path = None
+                if geojson_data.get('type') == 'FeatureCollection':
+                    collection_props = geojson_data.get('properties') or {}
+                    imported_geotiff_path = collection_props.get('geotiff_path')
+                imported_survey_speed = None
                 for feature in features:
                     if feature.get('type') != 'Feature':
                         continue
                     geometry = feature.get('geometry', {})
                     if geometry.get('type') != 'LineString':
                         continue
+                    if imported_survey_speed is None:
+                        props = feature.get('properties') or {}
+                        if imported_geotiff_path is None:
+                            imported_geotiff_path = props.get('geotiff_path')
+                        for _key in ('survey_speed', 'speed_knots', 'surveySpeed', 'speedKnots'):
+                            val = props.get(_key)
+                            if val is not None:
+                                try:
+                                    imported_survey_speed = float(val)
+                                    break
+                                except (TypeError, ValueError):
+                                    pass
                     for coord in geometry.get('coordinates', []):
                         if len(coord) >= 2:
                             self.line_planning_points.append((coord[1], coord[0]))
+                if imported_survey_speed is not None and hasattr(self, 'line_survey_speed_entry'):
+                    self.line_survey_speed_entry.setText(str(imported_survey_speed))
+                if imported_geotiff_path and hasattr(self, '_load_geotiff_from_path'):
+                    if os.path.exists(imported_geotiff_path):
+                        self._load_geotiff_from_path(imported_geotiff_path)
+                    else:
+                        self.set_line_info_text(f"Saved GeoTIFF not found: {imported_geotiff_path}. Continuing without GeoTIFF.", append=True)
                 file_processed = True
 
             if not file_processed:
@@ -473,6 +503,9 @@ class LinePlanningMixin:
                 self.line_export_name_entry.setText(file_basename)
             self._update_line_planning_button_states()
             self._plot_survey_plan(preserve_view_limits=True)
+            # Match manual draw: profile is not updated inside _plot_survey_plan
+            if hasattr(self, '_draw_current_profile'):
+                self._draw_current_profile()
             self.set_line_info_text(f"Successfully imported line plan with {len(self.line_planning_points)} points.")
             if hasattr(self, 'line_start_draw_btn') and len(self.line_planning_points) >= 2:
                 self.line_start_draw_btn.setStyleSheet("")

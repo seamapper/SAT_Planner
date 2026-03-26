@@ -23,7 +23,11 @@ class ConfigMixin:
 
     def _save_last_used_dir(self):
         try:
-            config = {'last_used_dir': self.last_used_dir}
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, 'r') as f:
+                    config = json.load(f)
+            config['last_used_dir'] = self.last_used_dir
             with open(self.CONFIG_FILENAME, 'w') as f:
                 json.dump(config, f)
         except Exception:

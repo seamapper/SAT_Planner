@@ -70,7 +70,7 @@ class GeoTIFFMixin:
                 downsample_factor = 16
 
         try:
-            # Calculate the visible region based on current plot limits
+            # Use current axes limits (call canvas.draw() before this if limits just changed)
             xlim = self.ax.get_xlim()
             ylim = self.ax.get_ylim()
 

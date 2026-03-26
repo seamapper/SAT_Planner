@@ -265,8 +265,8 @@ class MapInteractionMixin:
                             self.bisect_lead_entry.blockSignals(True)
                             self.bisect_lead_entry.setText(f"{bisect_lead:.2f}")
                             self.bisect_lead_entry.blockSignals(False)
-                            # Set Export Name to 'Reference_' + int(distance between lines) + 'm_' + int(heading) + 'deg'
-                            export_name_to_set = f"Reference_{int(calculated_dist_between_lines)}m_{int(float(self.heading_entry.text()))}deg"
+                            # Set Export Name to 'Accuracy_' + int(distance between lines) + 'm_' + int(heading) + 'deg'
+                            export_name_to_set = f"Accuracy_{int(calculated_dist_between_lines)}m_{int(float(self.heading_entry.text()))}deg"
                         else:
                             self._show_message("warning","Input Warning",
                                                    "Calculated Distance Between Lines is not positive. Not setting Distance automatically.")
@@ -581,10 +581,13 @@ class MapInteractionMixin:
                     new_zoom_level = max(0.01, min(10.0, new_zoom_level))
                     self.geotiff_zoom_level = new_zoom_level
                 
-                # Force a small delay to ensure axis limits are applied before loading
+                # Force draw so axis limits (and aspect) are applied before _load_geotiff_at_resolution reads them
                 self.canvas.draw()
-                
-                # Reload GeoTIFF data at appropriate resolution
+                self.current_xlim = self.ax.get_xlim()
+                self.current_ylim = self.ax.get_ylim()
+                self._last_user_xlim = self.current_xlim
+                self._last_user_ylim = self.current_ylim
+
                 success = self._load_geotiff_at_resolution()
                 if success:
                     # Ensure the loaded extent covers the full view - if not, we may need to reload
@@ -826,7 +829,7 @@ class MapInteractionMixin:
         # Set axis limits
         self.ax.set_xlim(xlim)
         self.ax.set_ylim(ylim)
-        
+
         # Update zoom level and reload GeoTIFF data if available
         if self.geotiff_extent is not None and self.geotiff_dataset_original is not None:
             # Calculate zoom level based on the view extent vs full GeoTIFF extent
@@ -835,15 +838,21 @@ class MapInteractionMixin:
                 full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
                 current_width = xlim[1] - xlim[0]
                 current_height = ylim[1] - ylim[0]
-                
+
                 width_ratio = current_width / full_width if full_width > 0 else 1.0
                 height_ratio = current_height / full_height if full_height > 0 else 1.0
                 # Use the larger ratio (more zoomed in) to determine resolution
                 new_zoom_level = max(width_ratio, height_ratio)
                 new_zoom_level = max(0.01, min(10.0, new_zoom_level))
                 self.geotiff_zoom_level = new_zoom_level
-            
-            # Reload GeoTIFF data at appropriate resolution
+
+            # Apply limits/aspect before load (was missing; get_xlim was stale → incomplete GeoTIFF window)
+            self.canvas.draw()
+            # Aspect may adjust limits; keep stored view in sync with what the axes actually show
+            self.current_xlim = self.ax.get_xlim()
+            self.current_ylim = self.ax.get_ylim()
+            self._last_user_xlim = self.current_xlim
+            self._last_user_ylim = self.current_ylim
             success = self._load_geotiff_at_resolution()
             if success:
                 # Replot with new resolution
@@ -886,7 +895,7 @@ class MapInteractionMixin:
         # Set axis limits
         self.ax.set_xlim(xlim)
         self.ax.set_ylim(ylim)
-        
+
         # Update zoom level and reload GeoTIFF data if available
         if self.geotiff_extent is not None and self.geotiff_dataset_original is not None:
             # Calculate zoom level based on the view extent vs full GeoTIFF extent
@@ -895,15 +904,19 @@ class MapInteractionMixin:
                 full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
                 current_width = xlim[1] - xlim[0]
                 current_height = ylim[1] - ylim[0]
-                
+
                 width_ratio = current_width / full_width if full_width > 0 else 1.0
                 height_ratio = current_height / full_height if full_height > 0 else 1.0
                 # Use the larger ratio (more zoomed in) to determine resolution
                 new_zoom_level = max(width_ratio, height_ratio)
                 new_zoom_level = max(0.01, min(10.0, new_zoom_level))
                 self.geotiff_zoom_level = new_zoom_level
-            
-            # Reload GeoTIFF data at appropriate resolution
+
+            self.canvas.draw()
+            self.current_xlim = self.ax.get_xlim()
+            self.current_ylim = self.ax.get_ylim()
+            self._last_user_xlim = self.current_xlim
+            self._last_user_ylim = self.current_ylim
             success = self._load_geotiff_at_resolution()
             if success:
                 # Replot with new resolution
@@ -1112,3 +1125,10 @@ class MapInteractionMixin:
                                                          bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
                                                          zorder=13)
             self.canvas.draw_idle()
+
+    def _hide_map_hover_tooltip_for_export(self):
+        """Hide on-map hover tooltip (lat/lon, depth, etc.) so exported map PNGs are clean."""
+        if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
+            self.mouse_hover_info_text.set_visible(False)
+        if hasattr(self, 'pitch_line_tooltip_text') and self.pitch_line_tooltip_text is not None:
+            self.pitch_line_tooltip_text.set_visible(False)

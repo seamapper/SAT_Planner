@@ -521,7 +521,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 print(f"ERROR: Missing widget - plot_frame: {hasattr(self, 'plot_frame')}")
                 return
 
-            # Bottom strip: profile + options (left, stretches) | Activity Log (right, 420px fixed)
+            # Bottom strip: Activity Log (left, fixed width) | profile + options (right, stretches)
             if hasattr(self, 'profile_widget') and hasattr(self, 'slope_profile_checkbox'):
                 profile_layout = QVBoxLayout()
                 profile_layout.setContentsMargins(0, 0, 0, 0)
@@ -549,10 +549,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
                 bottom_strip_layout = QHBoxLayout()
                 bottom_strip_layout.setContentsMargins(0, 0, 0, 0)
-                bottom_strip_layout.addWidget(profile_widget, 1)  # Left: profile + options, stretch with window
                 if hasattr(self, 'activity_log_groupbox'):
                     self.activity_log_groupbox.setFixedWidth(320)
-                    bottom_strip_layout.addWidget(self.activity_log_groupbox)  # Right: Activity Log, 420px
+                    bottom_strip_layout.addWidget(self.activity_log_groupbox)  # Left: Activity Log
+                bottom_strip_layout.addWidget(profile_widget, 1)  # Right: profile + options, stretch with window
                 bottom_strip_widget = QWidget()
                 bottom_strip_widget.setLayout(bottom_strip_layout)
                 bottom_strip_widget.setMaximumHeight(250)
@@ -770,7 +770,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.calibration_frame = QWidget()
         self.line_planning_frame = QWidget()
         self.param_notebook.addTab(self.calibration_frame, "Calibration")
-        self.param_notebook.addTab(self.reference_frame, "Reference")
+        # Label the second tab as 'Accuracy' instead of 'Reference'
+        self.param_notebook.addTab(self.reference_frame, "Accuracy")
         self.param_notebook.addTab(self.line_planning_frame, "Line")
 
         test_planning_layout.addWidget(self.param_notebook)
@@ -801,8 +802,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         row = 0
 
-        # --- Reference Line Parameters GroupBox ---
-        ref_line_params_groupbox = QGroupBox("Reference Line Parameters")
+        # --- Accuracy Line Parameters GroupBox (formerly Reference) ---
+        ref_line_params_groupbox = QGroupBox("Accuracy Line Parameters")
         ref_line_params_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ref_line_params_layout = QGridLayout(ref_line_params_groupbox)
         ref_line_params_layout.setSpacing(3)
@@ -891,7 +892,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_line_params_layout.addWidget(slider_frame_dist, ref_line_row, 1)
         ref_line_row += 1
 
-        self.generate_plot_btn = QPushButton("Generate Survey Plan")
+        self.generate_plot_btn = QPushButton("Generate Accuracy Survey Plan")
         self.generate_plot_btn.clicked.connect(self._generate_and_plot)
         ref_line_params_layout.addWidget(self.generate_plot_btn, ref_line_row, 0, 1, 2)
 
@@ -910,18 +911,18 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         row += 1
 
         # --- Plot Control GroupBox ---
-        ref_plot_control_groupbox = QGroupBox("Reference Plot Control")
+        ref_plot_control_groupbox = QGroupBox("Accuracy Plot Control")
         ref_plot_control_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ref_plot_control_layout = QVBoxLayout(ref_plot_control_groupbox)
         ref_plot_control_layout.setSpacing(0)
         ref_plot_control_layout.setContentsMargins(9, 9, 9, 9)
 
-        self.zoom_to_plan_btn = QPushButton("Zoom to Reference Plan")
+        self.zoom_to_plan_btn = QPushButton("Zoom to Accuracy Survey Plan")
         self.zoom_to_plan_btn.clicked.connect(self._zoom_to_plan)
         ref_plot_control_layout.addWidget(self.zoom_to_plan_btn)
         ref_plot_control_layout.addSpacing(3)
 
-        self.clear_plot_btn = QPushButton("Remove Reference Surface Plan")
+        self.clear_plot_btn = QPushButton("Remove Accuracy Survey Plan")
         self.clear_plot_btn.clicked.connect(self._clear_reference_plan)  # Remove only reference plan lines
         ref_plot_control_layout.addWidget(self.clear_plot_btn)
 
@@ -930,7 +931,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         row += 1
 
         # --- Test Plan Info GroupBox ---
-        ref_test_plan_info_groupbox = QGroupBox("Reference Info")
+        ref_test_plan_info_groupbox = QGroupBox("Accuracy Info")
         ref_test_plan_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ref_test_plan_info_layout = QGridLayout(ref_test_plan_info_groupbox)
         ref_test_plan_info_layout.setSpacing(3)
@@ -954,7 +955,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_test_plan_info_layout.addWidget(self.crossline_passes_entry, ref_test_plan_row, 1)
         ref_test_plan_row += 1
 
-        self.ref_show_info_btn = QPushButton("Show Reference Test Info")
+        self.ref_show_info_btn = QPushButton("Show Accuracy Test Info")
         self.ref_show_info_btn.clicked.connect(self._show_reference_planning_info)
         ref_test_plan_info_layout.addWidget(self.ref_show_info_btn, ref_test_plan_row, 0, 1, 2)
 
@@ -963,7 +964,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         row += 1
 
         # --- Import/Export GroupBox ---
-        ref_import_export_groupbox = QGroupBox("Reference Import/Export")
+        ref_import_export_groupbox = QGroupBox("Accuracy Import/Export")
         ref_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         ref_import_export_layout = QVBoxLayout(ref_import_export_groupbox)
         ref_import_export_layout.setSpacing(0)
@@ -991,7 +992,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
         ref_gmrt_row_layout.setSpacing(6)
         self.ref_download_gmrt_checkbox = QCheckBox("Download GMRT")
-        self.ref_download_gmrt_checkbox.setChecked(True)
+        self.ref_download_gmrt_checkbox.setChecked(False)
         self.ref_download_gmrt_checkbox.setToolTip("When enabled, importing a reference survey will download a GMRT bathymetry GeoTIFF (buffer and 100 m resolution) and load it.")
         ref_gmrt_row_layout.addWidget(self.ref_download_gmrt_checkbox)
         self.ref_gmrt_buffer_spin = QDoubleSpinBox()
@@ -1018,9 +1019,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         try:
             dist = int(float(self.dist_between_lines_entry.text() or "0"))
             heading = int(float(self.heading_entry.text() or "0"))
-            export_name = f"Reference_{dist}m_{heading}deg"
+            export_name = f"Accuracy_{dist}m_{heading}deg"
         except Exception:
-            export_name = "Reference_0m_0deg"
+            export_name = "Accuracy_0m_0deg"
         self.export_name_entry.setText(export_name)
         ref_export_name_layout.addWidget(self.export_name_entry, 0, 1)
         ref_import_export_layout.addWidget(ref_export_name_frame)
@@ -1210,7 +1211,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
         gmrt_row_layout.setSpacing(6)
         self.cal_download_gmrt_checkbox = QCheckBox("Download GMRT")
-        self.cal_download_gmrt_checkbox.setChecked(True)
+        self.cal_download_gmrt_checkbox.setChecked(False)
         self.cal_download_gmrt_checkbox.setToolTip("When enabled, importing a calibration survey will download a GMRT bathymetry GeoTIFF (buffer and 100 m resolution) and load it.")
         gmrt_row_layout.addWidget(self.cal_download_gmrt_checkbox)
         self.cal_gmrt_buffer_spin = QDoubleSpinBox()
@@ -1351,7 +1352,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         line_gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
         line_gmrt_row_layout.setSpacing(6)
         self.line_plan_download_gmrt_checkbox = QCheckBox("Download GMRT")
-        self.line_plan_download_gmrt_checkbox.setChecked(True)
+        self.line_plan_download_gmrt_checkbox.setChecked(False)
         self.line_plan_download_gmrt_checkbox.setToolTip("When enabled, importing a line plan survey will download a GMRT bathymetry GeoTIFF (buffer and 100 m resolution) and load it.")
         line_gmrt_row_layout.addWidget(self.line_plan_download_gmrt_checkbox)
         self.line_plan_gmrt_buffer_spin = QDoubleSpinBox()

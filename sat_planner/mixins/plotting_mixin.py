@@ -783,7 +783,7 @@ class PlottingMixin:
             for i, line in enumerate(self.survey_lines_data):
                 latitudes = [p[0] for p in line]
                 longitudes = [p[1] for p in line]
-                label = "Reference Line" if i == 0 else "_nolegend_"
+                label = "Accuracy Line" if i == 0 else "_nolegend_"
                 self.ax.plot(longitudes, latitudes, color='blue', linewidth=1.5, linestyle='--', label=label)
 
                 # For alternating lines, flip the start/end points to show survey order

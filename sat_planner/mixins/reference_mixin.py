@@ -63,7 +63,7 @@ class ReferenceLineAssignmentDialog(QDialog):
 
     def __init__(self, parent, imported_lines):
         super().__init__(parent)
-        self.setWindowTitle("Assign Reference Survey Lines")
+        self.setWindowTitle("Assign Accuracy Survey Lines")
         self.setMinimumSize(900, 700)
         self.setModal(True)
         self.imported_lines = imported_lines
@@ -73,7 +73,7 @@ class ReferenceLineAssignmentDialog(QDialog):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
 
-        instructions = QLabel("Assign one line as Crossline and the rest as Reference Lines:")
+        instructions = QLabel("Assign one line as Crossline and the rest as Accuracy Lines:")
         instructions.setStyleSheet("font-weight: bold;")
         main_layout.addWidget(instructions)
 
@@ -92,11 +92,11 @@ class ReferenceLineAssignmentDialog(QDialog):
         assignment_layout.addWidget(assignment_label)
 
         suggested_cross = _suggest_crossline_index(imported_lines)
-        # Non-crossline indices in file order → suggest as Reference Line 1, 2, 3, ...
+        # Non-crossline indices in file order → suggest as Accuracy Line 1, 2, 3, ...
         ref_order_indices = [i for i in range(len(imported_lines)) if i != suggested_cross]
         line_colors = ['red', 'blue', 'green', 'purple', 'orange', 'cyan', 'magenta', 'yellow']
         num_lines = len(imported_lines)
-        ref_options = ["Reference Line " + str(i + 1) for i in range(num_lines)]
+        ref_options = ["Accuracy Line " + str(i + 1) for i in range(num_lines)]
         self.comboboxes = []
         for i in range(num_lines):
             line_widget = QWidget()
@@ -113,9 +113,9 @@ class ReferenceLineAssignmentDialog(QDialog):
             if i == suggested_cross:
                 combo.setCurrentIndex(1)  # Crossline
             else:
-                # Suggest reference lines in file order: first non-crossline → Reference Line 1, etc.
+                # Suggest accuracy lines in file order: first non-crossline → Accuracy Line 1, etc.
                 ref_rank = ref_order_indices.index(i)
-                combo.setCurrentIndex(2 + ref_rank)  # 2 = first Reference Line option
+                combo.setCurrentIndex(2 + ref_rank)  # 2 = first Accuracy Line option
             self.comboboxes.append(combo)
             line_layout.addWidget(combo)
             color_label = QLabel("●")
@@ -180,7 +180,7 @@ class ReferenceLineAssignmentDialog(QDialog):
                 crossline_idx = i
                 self.assignments[i] = 'crossline'
             else:
-                # idx 2 = Reference Line 1, idx 3 = Reference Line 2, ...
+                # idx 2 = Accuracy Line 1, idx 3 = Accuracy Line 2, ...
                 ref_num = idx - 1
                 self.assignments[i] = f'ref_{ref_num}'
         if crossline_idx is None:
@@ -705,6 +705,8 @@ class ReferenceMixin:
             file_ext = os.path.splitext(file_path)[1].lower()
             file_basename = os.path.basename(file_path)
             file_processed = False
+            imported_geojson_survey_speed = None
+            imported_geojson_geotiff_path = None
 
             # DDD / DMS / DMM / LNW: use calibration parsers + reference assignment dialog
             if file_ext == '.lnw':
@@ -817,6 +819,7 @@ class ReferenceMixin:
                     features = geojson_data.get('features', [])
                     if not isinstance(features, list):
                         features = []
+                    imported_geojson_geotiff_path = (geojson_data.get('properties') or {}).get('geotiff_path')
                 elif geojson_data.get('type') == 'Feature':
                     features = [geojson_data]
                 else:
@@ -833,6 +836,8 @@ class ReferenceMixin:
                     properties = feature.get('properties', {})
                     if not isinstance(properties, dict):
                         properties = {}
+                    if imported_geojson_geotiff_path is None:
+                        imported_geojson_geotiff_path = properties.get('geotiff_path')
                     line_num = properties.get('line_num', 0)
                     features_with_num.append((line_num, feature))
 
@@ -848,6 +853,17 @@ class ReferenceMixin:
                     coordinates = geometry.get('coordinates', [])
                     if not isinstance(coordinates, list) or len(coordinates) < 2:
                         continue
+
+                    props = feature.get('properties', {}) or {}
+                    if imported_geojson_survey_speed is None:
+                        for _key in ('survey_speed', 'speed_knots', 'surveySpeed', 'speedKnots'):
+                            val = props.get(_key)
+                            if val is not None:
+                                try:
+                                    imported_geojson_survey_speed = float(val)
+                                    break
+                                except (TypeError, ValueError):
+                                    pass
 
                     # GeoJSON uses [lon, lat] format, we need [lat, lon]
                     point1 = (coordinates[0][1], coordinates[0][0])
@@ -1004,6 +1020,14 @@ class ReferenceMixin:
             except Exception as e:
                 print(f"Warning: Error populating parameter fields: {e}")
 
+            if (not params or not isinstance(params, dict) or params.get('survey_speed') is None) and imported_geojson_survey_speed is not None:
+                self.survey_speed_entry.setText(str(imported_geojson_survey_speed))
+            if imported_geojson_geotiff_path and hasattr(self, '_load_geotiff_from_path'):
+                if os.path.exists(imported_geojson_geotiff_path):
+                    self._load_geotiff_from_path(imported_geojson_geotiff_path)
+                else:
+                    self.set_ref_info_text(f"Saved GeoTIFF not found: {imported_geojson_geotiff_path}. Continuing without GeoTIFF.", append=True)
+
             # Update plot
             self._plot_survey_plan(preserve_view_limits=True)
 
@@ -1032,10 +1056,10 @@ class ReferenceMixin:
             traceback.print_exc()
 
     def set_ref_info_text(self, message, append=False):
-        """Add a message to the Activity Log with [Reference] prefix. Maintains up to 200 lines of history."""
+        """Add a message to the Activity Log with [Accuracy] prefix. Maintains up to 200 lines of history."""
         if not hasattr(self, 'activity_log_text'):
             return
-        prefixed_message = f"[Reference] {message}"
+        prefixed_message = f"[Accuracy] {message}"
         self.activity_log_text.setReadOnly(False)
         if append:
             # Prepend new message (newest at top) - only when explicitly requested
@@ -1099,9 +1123,9 @@ class ReferenceMixin:
             try:
                 dist = int(float(self.dist_between_lines_entry.text())) if self.dist_between_lines_entry.text() else 0
                 heading = int(float(self.heading_entry.text())) if self.heading_entry.text() else 0
-                export_name = f"Reference_{dist}m_{heading}deg"
+                export_name = f"Accuracy_{dist}m_{heading}deg"
             except Exception:
-                export_name = "Reference_0m_0deg"
+                export_name = "Accuracy_0m_0deg"
             self.export_name_entry.setText(export_name)
         if hasattr(self, 'offset_direction_var'):
             self.offset_direction_var = "North"
@@ -1464,8 +1488,8 @@ class ReferenceMixin:
             stats_text += f"3. Run crossline ({stats['num_crossline_passes']} passes)\n"
         stats_text += "\n"
 
-        # Reference Waypoints (DMM)
-        dmm_heading = "Reference Waypoints (DMM)"
+        # Accuracy Waypoints (DMM)
+        dmm_heading = "Accuracy Waypoints (DMM)"
         stats_text += f"\n{dmm_heading}\n"
         stats_text += "-" * len(dmm_heading) + "\n"
         if self.survey_lines_data:
@@ -1490,8 +1514,8 @@ class ReferenceMixin:
             stats_text += f"CLS: {cls_lat_ddm}, {cls_lon_ddm}\n"
             stats_text += f"CLE: {cle_lat_ddm}, {cle_lon_ddm}\n"
 
-        # Reference Waypoints (DDD)
-        ddd_heading = "Reference Waypoints (DDD)"
+        # Accuracy Waypoints (DDD)
+        ddd_heading = "Accuracy Waypoints (DDD)"
         stats_text += f"\n{ddd_heading}\n"
         stats_text += "-" * len(ddd_heading) + "\n"
         if self.survey_lines_data:
@@ -1509,7 +1533,7 @@ class ReferenceMixin:
             stats_text += f"CLE: {self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f}\n"
 
         # Create custom dialog window with copy functionality
-        show_statistics_dialog(self, "Reference Survey Info", stats_text)
+        show_statistics_dialog(self, "Accuracy Survey Info", stats_text)
 
     def _update_multiplier_label_len(self, val):
         """Updates the label next to the line length multiplier slider."""
@@ -1574,7 +1598,7 @@ class ReferenceMixin:
         try:
             dist = int(float(self.dist_between_lines_entry.text()))
             heading = int(float(self.heading_entry.text()))
-            export_name = f"Reference_{dist}m_{heading}deg"
+            export_name = f"Accuracy_{dist}m_{heading}deg"
             self.export_name_entry.clear()
             self.export_name_entry.setText(export_name)
         except Exception:

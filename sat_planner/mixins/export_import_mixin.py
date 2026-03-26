@@ -43,7 +43,7 @@ class ExportImportMixin:
             # Fallback to default naming if export name is empty
             dist_between_lines = int(values['dist_between_lines'])
             heading_int = int(values['heading'])
-            export_name = f"Reference_{dist_between_lines}m_{heading_int}deg"
+            export_name = f"Accuracy_{dist_between_lines}m_{heading_int}deg"
         filename = f"{export_name}_params.json"
         file_path = os.path.join(save_dir, filename)
 
@@ -212,6 +212,10 @@ class ExportImportMixin:
 
             # --- Export to GeoJSON ---
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
+            try:
+                ref_export_speed = float(self.survey_speed_entry.text()) if hasattr(self, 'survey_speed_entry') and self.survey_speed_entry.text() else 8.0
+            except (ValueError, TypeError):
+                ref_export_speed = 8.0
             geojson_features = []
             # Main survey lines
             for i, line in enumerate(self.survey_lines_data):
@@ -223,6 +227,8 @@ class ExportImportMixin:
                     },
                     "properties": {
                         "line_num": i + 1,
+                        "survey_speed": ref_export_speed,
+                        "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
                         "points": [
                             {"point_num": 1, "lat": line[0][0], "lon": line[0][1]},
                             {"point_num": 2, "lat": line[1][0], "lon": line[1][1]}
@@ -239,6 +245,8 @@ class ExportImportMixin:
                     },
                     "properties": {
                         "line_num": 0,
+                        "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
+                        "survey_speed": ref_export_speed,
                         "points": [
                             {"point_num": 1, "lat": self.cross_line_data[0][0], "lon": self.cross_line_data[0][1]},
                             {"point_num": 2, "lat": self.cross_line_data[1][0], "lon": self.cross_line_data[1][1]}
@@ -247,6 +255,9 @@ class ExportImportMixin:
                 })
             geojson_collection = {
                 "type": "FeatureCollection",
+                "properties": {
+                    "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None)
+                },
                 "features": geojson_features
             }
             with open(geojson_file_path, 'w') as f:
@@ -445,8 +456,8 @@ class ExportImportMixin:
                 f.write("- After completing all main lines, travel to crossline start\n")
                 f.write("- Complete crossline survey with specified number of passes\n\n")
                 
-                # Reference Waypoints (DMM)
-                dmm_heading = "Reference Waypoints (DMM)"
+                # Accuracy Waypoints (DMM)
+                dmm_heading = "Accuracy Waypoints (DMM)"
                 f.write(f"\n{dmm_heading}\n")
                 f.write("-" * len(dmm_heading) + "\n")
                 if self.survey_lines_data:
@@ -471,8 +482,8 @@ class ExportImportMixin:
                     f.write(f"CLS: {cls_lat_ddm}, {cls_lon_ddm}\n")
                     f.write(f"CLE: {cle_lat_ddm}, {cle_lon_ddm}\n")
 
-                # Reference Waypoints (DDD)
-                ddd_heading = "Reference Waypoints (DDD)"
+                # Accuracy Waypoints (DDD)
+                ddd_heading = "Accuracy Waypoints (DDD)"
                 f.write(f"\n{ddd_heading}\n")
                 f.write("-" * len(ddd_heading) + "\n")
                 if self.survey_lines_data:
@@ -499,6 +510,8 @@ class ExportImportMixin:
 
             # --- Export Survey Plan as PNG ---
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
+            if hasattr(self, "_hide_map_hover_tooltip_for_export"):
+                self._hide_map_hover_tooltip_for_export()
             self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
             
             # --- Export Profile Plot as PNG (if it exists) ---
