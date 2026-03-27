@@ -618,6 +618,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             # Destroy the main window
             self.destroy()
 
+    def _on_download_data_activated(self, index):
+        """Open the chosen download source immediately (no separate Go button)."""
+        if index == self._download_data_gmrt_index:
+            self._open_gmrt_download_dialog()
+
     def _open_gmrt_download_dialog(self):
         """Open the embedded GMRT Download dialog (non-modal). When a GeoTIFF is downloaded, load it and refresh profile."""
         try:
@@ -637,6 +642,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         """Load the downloaded GeoTIFF into the map and refresh the profile."""
         if path and hasattr(self, '_load_geotiff_from_path'):
             self._load_geotiff_from_path(path)
+        if hasattr(self, 'download_data_combo'):
+            self.download_data_combo.blockSignals(True)
+            try:
+                self.download_data_combo.setCurrentIndex(self._download_data_gmrt_index)
+            finally:
+                self.download_data_combo.blockSignals(False)
         if hasattr(self, '_draw_current_profile'):
             self._draw_current_profile()
         if hasattr(self, 'profile_canvas'):
@@ -701,10 +712,21 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         geotiff_layout.addWidget(geotiff_button_frame)
         geotiff_layout.addSpacing(3)
 
-        self.download_gmrt_btn = QPushButton("Download GMRT GeoTIFF")
-        self.download_gmrt_btn.clicked.connect(self._open_gmrt_download_dialog)
-        self.download_gmrt_btn.setToolTip("Open GMRT Bathymetry Grid Downloader to download and optionally load a GeoTIFF.")
-        geotiff_layout.addWidget(self.download_gmrt_btn)
+        download_data_row = QWidget()
+        download_data_layout = QHBoxLayout(download_data_row)
+        download_data_layout.setContentsMargins(0, 0, 0, 0)
+        download_data_layout.setSpacing(6)
+        download_data_layout.addWidget(QLabel("Download Data"))
+        self.download_data_combo = QComboBox()
+        self.download_data_combo.setToolTip("Choose a data source to download. GMRT opens the Download GMRT Grid dialog.")
+        self._download_data_select_index = 0
+        self._download_data_gmrt_index = 1
+        self.download_data_combo.addItem("Select Source")
+        self.download_data_combo.addItem("GMRT")
+        self.download_data_combo.setCurrentIndex(self._download_data_select_index)
+        self.download_data_combo.activated.connect(self._on_download_data_activated)
+        download_data_layout.addWidget(self.download_data_combo, 1)
+        geotiff_layout.addWidget(download_data_row)
         geotiff_layout.addSpacing(3)
 
         # Display mode dropdown - label and combo on same line
