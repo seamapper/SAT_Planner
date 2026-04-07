@@ -311,6 +311,13 @@ class GMRTGrabber(QWidget):
         # Status display - shows download progress and results
         self.status_label = QLabel("")
         left_layout.addWidget(self.status_label)
+        self.download_progress_bar = QProgressBar()
+        self.download_progress_bar.setVisible(False)
+        self.download_progress_bar.setMinimum(0)
+        self.download_progress_bar.setMaximum(1)
+        self.download_progress_bar.setValue(0)
+        self.download_progress_bar.setFormat("%v of %m")
+        left_layout.addWidget(self.download_progress_bar)
 
         # === ACTIVITY LOG SECTION ===
         # Provides a detailed log of all operations with timestamps
@@ -1017,6 +1024,11 @@ class GMRTGrabber(QWidget):
                 
                 self.status_label.setText(f"Downloading {len(tiles)} tiles...")
                 self.status_label.repaint()
+                self.download_progress_bar.setVisible(True)
+                self.download_progress_bar.setMinimum(0)
+                self.download_progress_bar.setMaximum(len(tiles))
+                self.download_progress_bar.setValue(0)
+                self.download_progress_bar.setFormat("%v of %m")
                 
                 # Start sequential tile downloads
                 self.tiles_to_download = tiles
@@ -1059,6 +1071,10 @@ class GMRTGrabber(QWidget):
 
             self.status_label.setText("Downloading...")
             self.status_label.repaint()
+            self.download_progress_bar.setVisible(True)
+            self.download_progress_bar.setMinimum(0)
+            self.download_progress_bar.setMaximum(0)  # Indeterminate for single-file download
+            self.download_progress_bar.setFormat("Downloading...")
             
             self.download_btn.setEnabled(False)  # Disable button during download
             self.download_single_grid(params, file_name, self.on_single_download_finished, format_type)
@@ -1090,6 +1106,12 @@ class GMRTGrabber(QWidget):
         
         self.status_label.setText(f"Downloading tile {self.current_tile_index + 1}/{len(self.tiles_to_download)}: {tile_filename}")
         self.status_label.repaint()
+        if hasattr(self, 'download_progress_bar'):
+            self.download_progress_bar.setVisible(True)
+            self.download_progress_bar.setMinimum(0)
+            self.download_progress_bar.setMaximum(len(self.tiles_to_download))
+            self.download_progress_bar.setValue(self.current_tile_index)
+            self.download_progress_bar.setFormat("%v of %m")
         
         self.download_single_grid(params, tile_path, self.on_tile_download_finished, self.format_type)
 
@@ -1147,6 +1169,11 @@ class GMRTGrabber(QWidget):
         """Callback for single download completion"""
         self.download_btn.setEnabled(True)
         self.download_btn.setText("Download Grid")
+        if hasattr(self, 'download_progress_bar'):
+            self.download_progress_bar.setVisible(False)
+            self.download_progress_bar.setMaximum(1)
+            self.download_progress_bar.setValue(0)
+            self.download_progress_bar.setFormat("%v of %m")
         if success:
             path_to_load = result
             # If split enabled: split first (deletes combined), then tell SAT Planner to load the bathy grid
@@ -1176,6 +1203,12 @@ class GMRTGrabber(QWidget):
             
             # Move to next tile
             self.current_tile_index += 1
+            if hasattr(self, 'download_progress_bar'):
+                self.download_progress_bar.setVisible(True)
+                self.download_progress_bar.setMinimum(0)
+                self.download_progress_bar.setMaximum(len(self.tiles_to_download))
+                self.download_progress_bar.setValue(self.current_tile_index)
+                self.download_progress_bar.setFormat("%v of %m")
             
             # Schedule next download with a 2-second delay
             if self.current_tile_index < len(self.tiles_to_download):
@@ -1277,6 +1310,11 @@ class GMRTGrabber(QWidget):
                     # Finish with success message
                     self.download_btn.setEnabled(True)
                     self.download_btn.setText("Download Grid")
+                    if hasattr(self, 'download_progress_bar'):
+                        self.download_progress_bar.setVisible(False)
+                        self.download_progress_bar.setMaximum(1)
+                        self.download_progress_bar.setValue(0)
+                        self.download_progress_bar.setFormat("%v of %m")
                     self.log_message(f"Mosaicking completed successfully: {os.path.basename(mosaic_path)}")
                     self.status_label.setText(f"Mosaic complete: {os.path.basename(mosaic_path)} in {self.download_dir}")
                     QMessageBox.information(self, "Success", f"Mosaicked {len(self.downloaded_tile_files)} tiles into:\n{mosaic_path}")
@@ -1288,6 +1326,11 @@ class GMRTGrabber(QWidget):
                 self.status_label.setText("Mosaicking failed")
                 self.download_btn.setText("Download Grid")
                 self.download_btn.setEnabled(True)
+                if hasattr(self, 'download_progress_bar'):
+                    self.download_progress_bar.setVisible(False)
+                    self.download_progress_bar.setMaximum(1)
+                    self.download_progress_bar.setValue(0)
+                    self.download_progress_bar.setFormat("%v of %m")
                 QMessageBox.critical(self, "Mosaicking Error", f"Mosaicking failed:\n{result}")
                 self.finish_tile_download()
                 
@@ -1303,6 +1346,11 @@ class GMRTGrabber(QWidget):
         """Finish the tile download process without mosaicking"""
         self.download_btn.setEnabled(True)
         self.download_btn.setText("Download Grid")
+        if hasattr(self, 'download_progress_bar'):
+            self.download_progress_bar.setVisible(False)
+            self.download_progress_bar.setMaximum(1)
+            self.download_progress_bar.setValue(0)
+            self.download_progress_bar.setFormat("%v of %m")
         self.log_message(f"All tiles completed: {self.success_count}/{len(self.tiles_to_download)} successful")
         self.status_label.setText(f"Download complete: {self.success_count}/{len(self.tiles_to_download)} tiles in {self.download_dir}")
         QMessageBox.information(self, "Success", f"Downloaded {self.success_count}/{len(self.tiles_to_download)} tiles to:\n{self.download_dir}")

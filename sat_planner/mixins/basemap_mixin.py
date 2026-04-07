@@ -3,8 +3,10 @@ Basemap and web imagery: ArcGIS World Imagery tiles, NOAA ENC Charts overlay.
 Toggle, load, and display; reload on zoom/pan is coordinated from map_interaction_mixin.
 """
 import traceback
+import json
 import numpy as np
 from urllib.request import urlopen, Request
+from urllib.parse import urlencode
 from io import BytesIO
 
 from PIL import Image
@@ -70,6 +72,37 @@ class BasemapMixin:
                 self.canvas.draw_idle()
             except Exception as e:
                 print(f"Error updating NOAA charts opacity: {e}")
+
+    def _toggle_eez_layer(self):
+        """Toggle World EEZ overlay on/off."""
+        if hasattr(self, 'eez_checkbox'):
+            self.show_eez_var = self.eez_checkbox.isChecked()
+            if hasattr(self, 'eez_opacity_slider'):
+                self.eez_opacity_slider.setEnabled(self.show_eez_var)
+            if hasattr(self, 'eez_opacity_label'):
+                self.eez_opacity_label.setEnabled(self.show_eez_var)
+            if not self.show_eez_var:
+                if hasattr(self, 'eez_image_plot') and self.eez_image_plot is not None:
+                    try:
+                        self.eez_image_plot.remove()
+                    except Exception:
+                        pass
+                    self.eez_image_plot = None
+                self.canvas.draw_idle()
+            else:
+                self._load_and_plot_eez(force_reload=True)
+
+    def _update_eez_opacity(self, value):
+        """Update EEZ layer opacity."""
+        self.eez_opacity = value
+        if hasattr(self, 'eez_opacity_label'):
+            self.eez_opacity_label.setText(f"Opacity: {value}%")
+        if hasattr(self, 'eez_image_plot') and self.eez_image_plot is not None:
+            try:
+                self.eez_image_plot.set_alpha(value / 100.0)
+                self.canvas.draw_idle()
+            except Exception as e:
+                print(f"Error updating EEZ opacity: {e}")
 
     def _load_and_plot_basemap(self, force_reload=False):
         """Load and display ArcGIS World Imagery basemap tiles."""
@@ -292,3 +325,126 @@ class BasemapMixin:
         except Exception as e:
             print(f"Error loading NOAA charts: {e}")
             traceback.print_exc()
+
+    def _load_and_plot_eez(self, force_reload=False):
+        """Load and display World EEZ polygons from ArcGIS REST as a transparent overlay image."""
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            if not xlim or not ylim or xlim[0] >= xlim[1] or ylim[0] >= ylim[1]:
+                return
+            extent_width = xlim[1] - xlim[0]
+            extent_height = ylim[1] - ylim[0]
+            current_extent = (xlim[0], xlim[1], ylim[0], ylim[1])
+            if not force_reload:
+                if hasattr(self, '_last_eez_extent') and self._last_eez_extent is not None:
+                    last = self._last_eez_extent
+                    lw, lh = last[1] - last[0], last[3] - last[2]
+                    wc = abs(extent_width - lw) / max(extent_width, lw) if max(extent_width, lw) > 0 else 1.0
+                    hc = abs(extent_height - lh) / max(extent_height, lh) if max(extent_height, lh) > 0 else 1.0
+                    cx = (xlim[0] + xlim[1]) / 2
+                    cy = (ylim[0] + ylim[1]) / 2
+                    lcx, lcy = (last[0] + last[1]) / 2, (last[2] + last[3]) / 2
+                    cxc = abs(cx - lcx) / extent_width if extent_width > 0 else 0
+                    cyc = abs(cy - lcy) / extent_height if extent_height > 0 else 0
+                    if wc < 0.15 and hc < 0.15 and cxc < 0.25 and cyc < 0.25:
+                        return
+            self._last_eez_extent = current_extent
+            width = xlim[1] - xlim[0]
+            height = ylim[1] - ylim[0]
+            base_padding = 0.12
+            padded_xlim = (xlim[0] - width * base_padding, xlim[1] + width * base_padding)
+            padded_ylim = (ylim[0] - height * base_padding, ylim[1] + height * base_padding)
+            width_px = 1400
+            height_px = max(600, int(width_px * ((padded_ylim[1] - padded_ylim[0]) / max((padded_xlim[1] - padded_xlim[0]), 1e-9))))
+            height_px = min(height_px, 2048)
+
+            bbox_4326 = f"{padded_xlim[0]},{padded_ylim[0]},{padded_xlim[1]},{padded_ylim[1]}"
+            base_url = "https://gis.ccom.unh.edu/server/rest/services/Global/World_EEZ_V12_20231025/MapServer/export"
+            params = {
+                'bbox': bbox_4326,
+                'bboxSR': '4326',
+                'imageSR': '4326',
+                'size': f"{width_px},{height_px}",
+                'format': 'png32',
+                'transparent': 'true',
+                'f': 'image',
+                'layers': 'show:0'
+            }
+            url = f"{base_url}?{'&'.join([f'{k}={v}' for k, v in params.items()])}"
+            req = Request(url, headers={'User-Agent': 'SAT_Planner'})
+            with urlopen(req, timeout=10) as response:
+                img_data = response.read()
+            if len(img_data) < 8 or img_data[:8] != b'\x89PNG\r\n\x1a\n':
+                return
+            img = Image.open(BytesIO(img_data))
+            img_array = np.array(img)
+            if hasattr(self, 'eez_image_plot') and self.eez_image_plot is not None:
+                try:
+                    self.eez_image_plot.remove()
+                except Exception:
+                    pass
+            current_aspect = self.ax.get_aspect()
+            current_xlim_before = self.ax.get_xlim()
+            current_ylim_before = self.ax.get_ylim()
+            alpha = self.eez_opacity / 100.0 if hasattr(self, 'eez_opacity') else 0.5
+            self.eez_image_plot = self.ax.imshow(
+                img_array,
+                extent=[padded_xlim[0], padded_xlim[1], padded_ylim[0], padded_ylim[1]],
+                origin='upper',
+                zorder=-0.8,
+                alpha=alpha,
+                interpolation='bilinear'
+            )
+            if self.ax.get_xlim() != current_xlim_before or self.ax.get_ylim() != current_ylim_before:
+                self.ax.set_xlim(current_xlim_before)
+                self.ax.set_ylim(current_ylim_before)
+                if current_aspect != 'auto':
+                    self.ax.set_aspect(current_aspect, adjustable='datalim')
+            self.canvas.draw_idle()
+        except Exception as e:
+            print(f"Error loading EEZ layer: {e}")
+
+    def _get_eez_geoname_at_point(self, lat, lon):
+        """Return EEZ GEONAME for a point in WGS84, or None."""
+        try:
+            if lat is None or lon is None:
+                return None
+            # Tiny cache to avoid repeated lookups on the same click point.
+            cache_key = (round(float(lat), 5), round(float(lon), 5))
+            if not hasattr(self, '_eez_point_query_cache'):
+                self._eez_point_query_cache = {}
+            if cache_key in self._eez_point_query_cache:
+                return self._eez_point_query_cache[cache_key]
+
+            base_url = "https://gis.ccom.unh.edu/server/rest/services/Global/World_EEZ_V12_20231025/MapServer/0/query"
+            params = {
+                "f": "json",
+                "geometry": f"{float(lon)},{float(lat)}",
+                "geometryType": "esriGeometryPoint",
+                "inSR": "4326",
+                "spatialRel": "esriSpatialRelIntersects",
+                "outFields": "GEONAME",
+                "returnGeometry": "false",
+                "where": "1=1",
+            }
+            url = f"{base_url}?{urlencode(params)}"
+            req = Request(url, headers={"User-Agent": "SAT_Planner"})
+            with urlopen(req, timeout=6) as response:
+                payload = response.read()
+            data = json.loads(payload.decode("utf-8"))
+            features = data.get("features") if isinstance(data, dict) else None
+            geoname = None
+            if isinstance(features, list) and features:
+                attrs = features[0].get("attributes", {}) if isinstance(features[0], dict) else {}
+                geoname = attrs.get("GEONAME") if isinstance(attrs, dict) else None
+                if geoname is not None:
+                    geoname = str(geoname).strip() or None
+
+            # Keep cache small and bounded.
+            if len(self._eez_point_query_cache) > 300:
+                self._eez_point_query_cache.clear()
+            self._eez_point_query_cache[cache_key] = geoname
+            return geoname
+        except Exception:
+            return None

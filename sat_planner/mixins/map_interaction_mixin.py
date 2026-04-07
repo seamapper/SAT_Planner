@@ -196,14 +196,42 @@ class MapInteractionMixin:
             print("DEBUG: Clicked coordinates are None. Returning.")
             return
 
-        # Show slope information if in shaded relief or slope visualization mode
+        # Show click tooltip on map including optional EEZ name.
+        lat_str = decimal_degrees_to_ddm(clicked_lat, is_latitude=True)
+        lon_str = decimal_degrees_to_ddm(clicked_lon, is_latitude=False)
+        elevation = None
+        slope = None
         if hasattr(self, 'hillshade_vs_slope_viz_mode') and self.hillshade_vs_slope_viz_mode in ["hillshade", "slope_viz"]:
             elevation, slope = self._calculate_slope_at_point(clicked_lat, clicked_lon)
-            if elevation is not None and slope is not None:
-                lat_str = decimal_degrees_to_ddm(clicked_lat, is_latitude=True)
-                lon_str = decimal_degrees_to_ddm(clicked_lon, is_latitude=False)
-                info_msg = f"Lat: {lat_str}, Lon: {lon_str}, Slope: {slope:.1f}°, Depth: {abs(elevation):.1f}m"
-                print(f"INFO: {info_msg}")
+        depth_str = f"{abs(elevation):.1f} m" if elevation is not None and not np.isnan(elevation) else "-"
+        slope_str = f"{slope:.1f}°" if slope is not None and not np.isnan(slope) else "-"
+        eez_name = None
+        if getattr(self, 'show_eez_var', False) and hasattr(self, '_get_eez_geoname_at_point'):
+            eez_name = self._get_eez_geoname_at_point(clicked_lat, clicked_lon)
+        info_lines = [
+            f"Lat: {lat_str}",
+            f"Lon: {lon_str}",
+            f"Depth: {depth_str}",
+            f"Slope: {slope_str}",
+        ]
+        if getattr(self, 'show_eez_var', False):
+            info_lines.append(f"EEZ: {eez_name if eez_name else '-'}")
+        info_msg = "\n".join(info_lines)
+        if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
+            self.mouse_hover_info_text.set_text(info_msg)
+            self.mouse_hover_info_text.set_visible(True)
+        else:
+            self.mouse_hover_info_text = self.ax.text(
+                0.02, 0.98, info_msg,
+                transform=self.ax.transAxes,
+                fontsize=9,
+                va='top',
+                ha='left',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                zorder=13
+            )
+        self.canvas.draw_idle()
+        print(f"INFO: {info_msg.replace(chr(10), ', ')}")
 
         # Temporarily block signals to prevent auto-regenerate from triggering zoom
         self.central_lat_entry.blockSignals(True)
@@ -462,6 +490,13 @@ class MapInteractionMixin:
                 self._noaa_charts_reload_timer.timeout.connect(self._load_and_plot_noaa_charts)
             self._noaa_charts_reload_timer.stop()
             self._noaa_charts_reload_timer.start(150)
+        if hasattr(self, 'show_eez_var') and self.show_eez_var:
+            if not hasattr(self, '_eez_reload_timer'):
+                self._eez_reload_timer = QTimer()
+                self._eez_reload_timer.setSingleShot(True)
+                self._eez_reload_timer.timeout.connect(self._load_and_plot_eez)
+            self._eez_reload_timer.stop()
+            self._eez_reload_timer.start(200)
 
         # Use draw_idle() for non-blocking updates during zoom
         self.canvas.draw_idle()
@@ -527,6 +562,13 @@ class MapInteractionMixin:
                 self._noaa_charts_reload_timer.timeout.connect(self._load_and_plot_noaa_charts)
             self._noaa_charts_reload_timer.stop()
             self._noaa_charts_reload_timer.start(150)
+        if hasattr(self, 'show_eez_var') and self.show_eez_var:
+            if not hasattr(self, '_eez_reload_timer'):
+                self._eez_reload_timer = QTimer()
+                self._eez_reload_timer.setSingleShot(True)
+                self._eez_reload_timer.timeout.connect(self._load_and_plot_eez)
+            self._eez_reload_timer.stop()
+            self._eez_reload_timer.start(200)
 
     def _zoom_to_plan(self):
         all_lats = []
@@ -967,6 +1009,7 @@ class MapInteractionMixin:
     def _on_mouse_motion(self, event):
         """Handle all mouse motion events including hover info, line planning, pitch line, and pick center."""
         if event.inaxes != self.ax:
+            self._cancel_eez_hover_lookup()
             if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
                 self.mouse_hover_info_text.set_visible(False)
                 self.mouse_hover_info_text = None
@@ -977,6 +1020,7 @@ class MapInteractionMixin:
         mouse_lat = event.ydata
 
         if mouse_lon is None or mouse_lat is None:
+            self._cancel_eez_hover_lookup()
             if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
                 self.mouse_hover_info_text.set_visible(False)
                 self.mouse_hover_info_text = None
@@ -984,10 +1028,12 @@ class MapInteractionMixin:
             return
 
         if hasattr(self, 'line_planning_mode') and self.line_planning_mode and len(self.line_planning_points) >= 1:
+            self._cancel_eez_hover_lookup()
             self._on_line_planning_motion(event)
             return
 
         if hasattr(self, 'pick_pitch_line_mode') and self.pick_pitch_line_mode:
+            self._cancel_eez_hover_lookup()
             if len(self.pitch_line_points) == 0:
                 if hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None:
                     elevation, slope = self._calculate_slope_at_point(mouse_lat, mouse_lon)
@@ -1047,6 +1093,7 @@ class MapInteractionMixin:
             return
 
         if hasattr(self, 'pick_center_mode') and self.pick_center_mode:
+            self._cancel_eez_hover_lookup()
             if hasattr(self, 'pick_center_crosshair') and self.pick_center_crosshair is not None:
                 self.pick_center_crosshair.remove()
             self.pick_center_crosshair, = self.ax.plot(mouse_lon, mouse_lat, '+', color='red', markersize=15, markeredgewidth=2)
@@ -1054,6 +1101,7 @@ class MapInteractionMixin:
             return
 
         if hasattr(self, 'pick_roll_line_mode') and self.pick_roll_line_mode:
+            self._cancel_eez_hover_lookup()
             if len(self.roll_line_points) == 1:
                 lats = [self.roll_line_points[0][0], mouse_lat]
                 lons = [self.roll_line_points[0][1], mouse_lon]
@@ -1097,34 +1145,92 @@ class MapInteractionMixin:
                 hasattr(self, 'pick_center_mode') and self.pick_center_mode or
                 hasattr(self, 'pick_roll_line_mode') and self.pick_roll_line_mode):
 
-            if not (hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None):
+            has_geotiff = hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None
+            if not has_geotiff and not getattr(self, 'show_eez_var', False):
+                self._cancel_eez_hover_lookup()
                 if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
                     self.mouse_hover_info_text.set_visible(False)
                     self.mouse_hover_info_text = None
                     self.canvas.draw_idle()
                 return
 
-            elevation, slope = self._calculate_slope_at_point(mouse_lat, mouse_lon)
-            try:
-                elev_str = f"{elevation:.1f} m" if elevation is not None and not np.isnan(elevation) else "-"
-                slope_str = f"{slope:.1f}°" if slope is not None and not np.isnan(slope) else "-"
-            except Exception:
-                elev_str = "-"
-                slope_str = "-"
-
-            lat_str = decimal_degrees_to_ddm(mouse_lat, is_latitude=True)
-            lon_str = decimal_degrees_to_ddm(mouse_lon, is_latitude=False)
-            info_str = f"Lat: {lat_str}\nLon: {lon_str}\nElevation: {elev_str}\nSlope: {slope_str}"
-
-            if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
-                self.mouse_hover_info_text.set_text(info_str)
-                self.mouse_hover_info_text.set_visible(True)
-            else:
-                self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes,
-                                                         fontsize=9, va='top', ha='left',
-                                                         bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
-                                                         zorder=13)
+            self._hover_mouse_lat = mouse_lat
+            self._hover_mouse_lon = mouse_lon
+            self._update_default_hover_info(mouse_lat, mouse_lon)
+            self._schedule_eez_hover_lookup(mouse_lat, mouse_lon)
             self.canvas.draw_idle()
+
+    def _cancel_eez_hover_lookup(self):
+        if hasattr(self, '_eez_hover_timer') and self._eez_hover_timer is not None:
+            self._eez_hover_timer.stop()
+        self._eez_hover_lookup_point = None
+
+    def _schedule_eez_hover_lookup(self, mouse_lat, mouse_lon):
+        """Schedule an EEZ point query after cursor dwell."""
+        if not (getattr(self, 'show_eez_var', False) and hasattr(self, '_get_eez_geoname_at_point')):
+            self._cancel_eez_hover_lookup()
+            return
+        self._eez_hover_lookup_point = (float(mouse_lat), float(mouse_lon))
+        if not hasattr(self, '_eez_hover_timer') or self._eez_hover_timer is None:
+            self._eez_hover_timer = QTimer()
+            self._eez_hover_timer.setSingleShot(True)
+            self._eez_hover_timer.timeout.connect(self._perform_eez_hover_lookup)
+        self._eez_hover_timer.stop()
+        self._eez_hover_timer.start(450)
+
+    def _perform_eez_hover_lookup(self):
+        """Run EEZ query for the most recent dwell point and refresh tooltip."""
+        if not (getattr(self, 'show_eez_var', False) and hasattr(self, '_get_eez_geoname_at_point')):
+            return
+        point = getattr(self, '_eez_hover_lookup_point', None)
+        if not point:
+            return
+        lat, lon = point
+        geoname = self._get_eez_geoname_at_point(lat, lon)
+        self._hover_eez_lookup_point = point
+        self._hover_eez_name = geoname
+        # Only refresh if cursor is still near the queried point.
+        current_lat = getattr(self, '_hover_mouse_lat', None)
+        current_lon = getattr(self, '_hover_mouse_lon', None)
+        if current_lat is None or current_lon is None:
+            return
+        if abs(current_lat - lat) > 0.001 or abs(current_lon - lon) > 0.001:
+            return
+        self._update_default_hover_info(current_lat, current_lon)
+        self.canvas.draw_idle()
+
+    def _update_default_hover_info(self, mouse_lat, mouse_lon):
+        """Render the default hover text and include EEZ info when enabled."""
+        elevation, slope = (None, None)
+        if hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None:
+            elevation, slope = self._calculate_slope_at_point(mouse_lat, mouse_lon)
+        try:
+            elev_str = f"{elevation:.1f} m" if elevation is not None and not np.isnan(elevation) else "-"
+            slope_str = f"{slope:.1f}°" if slope is not None and not np.isnan(slope) else "-"
+        except Exception:
+            elev_str = "-"
+            slope_str = "-"
+        lat_str = decimal_degrees_to_ddm(mouse_lat, is_latitude=True)
+        lon_str = decimal_degrees_to_ddm(mouse_lon, is_latitude=False)
+        info_str = f"Lat: {lat_str}\nLon: {lon_str}\nElevation: {elev_str}\nSlope: {slope_str}"
+        if getattr(self, 'show_eez_var', False):
+            eez_name = None
+            lookup_point = getattr(self, '_hover_eez_lookup_point', None)
+            if lookup_point and abs(lookup_point[0] - mouse_lat) <= 0.001 and abs(lookup_point[1] - mouse_lon) <= 0.001:
+                eez_name = getattr(self, '_hover_eez_name', None)
+            else:
+                # Point moved; clear stale EEZ name until dwell query refreshes.
+                self._hover_eez_name = None
+                self._hover_eez_lookup_point = None
+            info_str += f"\nEEZ: {eez_name if eez_name else '...'}"
+        if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
+            self.mouse_hover_info_text.set_text(info_str)
+            self.mouse_hover_info_text.set_visible(True)
+        else:
+            self.mouse_hover_info_text = self.ax.text(0.02, 0.98, info_str, transform=self.ax.transAxes,
+                                                     fontsize=9, va='top', ha='left',
+                                                     bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+                                                     zorder=13)
 
     def _hide_map_hover_tooltip_for_export(self):
         """Hide on-map hover tooltip (lat/lon, depth, etc.) so exported map PNGs are clean."""

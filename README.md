@@ -18,7 +18,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **Dark Theme**: Qt GUI always uses a dark theme; map (matplotlib) keeps default styling
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
 - **GMRT Download**: Optional download of GMRT bathymetry GeoTIFF when importing surveys (Calibration, Accuracy, Line tabs; configurable buffer)
-- **Download GMRT GeoTIFF**: Button opens a separate "Download GMRT Grid" dialog to fetch GMRT bathymetry as GeoTIFF; when split (topo/bathy) is used, SAT Planner loads the bathy grid
+- **Download Data**: Source selector in GeoTIFF Controls (default `Select Source`; current source `GMRT`) opens the "Download GMRT Grid" dialog immediately on selection and keeps the selected source after successful download
 - **Dynamic Resolution**: Automatically adjust GeoTIFF resolution based on zoom level
 - **Interactive Plotting**: Pan (middle mouse), zoom (scroll), and interact with survey plans on the map (no toolbar)
 - **Real-time Statistics**: Calculate survey distances, times, and comprehensive statistics
@@ -26,6 +26,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **Activity Log**: Collapsible side panel below the map (expand/collapse strip)
 - **Export Capabilities**: Export survey plans in CSV and Shapefile formats
 - **Survey Import**: Import calibration/accuracy/line plans from DDD, DMS, DMM, LNW, CSV, and GeoJSON
+- **EEZ Overlay**: EEZ layer with opacity control (default 100%) and hover `GEONAME` tooltip lookup
 
 ### Calibration Survey Planning
 - Draw pitch and roll calibration lines interactively
@@ -45,10 +46,10 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Auto-regenerate plans when parameters change (with debounce)
 - Configure line length, spacing, heading, speed, and turn time
 - Import accuracy surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON); **suggested crossline and reference line order** (crossline by orientation, reference lines in file order); optional GMRT download after import (checkbox + buffer)
-- **Reference Survey Info** dialog and *_info.txt with **Reference Waypoints (DMM)** and **Reference Waypoints (DDD)** sections (L1S/L1E, L2S/L2E, …, CLS/CLE)
+- **Accuracy Survey Info** dialog and *_info.txt with **Accuracy Waypoints (DMM)** and **Accuracy Waypoints (DDD)** sections (L1S/L1E, L2S/L2E, …, CLS/CLE)
 - Calculate comprehensive survey statistics with time breakdowns
 - Survey time breakdown showing main lines, crossline, transit, and turn times
-- Export reference survey plans with detailed statistics (shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`)
+- Export accuracy survey plans with detailed statistics (shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`)
 
 ### Line Planning
 - Interactive line drawing with waypoint support
@@ -70,6 +71,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Survey plan axis labels in degrees–decimal minutes (DDM)
 - Contour interval and slope min/max entry updates are debounced while typing
 - Survey legend is drawn above map overlays/layers
+- EEZ overlay reloads on pan/zoom and supports paused-hover name lookup
 
 ### GeoJSON Metadata
 - Calibration, Accuracy, and Line GeoJSON exports include `survey_speed`
@@ -126,7 +128,7 @@ The application is organized as a package plus a launcher:
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `SAT_Planner_v2026.10.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
+- `SAT_Planner_v2026.14.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
 - `SAT_Planner.app` (macOS) — if available
 
 No installation required - just run the executable or app bundle.
@@ -188,12 +190,12 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 
 ### Basic Workflow
 
-1. **Load GeoTIFF** (optional): Click "Load GeoTIFF" to load elevation data, or click "Download GMRT GeoTIFF" to open the GMRT dialog and download bathymetry (GeoTIFF-only; if you use split, the app loads the bathy grid)
+1. **Load GeoTIFF** (optional): Click "Load GeoTIFF" to load elevation data, or use **Download Data** -> **GMRT** to open the GMRT dialog and download bathymetry (GeoTIFF-only; if you use split, the app loads the bathy grid)
 2. **Enable Map Overlays** (optional): Toggle Imagery Basemap or NOAA ENC Charts checkboxes and adjust opacity sliders
-3. **Select Planning Mode**: Choose between Calibration, Reference, or Line tabs
+3. **Select Planning Mode**: Choose between Calibration, Accuracy, or Line tabs
 4. **Configure Parameters**: Set survey parameters in the appropriate tab
 5. **Generate/Plan**: Create survey lines based on parameters or draw interactively
-6. **View Statistics**: Click the survey info button to open **Calibration Survey Info**, **Reference Survey Info**, or **Survey Info** (Line tab) dialogs
+6. **View Statistics**: Click the survey info button to open **Calibration Survey Info**, **Accuracy Survey Info**, or **Survey Info** (Line tab) dialogs
 7. **Export**: Save survey plans using the Export buttons
 
 ### Calibration Survey Planning
@@ -233,12 +235,13 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 
 ### Download GMRT Grid Dialog
 
-Click **"Download GMRT GeoTIFF"** in the GeoTIFF Control section to open the **Download GMRT Grid** window (separate from the main app). In the dialog you can:
+Use **Download Data** -> **GMRT** in the GeoTIFF Control section to open the **Download GMRT Grid** window (separate from the main app). In the dialog you can:
 
 - Set the area of interest (North/South/East/West or draw on the map)
 - Choose **Cell Resolution**: 100 m, 200 m, 400 m, or **Custom** (e.g. 50 m); default is 100 m
 - Optionally **Split Grid Into Bathymetry and Topography**; when enabled, SAT Planner loads the bathymetry grid after download
 - A warning (orange text) appears when estimated pixels exceed 16,000,000
+- Download progress displays in-dialog (tile mode: `x of y`; single-grid mode: indeterminate "Downloading...")
 - Use **"Close GMRT Downloader"** at the bottom to close the dialog
 
 Downloads are always GeoTIFF. The dialog uses its own config: `~/.gmrtgrab_sat_planner_config.json`.
@@ -268,7 +271,7 @@ The application saves configuration in:
 - **SIS asciiplan**: ASCII plan format for SIS
 - **Hypack LNW**: LNW format for Hypack (UTM zone computed from survey points when needed)
 - **Shapefile**: Geospatial vector format for GIS applications
-- **Statistics / *_info.txt**: Text reports with distances, timing, survey details, and waypoint sections (DMM then DDD) for Calibration, Reference, and Line plans
+- **Statistics / *_info.txt**: Text reports with distances, timing, survey details, and waypoint sections (DMM then DDD) for Calibration, Accuracy, and Line plans
 
 ## Navigation
 
@@ -311,6 +314,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.14**: Added GeoTIFF Controls **Download Data** source dropdown (`Select Source`, `GMRT`) that opens the source flow immediately and keeps selection after successful download. Added GMRT dialog download progress bar (`x of y` for tiled downloads, indeterminate for single download). Added EEZ opacity default 100%, pan/zoom-driven EEZ refresh, and paused-hover EEZ `GEONAME` tooltip lookups (including without a loaded GeoTIFF). Fixed line-plan zoom GeoTIFF coverage refresh, line-plan profile refresh after import, and calibration Pitch Line Info refresh after survey import.
 - **v2026.11**: UI and workflow updates. Accuracy tab naming in UI/docs (formerly Reference). Import/Export button labels updated (Import/Export Accuracy Survey, Import/Export Calibration Survey, Import/Export Line Survey) and reordered on tabs. "Download GMRT" defaults to unchecked and placement updated in import/export groups. Activity Log changed to collapsible side panel. GeoJSON export/import now includes `survey_speed` and saved `geotiff_path` for Calibration/Accuracy/Line; missing GeoTIFF path does not block import (warning + continue). Contour interval and slope min/max redraws are debounced while typing. Survey legend now draws above all overlays.
 - **v2026.10**: Shared export utilities (`sat_planner/export_utils.py`): DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points. Calibration/Reference/Line planning use these writers. Calibration: **Reverse Line Direction** (Pitch/Roll/Heading1/Heading2); **import suggestion** from metadata (PLS/PLE, RLS/RLE, H1S/H1E, H2S/H2E) or geometry (Pitch = middle parallel, Roll = fourth line, Heading1/2 = outer two). Reference: **import suggestion** (crossline + reference lines). Line planning: **Reverse Line Direction**. Survey info dialogs: **Calibration Survey Info**, **Reference Survey Info**, **Survey Info** (Line); *_info.txt waypoints as **Calibration Waypoints (DMM/DDD)**, **Reference Waypoints (DMM/DDD)**, **Line Plan Waypoints (DMM/DDD)**. Exe build uses version from `sat_planner/constants.py`; output `dist/SAT_Planner_v2026.10.exe`.
 - **v2026.09** (or later): Integrated GMRT Download dialog: "Download GMRT GeoTIFF" button opens a separate "Download GMRT Grid" window. Dialog is GeoTIFF-only (no output format selector); cell resolution 100/200/400 m or Custom (default 50 m), default preset 100 m. Large-area warning when estimated pixels > 16,000,000 (orange). When split (topo/bathy) is used, SAT Planner loads the bathy grid. "Close GMRT Downloader" button at bottom of dialog. Activity Log width 320 px.

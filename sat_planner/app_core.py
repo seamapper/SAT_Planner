@@ -311,6 +311,22 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self.noaa_charts_opacity_label.setEnabled(False)
             if not hasattr(self, 'noaa_charts_image_plot'):
                 self.noaa_charts_image_plot = None
+            self.show_eez_var = False
+            self.eez_checkbox = QCheckBox("Show EEZs")
+            self.eez_checkbox.setChecked(self.show_eez_var)
+            self.eez_checkbox.stateChanged.connect(self._toggle_eez_layer)
+            self.eez_opacity = 100
+            self.eez_opacity_label = QLabel(f"Opacity: {self.eez_opacity}%")
+            self.eez_opacity_label.setEnabled(False)
+            self.eez_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+            self.eez_opacity_slider.setMinimum(0)
+            self.eez_opacity_slider.setMaximum(100)
+            self.eez_opacity_slider.setValue(self.eez_opacity)
+            self.eez_opacity_slider.setMaximumWidth(100)
+            self.eez_opacity_slider.setEnabled(False)
+            self.eez_opacity_slider.valueChanged.connect(self._update_eez_opacity)
+            if not hasattr(self, 'eez_image_plot'):
+                self.eez_image_plot = None
 
         # About button (only create once)
         if not hasattr(self, 'about_btn'):
@@ -555,6 +571,13 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                     if hasattr(self, 'noaa_charts_opacity_slider'):
                         self.noaa_charts_opacity_slider.setMaximumWidth(100)
                         checkbox_button_layout.addWidget(self.noaa_charts_opacity_slider)
+                if hasattr(self, 'eez_checkbox'):
+                    checkbox_button_layout.addWidget(self.eez_checkbox)
+                    if hasattr(self, 'eez_opacity_label'):
+                        checkbox_button_layout.addWidget(self.eez_opacity_label)
+                    if hasattr(self, 'eez_opacity_slider'):
+                        self.eez_opacity_slider.setMaximumWidth(100)
+                        checkbox_button_layout.addWidget(self.eez_opacity_slider)
                 checkbox_button_layout.addStretch()
                 if hasattr(self, 'about_btn'):
                     checkbox_button_layout.addWidget(self.about_btn)

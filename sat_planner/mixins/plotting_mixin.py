@@ -980,6 +980,10 @@ class PlottingMixin:
                 # Fallback to auto if calculation fails
                 self.ax.set_aspect('auto')
 
+            # Plot EEZ overlay just above bathymetry and below most other layers.
+            if hasattr(self, 'show_eez_var') and self.show_eez_var:
+                self._load_and_plot_eez(force_reload=True)
+
             # Plot NOAA ENC Charts overlay if enabled (plot last so it overlays everything)
             if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
                 self._load_and_plot_noaa_charts(force_reload=True)

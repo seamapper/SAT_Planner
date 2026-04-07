@@ -1421,6 +1421,7 @@ class CalibrationMixin:
                 self._show_message("error","Import Error", f"Unsupported file format: {file_ext}")
                 return
             params = None
+            imported_line_offset = None
             base_path = os.path.splitext(file_path)[0]
             metadata_path = os.path.join(os.path.dirname(file_path), os.path.basename(base_path) + "_params.json")
             if os.path.exists(metadata_path):
@@ -1432,6 +1433,7 @@ class CalibrationMixin:
             if params and isinstance(params, dict):
                 try:
                     if params.get('line_offset') is not None:
+                        imported_line_offset = params.get('line_offset')
                         self.cal_line_offset_entry.setText(str(params['line_offset']))
                     if params.get('export_name'):
                         self.cal_export_name_entry.setText(params['export_name'])
@@ -1446,8 +1448,12 @@ class CalibrationMixin:
                     self._load_geotiff_from_path(imported_geojson_geotiff_path)
                 else:
                     self.set_cal_info_text(f"Saved GeoTIFF not found: {imported_geojson_geotiff_path}. Continuing without GeoTIFF.", append=True)
-            if not params or not isinstance(params, dict) or params.get('line_offset') is None:
+            # Always refresh Pitch Line Info fields from current pitch line + GeoTIFF data.
+            # If metadata supplied a line offset, keep that value after refreshing the labels.
+            if hasattr(self, '_update_cal_line_offset_from_pitch_line'):
                 self._update_cal_line_offset_from_pitch_line()
+                if imported_line_offset is not None:
+                    self.cal_line_offset_entry.setText(str(imported_line_offset))
             # Suggested export name: from params, else from loaded GeoTIFF, else defer if GMRT download, else pitch-line or generic
             if not params or not isinstance(params, dict) or not params.get('export_name'):
                 self._set_cal_export_name_after_import()
