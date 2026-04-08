@@ -8,7 +8,7 @@ from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QComboBox, QPushButton,
     QVBoxLayout, QHBoxLayout, QFileDialog, QMessageBox, QDoubleSpinBox,
-    QGroupBox, QFormLayout, QCheckBox, QTextEdit, QSplitter, QFrame, QSizePolicy
+    QGroupBox, QFormLayout, QCheckBox, QTextEdit, QSplitter, QFrame, QSizePolicy, QProgressBar
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QUrl, QRect, QPoint
 from PyQt6.QtGui import QPixmap, QImage, QPainter, QPen, QColor, QIcon
@@ -255,7 +255,7 @@ class GMRTGrabber(QWidget):
         # Split Bathymetry/Topography option
         # When enabled, downloaded grids will be split into topography (>=0) and bathymetry (<0) files
         self.split_checkbox = QCheckBox("Split Grid Into Bathymetry and Topography Grids")
-        self.split_checkbox.setChecked(False)  # Default to unchecked
+        self.split_checkbox.setChecked(True)  # Default to checked
         self.split_checkbox.setToolTip(
             "If checked, each downloaded grid will be split into two files: one with values >= 0 (topography, _topo) and one with values < 0 (bathymetry, _bathy)."
         )

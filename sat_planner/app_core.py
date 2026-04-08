@@ -315,7 +315,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self.eez_checkbox = QCheckBox("Show EEZs")
             self.eez_checkbox.setChecked(self.show_eez_var)
             self.eez_checkbox.stateChanged.connect(self._toggle_eez_layer)
-            self.eez_opacity = 100
+            self.eez_opacity = 80
             self.eez_opacity_label = QLabel(f"Opacity: {self.eez_opacity}%")
             self.eez_opacity_label.setEnabled(False)
             self.eez_opacity_slider = QSlider(Qt.Orientation.Horizontal)
