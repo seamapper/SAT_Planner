@@ -335,6 +335,67 @@ class ProfilesMixin:
             self.set_cal_info_text(msg)
             self.set_cal_info_text("Using Median Depth for Line Offset", append=False)
 
+    def _draw_performance_profile(self):
+        """Draw elevation/slope profile for performance test line 1."""
+        for ax in self.profile_fig.get_axes():
+            if ax != self.profile_ax:
+                ax.remove()
+        self.profile_ax.clear()
+        self.profile_ax.set_title("Performance Line 1 Elevation Profile", fontsize=8)
+        self.profile_ax.set_xlabel("Distance (m)", fontsize=8)
+        self.profile_ax.set_ylabel("Elevation (m)", fontsize=8)
+        self.profile_ax.tick_params(axis='both', which='major', labelsize=7)
+        slope_ax = None
+
+        if not (hasattr(self, 'performance_profile_line') and self.performance_profile_line and len(self.performance_profile_line) == 2):
+            self.profile_fig.tight_layout(pad=1.0)
+            if hasattr(self, 'profile_canvas'):
+                self.profile_canvas.draw_idle()
+            return
+
+        (lat1, lon1), (lat2, lon2) = self.performance_profile_line
+        lats = np.linspace(lat1, lat2, 100)
+        lons = np.linspace(lon1, lon2, 100)
+        elevations, slopes, _ = self._get_profile_data_from_geotiff(lats, lons)
+        if elevations is None:
+            self.profile_fig.tight_layout(pad=1.0)
+            if hasattr(self, 'profile_canvas'):
+                self.profile_canvas.draw_idle()
+            return
+
+        try:
+            geod = pyproj.Geod(ellps="WGS84")
+            dists = [0.0]
+            for i in range(1, len(lats)):
+                _, _, dist = geod.inv(lons[i - 1], lats[i - 1], lons[i], lats[i])
+                dists.append(dists[-1] + dist)
+            dists = np.array(dists)
+        except Exception:
+            dists = np.linspace(0, 1, 100)
+
+        self.profile_ax.plot(dists, elevations, color='darkorange', lw=1.5, label='Elevation')
+        if self.show_slope_profile_var:
+            slope_ax = self.profile_ax.twinx()
+            slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
+            slope_ax.set_ylabel('Slope (deg)', fontsize=8)
+            slope_ax.tick_params(axis='y', labelsize=7)
+            slope_ax.grid(False)
+        self.profile_ax.set_xlim(dists[0], dists[-1])
+        if np.any(~np.isnan(elevations)):
+            self.profile_ax.set_ylim(np.nanmin(elevations), np.nanmax(elevations))
+        if slope_ax and np.any(~np.isnan(slopes)):
+            slope_ax.set_ylim(0, np.nanmax(slopes[~np.isnan(slopes)]) * 1.1)
+
+        handles, labels = self.profile_ax.get_legend_handles_labels()
+        if slope_ax:
+            slope_handles, slope_labels = slope_ax.get_legend_handles_labels()
+            handles.extend(slope_handles)
+            labels.extend(slope_labels)
+        if handles:
+            self.profile_ax.legend(handles, labels, fontsize=10, loc='upper right')
+        self.profile_fig.tight_layout(pad=1.0)
+        self.profile_canvas.draw_idle()
+
     def _draw_current_profile(self):
         if not hasattr(self, 'param_notebook'):
             return
@@ -347,6 +408,8 @@ class ProfilesMixin:
             self._draw_crossline_profile()
         elif current_tab == 2:
             self._draw_line_planning_profile()
+        elif current_tab == 3:
+            self._draw_performance_profile()
         else:
             self.profile_ax.clear()
             self.profile_ax.set_title("Elevation Profile", fontsize=8)

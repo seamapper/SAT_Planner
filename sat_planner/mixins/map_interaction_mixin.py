@@ -25,7 +25,10 @@ class MapInteractionMixin:
 
         self.pick_center_mode = not self.pick_center_mode
         if self.pick_center_mode:
-            self.pick_center_btn.setText("Picking Enabled (Click Plot)")
+            if hasattr(self, 'pick_center_btn'):
+                self.pick_center_btn.setText("Picking Enabled (Click Plot)")
+            if hasattr(self, 'performance_pick_center_btn'):
+                self.performance_pick_center_btn.setText("Picking Enabled (Click Plot)")
             # Change cursor to cross
             self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
             if hasattr(self, 'set_ref_info_text') and self.param_notebook.currentIndex() == 1:
@@ -36,7 +39,10 @@ class MapInteractionMixin:
                 self.pick_center_info_text = None
                 self.canvas.draw_idle()
         else:
-            self.pick_center_btn.setText("Pick Center from GeoTIFF")
+            if hasattr(self, 'pick_center_btn'):
+                self.pick_center_btn.setText("Pick Center from GeoTIFF")
+            if hasattr(self, 'performance_pick_center_btn'):
+                self.performance_pick_center_btn.setText("Pick Center from GeoTIFF")
             # Restore cursor to default
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             # Remove info text if present
@@ -233,14 +239,21 @@ class MapInteractionMixin:
         self.canvas.draw_idle()
         print(f"INFO: {info_msg.replace(chr(10), ', ')}")
 
-        # Temporarily block signals to prevent auto-regenerate from triggering zoom
-        self.central_lat_entry.blockSignals(True)
-        self.central_lon_entry.blockSignals(True)
-        self.central_lat_entry.setText(f"{clicked_lat:.6f}")
-        self.central_lon_entry.setText(f"{clicked_lon:.6f}")
-        self.central_lat_entry.blockSignals(False)
-        self.central_lon_entry.blockSignals(False)
-        print(f"DEBUG: Central Lat/Lon entries updated to: {clicked_lat:.6f}, {clicked_lon:.6f}")
+        current_tab = self.param_notebook.currentIndex() if hasattr(self, 'param_notebook') else -1
+        is_accuracy_tab = current_tab == 1
+        is_performance_tab = current_tab == 3
+
+        if is_accuracy_tab:
+            # Temporarily block signals to prevent auto-regenerate from triggering zoom
+            self.central_lat_entry.blockSignals(True)
+            self.central_lon_entry.blockSignals(True)
+            self.central_lat_entry.setText(f"{clicked_lat:.6f}")
+            self.central_lon_entry.setText(f"{clicked_lon:.6f}")
+            self.central_lat_entry.blockSignals(False)
+            self.central_lon_entry.blockSignals(False)
+        elif is_performance_tab and hasattr(self, '_update_performance_center_from_pick'):
+            self._update_performance_center_from_pick(clicked_lat, clicked_lon)
+        print(f"DEBUG: Center coordinates updated for tab {current_tab}: {clicked_lat:.6f}, {clicked_lon:.6f}")
 
         export_name_to_set = None
 
@@ -268,10 +281,12 @@ class MapInteractionMixin:
                     z_value = self.geotiff_dataset_original.read(1)[row, col]
                     z_value = float(z_value)  # Ensure float type for calculations
                     print(f"DEBUG: Raw Z-value from original GeoTIFF at pixel ({row}, {col}): {z_value}")
+                    if is_performance_tab and hasattr(self, '_update_performance_depth_from_pick'):
+                        self._update_performance_depth_from_pick(z_value)
 
                     # Check if Z-value is valid and represents depth (non-positive elevation)
                     # Using abs(z_value) for multipliers to ensure positive length/distance
-                    if not np.isnan(z_value) and z_value <= 0:
+                    if is_accuracy_tab and not np.isnan(z_value) and z_value <= 0:
 
                         # Store depth so separation multiplier slider can update distance/bisect when slid
                         self._depth_at_picked_point = abs(z_value)
@@ -316,13 +331,13 @@ class MapInteractionMixin:
                             self._show_message("warning","Input Warning",
                                                    "Calculated Line Length is not positive. Not setting Line Length automatically.")
                             print("DEBUG: Warning: Calculated Line Length is not positive after multiplication.")
-                    else:
+                    elif is_accuracy_tab:
                         self._depth_at_picked_point = None
                         self._show_message("warning","GeoTIFF Warning",
                                                f"Invalid Z-value ({z_value}) at clicked location (NaN or positive elevation). Line spacing and length not set.")
                         print(
                             f"DEBUG: Warning: Z-value is NaN or positive ({z_value}). Conditions for setting parameters not met.")
-                else:
+                elif is_accuracy_tab:
                     self._depth_at_picked_point = None
                     self._show_message("warning","GeoTIFF Warning",
                                            f"Clicked location (row={row}, col={col}) is outside GeoTIFF bounds (height={self.geotiff_dataset_original.height}, width={self.geotiff_dataset_original.width}). Line spacing and length not set.")
@@ -333,25 +348,28 @@ class MapInteractionMixin:
                                      f"Failed to read Z-value from GeoTIFF: {e}. See console for more details.")
                 print(f"DEBUG ERROR: Failed to read Z-value from GeoTIFF: {e}")
                 traceback.print_exc()  # Print full traceback for deeper debugging
-        else:
+        elif is_accuracy_tab:
             self._depth_at_picked_point = None
             print("DEBUG: self.geotiff_dataset_original is None. GeoTIFF not loaded.")
 
         # Set export name if calculated
-        if export_name_to_set is not None:
+        if is_accuracy_tab and export_name_to_set is not None:
             self.export_name_entry.clear()
             self.export_name_entry.setText(export_name_to_set)
 
         # Reset "Pick Center from GeoTIFF" button to normal style after center is selected
         if hasattr(self, 'pick_center_btn'):
             self.pick_center_btn.setStyleSheet("")
+        if hasattr(self, 'performance_pick_center_btn'):
+            self.performance_pick_center_btn.setStyleSheet("")
         
         # Stop auto-regenerate timer to prevent it from triggering zoom after we manually generate
         if hasattr(self, 'auto_regenerate_timer'):
             self.auto_regenerate_timer.stop()
         
         self._toggle_pick_center_mode()  # Turn off pick mode after click
-        self._generate_and_plot(show_success_dialog=False, auto_zoom=False)  # Re-generate plot with new center, suppress dialog and zoom
+        if hasattr(self, 'param_notebook') and self.param_notebook.currentIndex() == 1:
+            self._generate_and_plot(show_success_dialog=False, auto_zoom=False)  # Re-generate plot for Accuracy tab
 
     def _on_scroll(self, event):
         """Callback for mouse scroll event to zoom in/out from the center of the window."""

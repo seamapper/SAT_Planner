@@ -40,6 +40,7 @@ from .mixins.survey_parsers_mixin import SurveyParsersMixin
 from .mixins.gmrt_download_mixin import GMRTDownloadMixin
 from .mixins.calibration_mixin import CalibrationMixin
 from .mixins.line_planning_mixin import LinePlanningMixin
+from .mixins.performance_mixin import PerformanceMixin
 from .mixins.profiles_mixin import ProfilesMixin
 from .mixins.map_interaction_mixin import MapInteractionMixin
 from .mixins.export_import_mixin import ExportImportMixin
@@ -47,7 +48,7 @@ from .mixins.config_mixin import ConfigMixin
 from .gmrt_dialog import GMRTGrabber
 
 
-class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, QMainWindow):
+class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, PerformanceMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, QMainWindow):
     CONFIG_FILENAME = CONFIG_FILENAME  # from package
 
     def __init__(self):
@@ -363,6 +364,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.elevation_slope_combo.setEnabled(False)
             if hasattr(self, 'pick_center_btn'):
                 self.pick_center_btn.setEnabled(False)
+            if hasattr(self, 'performance_pick_center_btn'):
+                self.performance_pick_center_btn.setEnabled(False)
             if hasattr(self, 'remove_geotiff_btn'):
                 self.remove_geotiff_btn.setEnabled(False)  # Disable Remove GeoTIFF button
             if hasattr(self, 'zoom_to_geotiff_btn'):
@@ -405,7 +408,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         # Bind parameter changes to update the Export Name
         self.central_lat_entry.textChanged.connect(self._update_export_name)
         # Reset "Pick Center from GeoTIFF" button to normal style when Central Latitude is entered
-        self.central_lat_entry.textChanged.connect(lambda: self.pick_center_btn.setStyleSheet("") if hasattr(self, 'pick_center_btn') and self.central_lat_entry.text().strip() else None)
+        self.central_lat_entry.textChanged.connect(
+            lambda: (
+                self.pick_center_btn.setStyleSheet("") if hasattr(self, 'pick_center_btn') and self.central_lat_entry.text().strip() else None,
+                self.performance_pick_center_btn.setStyleSheet("") if hasattr(self, 'performance_pick_center_btn') and self.central_lat_entry.text().strip() else None
+            )
+        )
         self.central_lon_entry.textChanged.connect(self._update_export_name)
         self.line_length_entry.textChanged.connect(self._update_export_name)
         self.heading_entry.textChanged.connect(self._update_export_name)
@@ -705,8 +713,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         # Use QScrollArea for scrolling
         self.param_scroll = QScrollArea()
         self.param_scroll.setWidgetResizable(True)
-        self.param_scroll.setMaximumWidth(420)
-        self.param_scroll.setMinimumWidth(300)  # Minimum width for visibility
+        self.param_scroll.setMaximumWidth(385)
+        self.param_scroll.setMinimumWidth(385)  # Keep left parameter column at 385 px
         self.param_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # Disable horizontal scrollbar
 
         param_widget = QWidget()
@@ -762,6 +770,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.elevation_slope_combo.setCurrentText("Shaded Relief")  # Set default
         self.elevation_slope_combo.currentTextChanged.connect(self._on_geotiff_display_mode_changed)
         display_layout.addWidget(self.elevation_slope_combo)
+        display_layout.addStretch()
         geotiff_layout.addWidget(display_frame)
         geotiff_layout.addSpacing(3)
 
@@ -786,12 +795,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.show_contours_checkbox.setChecked(self.show_contours_var)
         self.show_contours_checkbox.stateChanged.connect(self._on_contour_checkbox_changed)
         contours_interval_layout.addWidget(self.show_contours_checkbox)
-        contours_interval_layout.addStretch()  # Add stretch to push interval to the right
         contours_interval_layout.addWidget(QLabel("Interval (m):"))
         self.contour_interval_entry = QLineEdit("200")
         self.contour_interval_entry.textChanged.connect(self._on_contour_interval_changed)
         self.contour_interval_entry.setMaximumWidth(80)  # Limit width of entry field
         contours_interval_layout.addWidget(self.contour_interval_entry)
+        contours_interval_layout.addStretch()
         geotiff_layout.addWidget(contours_interval_frame)
         geotiff_layout.addSpacing(3)
 
@@ -803,7 +812,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.show_slope_overlay_checkbox.setChecked(self.show_slope_overlay_var)
         self.show_slope_overlay_checkbox.stateChanged.connect(self._on_slope_overlay_checkbox_changed)
         slope_overlay_layout.addWidget(self.show_slope_overlay_checkbox)
-        slope_overlay_layout.addStretch()  # Add stretch to push min/max to the right
         slope_overlay_layout.addWidget(QLabel("Min:"))
         self.slope_overlay_min_entry = QLineEdit("10")
         self.slope_overlay_min_entry.textChanged.connect(self._on_slope_overlay_min_changed)
@@ -814,6 +822,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.slope_overlay_max_entry.textChanged.connect(self._on_slope_overlay_max_changed)
         self.slope_overlay_max_entry.setMaximumWidth(60)  # Limit width of entry field
         slope_overlay_layout.addWidget(self.slope_overlay_max_entry)
+        slope_overlay_layout.addStretch()
         geotiff_layout.addWidget(slope_overlay_frame)
 
         param_layout.addWidget(geotiff_groupbox)
@@ -830,10 +839,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.reference_frame = QWidget()
         self.calibration_frame = QWidget()
         self.line_planning_frame = QWidget()
+        self.performance_frame = QWidget()
         self.param_notebook.addTab(self.calibration_frame, "Calibration")
         # Label the second tab as 'Accuracy' instead of 'Reference'
         self.param_notebook.addTab(self.reference_frame, "Accuracy")
         self.param_notebook.addTab(self.line_planning_frame, "Line")
+        self.param_notebook.addTab(self.performance_frame, "Performance")
 
         test_planning_layout.addWidget(self.param_notebook)
         param_layout.addWidget(test_planning_groupbox)
@@ -1444,6 +1455,181 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # Add stretch at the bottom to push all groupboxes to the top
         line_layout.setRowStretch(line_row, 1)
+
+        # --- Performance Tab ---
+        performance_layout = QGridLayout(self.performance_frame)
+        performance_layout.setColumnStretch(0, 1)
+        performance_layout.setColumnStretch(1, 2)
+        performance_row = 0
+
+        swath_perf_groupbox = QGroupBox("Swath Performance Parameters")
+        swath_perf_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        swath_perf_layout = QGridLayout(swath_perf_groupbox)
+        swath_perf_layout.setSpacing(3)
+        swath_perf_layout.setContentsMargins(9, 9, 9, 9)
+        swath_perf_layout.setColumnStretch(0, 1)
+        swath_perf_layout.setColumnStretch(1, 2)
+
+        swath_perf_row = 0
+        location_depth_groupbox = QGroupBox("Location && Depth")
+        location_depth_layout = QGridLayout(location_depth_groupbox)
+        location_depth_layout.setSpacing(3)
+        location_depth_layout.setContentsMargins(9, 9, 9, 9)
+        location_depth_layout.setColumnStretch(0, 0)
+        location_depth_layout.setColumnStretch(1, 1)
+
+        location_depth_row = 0
+        self.performance_pick_center_btn = QPushButton("Pick Center from GeoTIFF")
+        self.performance_pick_center_btn.clicked.connect(self._toggle_pick_center_mode)
+        self.performance_pick_center_btn.setEnabled(False)
+        location_depth_layout.addWidget(self.performance_pick_center_btn, location_depth_row, 0, 1, 2)
+        location_depth_row += 1
+
+        # Lat/Lon on their own row (HBox) so column widths are not tied to Test Depth label width
+        lat_lon_row = QWidget()
+        lat_lon_layout = QHBoxLayout(lat_lon_row)
+        lat_lon_layout.setContentsMargins(0, 0, 0, 0)
+        lat_lon_layout.setSpacing(6)
+        lat_lon_layout.addWidget(QLabel("Lat"))
+        self.performance_central_lat_entry = QLineEdit()
+        lat_lon_layout.addWidget(self.performance_central_lat_entry)
+        lat_lon_layout.addSpacing(12)
+        lat_lon_layout.addWidget(QLabel("Lon"))
+        self.performance_central_lon_entry = QLineEdit()
+        lat_lon_layout.addWidget(self.performance_central_lon_entry)
+        lat_lon_layout.addStretch()
+        location_depth_layout.addWidget(lat_lon_row, location_depth_row, 0, 1, 2)
+        location_depth_row += 1
+
+        location_depth_layout.addWidget(QLabel("Test Depth (m)"), location_depth_row, 0, 1, 1)
+        self.performance_test_depth_entry = QLineEdit()
+        location_depth_layout.addWidget(self.performance_test_depth_entry, location_depth_row, 1)
+        location_depth_row += 1
+
+        swath_perf_layout.addWidget(location_depth_groupbox, swath_perf_row, 0, 1, 2)
+        swath_perf_row += 1
+
+        sonar_environment_groupbox = QGroupBox("Sonar && Environment")
+        sonar_environment_layout = QGridLayout(sonar_environment_groupbox)
+        sonar_environment_layout.setSpacing(3)
+        sonar_environment_layout.setContentsMargins(9, 9, 9, 9)
+        sonar_environment_layout.setColumnStretch(0, 1)
+        sonar_environment_layout.setColumnStretch(1, 2)
+
+        sonar_environment_row = 0
+        sonar_environment_layout.addWidget(QLabel("Swath Angle (deg)"), sonar_environment_row, 0)
+        self.performance_swath_angle_entry = QLineEdit("75")
+        sonar_environment_layout.addWidget(self.performance_swath_angle_entry, sonar_environment_row, 1)
+        sonar_environment_row += 1
+
+        sonar_environment_layout.addWidget(QLabel("Sound Velocity (m/sec)"), sonar_environment_row, 0)
+        self.performance_sound_velocity_entry = QLineEdit("1500")
+        sonar_environment_layout.addWidget(self.performance_sound_velocity_entry, sonar_environment_row, 1)
+        sonar_environment_row += 1
+
+        sonar_environment_layout.addWidget(QLabel("Swell Direction (deg, to):"), sonar_environment_row, 0)
+        self.performance_swell_direction_entry = QLineEdit()
+        sonar_environment_layout.addWidget(self.performance_swell_direction_entry, sonar_environment_row, 1)
+        sonar_environment_row += 1
+
+        swath_perf_layout.addWidget(sonar_environment_groupbox, swath_perf_row, 0, 1, 2)
+        swath_perf_row += 1
+
+        test_parameters_groupbox = QGroupBox("Test Parameters")
+        test_parameters_layout = QGridLayout(test_parameters_groupbox)
+        test_parameters_layout.setSpacing(3)
+        test_parameters_layout.setContentsMargins(9, 9, 9, 9)
+        test_parameters_layout.setColumnStretch(0, 0)
+        test_parameters_layout.setColumnStretch(1, 1)
+        test_parameters_layout.setColumnStretch(2, 0)
+        test_parameters_layout.setColumnStretch(3, 1)
+
+        test_parameters_row = 0
+        test_parameters_layout.addWidget(QLabel("# Pings for Test"), test_parameters_row, 0)
+        self.performance_num_pings_entry = QLineEdit("200")
+        test_parameters_layout.addWidget(self.performance_num_pings_entry, test_parameters_row, 1)
+        test_parameters_layout.addWidget(QLabel("BIST Time (min)"), test_parameters_row, 2)
+        self.performance_bist_time_entry = QLineEdit("0")
+        test_parameters_layout.addWidget(self.performance_bist_time_entry, test_parameters_row, 3)
+        test_parameters_row += 1
+
+        test_parameters_layout.addWidget(QLabel("Test Speed (kts):"), test_parameters_row, 0)
+        self.performance_test_speed_entry = QLineEdit("8")
+        test_parameters_layout.addWidget(self.performance_test_speed_entry, test_parameters_row, 1)
+        test_parameters_layout.addWidget(QLabel("Turn Time (min)"), test_parameters_row, 2)
+        self.performance_turn_time_entry = QLineEdit("10")
+        test_parameters_layout.addWidget(self.performance_turn_time_entry, test_parameters_row, 3)
+        test_parameters_row += 1
+
+        swath_perf_layout.addWidget(test_parameters_groupbox, swath_perf_row, 0, 1, 2)
+        swath_perf_row += 1
+
+        calculated_time_distance_groupbox = QGroupBox("Calculated Time && Distance")
+        calculated_time_distance_layout = QGridLayout(calculated_time_distance_groupbox)
+        calculated_time_distance_layout.setSpacing(3)
+        calculated_time_distance_layout.setContentsMargins(9, 9, 9, 9)
+        calculated_time_distance_layout.setColumnStretch(0, 1)
+        calculated_time_distance_layout.setColumnStretch(1, 2)
+
+        calculated_row = 0
+        self.performance_ping_time_entry = QLabel("-")
+        calculated_time_distance_layout.addWidget(QLabel("Ping Time (sec)"), calculated_row, 0)
+        calculated_time_distance_layout.addWidget(self.performance_ping_time_entry, calculated_row, 1)
+        calculated_row += 1
+
+        calculated_time_distance_layout.addWidget(QLabel("Total Test Time (sec)"), calculated_row, 0)
+        self.performance_total_test_time_sec_entry = QLabel("-")
+        calculated_time_distance_layout.addWidget(self.performance_total_test_time_sec_entry, calculated_row, 1)
+        calculated_row += 1
+
+        calculated_time_distance_layout.addWidget(QLabel("Total Test Time (min)"), calculated_row, 0)
+        self.performance_total_test_time_min_entry = QLabel("-")
+        calculated_time_distance_layout.addWidget(self.performance_total_test_time_min_entry, calculated_row, 1)
+        calculated_row += 1
+
+        calculated_time_distance_layout.addWidget(QLabel("Line Length (m)"), calculated_row, 0)
+        self.performance_line_length_m_entry = QLabel("-")
+        calculated_time_distance_layout.addWidget(self.performance_line_length_m_entry, calculated_row, 1)
+        calculated_row += 1
+
+        calculated_time_distance_layout.addWidget(QLabel("Line Length (km)"), calculated_row, 0)
+        self.performance_line_length_km_entry = QLabel("-")
+        calculated_time_distance_layout.addWidget(self.performance_line_length_km_entry, calculated_row, 1)
+        calculated_row += 1
+
+        self.performance_plot_test_lines_btn = QPushButton("Plot Test Lines")
+        self.performance_plot_test_lines_btn.clicked.connect(self._plot_performance_test_lines)
+        calculated_time_distance_layout.addWidget(self.performance_plot_test_lines_btn, calculated_row, 0, 1, 2)
+        calculated_row += 1
+
+        swath_perf_layout.addWidget(calculated_time_distance_groupbox, swath_perf_row, 0, 1, 2)
+        swath_perf_row += 1
+
+        performance_plot_control_row = QWidget()
+        performance_plot_control_layout = QHBoxLayout(performance_plot_control_row)
+        performance_plot_control_layout.setContentsMargins(0, 0, 0, 0)
+        performance_plot_control_layout.setSpacing(6)
+        self.performance_zoom_to_lines_btn = QPushButton("Zoom to Performance Lines")
+        self.performance_zoom_to_lines_btn.clicked.connect(self._zoom_to_performance_lines)
+        performance_plot_control_layout.addWidget(self.performance_zoom_to_lines_btn, 1)
+        self.performance_remove_lines_btn = QPushButton("Remove Performance Lines")
+        self.performance_remove_lines_btn.clicked.connect(self._clear_performance_lines)
+        performance_plot_control_layout.addWidget(self.performance_remove_lines_btn, 1)
+        swath_perf_layout.addWidget(performance_plot_control_row, swath_perf_row, 0, 1, 2)
+        swath_perf_row += 1
+
+        self.performance_test_depth_entry.textChanged.connect(self._update_performance_ping_time)
+        self.performance_swath_angle_entry.textChanged.connect(self._update_performance_ping_time)
+        self.performance_sound_velocity_entry.textChanged.connect(self._update_performance_ping_time)
+        self.performance_num_pings_entry.textChanged.connect(self._update_performance_total_test_time)
+        self.performance_bist_time_entry.textChanged.connect(self._update_performance_total_test_time)
+        self.performance_test_speed_entry.textChanged.connect(self._update_performance_line_length)
+        self._update_performance_ping_time()
+
+        performance_layout.addWidget(swath_perf_groupbox, performance_row, 0, 1, 2)
+        performance_layout.setRowStretch(performance_row, 0)
+        performance_row += 1
+        performance_layout.setRowStretch(performance_row, 1)
 
         # --- 2. Main Plot Area (right side) ---
         self.plot_frame = QWidget()

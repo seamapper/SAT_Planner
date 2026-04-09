@@ -38,6 +38,7 @@ class PlottingMixin:
             offset_direction = values['offset_direction']
 
             self.central_point_coords = (central_lat, central_lon)
+            self.accuracy_central_point_coords = (central_lat, central_lon)
 
             # 1. Define a local projected CRS (e.g., UTM zone) for calculations
             # Determine UTM zone from central_lon
@@ -826,13 +827,22 @@ class PlottingMixin:
                                 fontsize=8, color='darkorchid', weight='bold',
                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
-            # Plot central point
-            if self.central_point_coords[0] is not None:
-                self.ax.plot(self.central_point_coords[1], self.central_point_coords[0],
-                             'o', color='green', markersize=5, label='Central Point')
-                self.ax.annotate('CP', (self.central_point_coords[1], self.central_point_coords[0]),
+            # Plot accuracy central point
+            acc_center = getattr(self, 'accuracy_central_point_coords', self.central_point_coords)
+            if acc_center and acc_center[0] is not None:
+                self.ax.plot(acc_center[1], acc_center[0], 'o', color='green', markersize=5, label='Acc Central Pt')
+                self.ax.annotate('ACP', (acc_center[1], acc_center[0]),
                                 xytext=(5, 5), textcoords='offset points',
                                 fontsize=8, color='green', weight='bold',
+                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
+
+            # Plot performance central point
+            perf_center = getattr(self, 'performance_central_point_coords', None)
+            if perf_center and perf_center[0] is not None:
+                self.ax.plot(perf_center[1], perf_center[0], 'o', color='darkorange', markersize=5, label='Perf Central Pt')
+                self.ax.annotate('PCP', (perf_center[1], perf_center[0]),
+                                xytext=(5, -10), textcoords='offset points',
+                                fontsize=8, color='darkorange', weight='bold',
                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
             # Plot pitch line if defined
@@ -885,6 +895,44 @@ class PlottingMixin:
                                     xytext=(5, 5), textcoords='offset points',
                                     fontsize=8, color='deeppink', weight='bold',
                                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
+
+            # Plot performance test lines if present
+            if hasattr(self, 'performance_test_lines_data') and len(self.performance_test_lines_data) == 4:
+                perf_colors = ['sienna', 'sienna', 'sienna', 'sienna']
+                for i, line in enumerate(self.performance_test_lines_data):
+                    latitudes = [p[0] for p in line]
+                    longitudes = [p[1] for p in line]
+                    label = 'Perf Lines' if i == 0 else "_nolegend_"
+                    self.ax.plot(
+                        longitudes,
+                        latitudes,
+                        color=perf_colors[i],
+                        linewidth=2.0 if i == 0 else 1.6,
+                        linestyle='-',
+                        marker='o',
+                        markersize=3,
+                        label=label,
+                    )
+                    self.ax.annotate(
+                        f'P{i + 1}S',
+                        (longitudes[0], latitudes[0]),
+                        xytext=(5, 5),
+                        textcoords='offset points',
+                        fontsize=8,
+                        color=perf_colors[i],
+                        weight='bold',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                    )
+                    self.ax.annotate(
+                        f'P{i + 1}E',
+                        (longitudes[1], latitudes[1]),
+                        xytext=(5, 5),
+                        textcoords='offset points',
+                        fontsize=8,
+                        color=perf_colors[i],
+                        weight='bold',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                    )
 
             # --- Plot the drawn line in Line Planning tab if it exists ---
             if hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 2:
@@ -1022,10 +1070,20 @@ class PlottingMixin:
         self.ax.set_xlim(self.current_xlim)
         self.ax.set_ylim(self.current_ylim)
 
-        # Reset data
+        # Reset accuracy / survey plan data (always)
         self.survey_lines_data = []
         self.cross_line_data = []
         self.central_point_coords = (None, None)
+        self.accuracy_central_point_coords = (None, None)
+
+        # Performance test lines: only clear on full clear (e.g. remove GeoTIFF).
+        # Partial clear is used by _generate_and_plot; keep performance overlay visible with accuracy plan.
+        if full_clear:
+            self.performance_central_point_coords = (None, None)
+            if hasattr(self, 'performance_test_lines_data'):
+                self.performance_test_lines_data = []
+            if hasattr(self, 'performance_profile_line'):
+                self.performance_profile_line = []
 
         # Clear GeoTIFF related data only if full_clear is True
         if full_clear:
@@ -1065,6 +1123,9 @@ class PlottingMixin:
             if hasattr(self, 'pick_center_btn'):
                 self.pick_center_btn.setEnabled(False)
                 self.pick_center_btn.setStyleSheet("")  # Reset to normal style when GeoTIFF is removed
+            if hasattr(self, 'performance_pick_center_btn'):
+                self.performance_pick_center_btn.setEnabled(False)
+                self.performance_pick_center_btn.setStyleSheet("")
             if hasattr(self, 'zoom_to_geotiff_btn'):
                 self.zoom_to_geotiff_btn.setEnabled(False)
             # Reset "Start Drawing Line" button to normal style when GeoTIFF is removed

@@ -513,10 +513,14 @@ class GeoTIFFMixin:
                 self.remove_geotiff_btn.setEnabled(True)
             if hasattr(self, 'pick_center_btn'):
                 self.pick_center_btn.setEnabled(True)
+            if hasattr(self, 'performance_pick_center_btn'):
+                self.performance_pick_center_btn.setEnabled(True)
             if hasattr(self, 'zoom_to_geotiff_btn'):
                 self.zoom_to_geotiff_btn.setEnabled(True)
                 # Make "Pick Center from GeoTIFF" button bold and orange after loading GeoTIFF
                 self.pick_center_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+                if hasattr(self, 'performance_pick_center_btn'):
+                    self.performance_pick_center_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
             # Reset Load GeoTIFF button to normal style after successful loading
             if hasattr(self, 'load_geotiff_btn'):
                 self.load_geotiff_btn.setStyleSheet("")  # Reset to default style
