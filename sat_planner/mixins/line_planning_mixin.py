@@ -92,6 +92,54 @@ class LinePlanningMixin:
             self.line_start_draw_btn.setText("Start Drawing Line")
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
 
+    def _toggle_remove_line_waypoint_mode(self):
+        """Toggle mode to remove a clicked waypoint from line planning."""
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            self._show_message("warning", "No GeoTIFF", "Load a GeoTIFF first to remove waypoints.")
+            return
+        if not hasattr(self, 'line_planning_points') or len(self.line_planning_points) < 1:
+            self._show_message("warning", "No Waypoints", "Draw or import a line before removing waypoints.")
+            return
+
+        if getattr(self, 'add_line_waypoint_mode', False):
+            self.add_line_waypoint_mode = False
+            if hasattr(self, 'line_add_waypoint_btn'):
+                self.line_add_waypoint_btn.setText("Add Waypoint")
+
+        self.remove_line_waypoint_mode = not getattr(self, 'remove_line_waypoint_mode', False)
+        if self.remove_line_waypoint_mode:
+            self.line_remove_waypoint_btn.setText("Click On Waypoint To Remove")
+            self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
+            self.set_line_info_text("Click a waypoint (WP#) to remove it.", append=False)
+        else:
+            self.line_remove_waypoint_btn.setText("Remove Waypoint")
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _toggle_add_line_waypoint_mode(self):
+        """Toggle mode to add a waypoint by clicking near a line segment."""
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            self._show_message("warning", "No GeoTIFF", "Load a GeoTIFF first to add waypoints.")
+            return
+        if not hasattr(self, 'line_planning_points') or len(self.line_planning_points) < 2:
+            self._show_message("warning", "No Line", "Draw or import a line with at least two waypoints first.")
+            return
+
+        if getattr(self, 'remove_line_waypoint_mode', False):
+            self.remove_line_waypoint_mode = False
+            if hasattr(self, 'line_remove_waypoint_btn'):
+                self.line_remove_waypoint_btn.setText("Remove Waypoint")
+
+        self.add_line_waypoint_mode = not getattr(self, 'add_line_waypoint_mode', False)
+        if self.add_line_waypoint_mode:
+            if hasattr(self, 'line_add_waypoint_btn'):
+                self.line_add_waypoint_btn.setText("Click On Line To Add Waypoint")
+            self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
+            self.set_line_info_text("Click on a line segment to add a waypoint.", append=False)
+        else:
+            if hasattr(self, 'line_add_waypoint_btn'):
+                self.line_add_waypoint_btn.setText("Add Waypoint")
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+
     def _clear_line_planning(self):
         self.line_planning_points = []
         # Safely remove line artist (some matplotlib artists raise NotImplementedError on remove())
@@ -141,7 +189,13 @@ class LinePlanningMixin:
             if hasattr(self, 'line_start_draw_btn'):
                 self.line_start_draw_btn.setStyleSheet("")
         self.line_planning_mode = False
+        self.add_line_waypoint_mode = False
+        self.remove_line_waypoint_mode = False
         self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+        if hasattr(self, 'line_add_waypoint_btn'):
+            self.line_add_waypoint_btn.setText("Add Waypoint")
+        if hasattr(self, 'line_remove_waypoint_btn'):
+            self.line_remove_waypoint_btn.setText("Remove Waypoint")
         self._clear_line_planning_profile()
         self._update_line_planning_button_states()
 
@@ -158,10 +212,100 @@ class LinePlanningMixin:
 
     def _handle_line_planning_plot_click(self, event):
         """Handle plot click when in line planning tab and mode. Returns True if event was handled."""
-        if not (hasattr(self, 'param_notebook') and self.param_notebook.currentIndex() == 2 and self.line_planning_mode):
+        if not (hasattr(self, 'param_notebook') and self.param_notebook.currentIndex() == 2):
+            return False
+        add_mode = getattr(self, 'add_line_waypoint_mode', False)
+        remove_mode = getattr(self, 'remove_line_waypoint_mode', False)
+        if not (self.line_planning_mode or remove_mode or add_mode):
             return False
         if event.inaxes != self.ax:
             return False
+        if add_mode and event.button == 1:
+            lat, lon = event.ydata, event.xdata
+            if lat is None or lon is None or not getattr(self, 'line_planning_points', None) or len(self.line_planning_points) < 2:
+                return True
+
+            x_span = abs(self.ax.get_xlim()[1] - self.ax.get_xlim()[0]) or 1.0
+            y_span = abs(self.ax.get_ylim()[1] - self.ax.get_ylim()[0]) or 1.0
+
+            best_seg_idx = None
+            best_dist2 = None
+            best_point = None
+            for i in range(len(self.line_planning_points) - 1):
+                lat1, lon1 = self.line_planning_points[i]
+                lat2, lon2 = self.line_planning_points[i + 1]
+                x1 = lon1 / x_span
+                y1 = lat1 / y_span
+                x2 = lon2 / x_span
+                y2 = lat2 / y_span
+                px = lon / x_span
+                py = lat / y_span
+                dx = x2 - x1
+                dy = y2 - y1
+                seg_len2 = dx * dx + dy * dy
+                if seg_len2 <= 1e-12:
+                    continue
+                t = ((px - x1) * dx + (py - y1) * dy) / seg_len2
+                t = max(0.0, min(1.0, t))
+                proj_x = x1 + t * dx
+                proj_y = y1 + t * dy
+                dist2 = (px - proj_x) ** 2 + (py - proj_y) ** 2
+                if best_dist2 is None or dist2 < best_dist2:
+                    best_dist2 = dist2
+                    best_seg_idx = i
+                    best_point = (proj_y * y_span, proj_x * x_span)
+
+            if best_seg_idx is None or best_dist2 is None or best_dist2 > (0.02 ** 2):
+                self.set_line_info_text("No line segment selected. Click closer to the line.", append=False)
+                return True
+
+            insert_idx = best_seg_idx + 1
+            self.line_planning_points.insert(insert_idx, best_point)
+            self.add_line_waypoint_mode = False
+            if hasattr(self, 'line_add_waypoint_btn'):
+                self.line_add_waypoint_btn.setText("Add Waypoint")
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+            self._plot_survey_plan(preserve_view_limits=True)
+            self._draw_line_planning_profile()
+            self._update_line_planning_button_states()
+            self.set_line_info_text(f"Added waypoint WP{insert_idx + 1}. Waypoints renumbered.", append=False)
+            return True
+
+        if remove_mode and event.button == 1:
+            lat, lon = event.ydata, event.xdata
+            if lat is None or lon is None or not getattr(self, 'line_planning_points', None):
+                return True
+            # Use nearest waypoint in screen/data units with a small normalized threshold.
+            lats = [p[0] for p in self.line_planning_points]
+            lons = [p[1] for p in self.line_planning_points]
+            x_span = abs(self.ax.get_xlim()[1] - self.ax.get_xlim()[0]) or 1.0
+            y_span = abs(self.ax.get_ylim()[1] - self.ax.get_ylim()[0]) or 1.0
+            distances = [((lon - x) / x_span) ** 2 + ((lat - y) / y_span) ** 2 for y, x in self.line_planning_points]
+            idx = int(np.argmin(distances))
+            if distances[idx] > (0.02 ** 2):
+                self.set_line_info_text("No waypoint selected. Click directly on a waypoint marker.", append=False)
+                return True
+
+            removed_wp_num = idx + 1
+            self.line_planning_points.pop(idx)
+            self.remove_line_waypoint_mode = False
+            if hasattr(self, 'line_remove_waypoint_btn'):
+                self.line_remove_waypoint_btn.setText("Remove Waypoint")
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+
+            if len(self.line_planning_points) >= 2:
+                self._plot_survey_plan(preserve_view_limits=True)
+                self._draw_line_planning_profile()
+            elif len(self.line_planning_points) == 1:
+                self._plot_survey_plan(preserve_view_limits=True)
+                self._clear_line_planning_profile()
+            else:
+                self._plot_survey_plan(preserve_view_limits=True)
+                self._clear_line_planning_profile()
+            self._update_line_planning_button_states()
+            self.set_line_info_text(f"Removed waypoint WP{removed_wp_num}. Waypoints renumbered.", append=False)
+            return True
+
         if event.button == 1:  # Left click: add point
             lat, lon = event.ydata, event.xdata
             if lat is None or lon is None:
@@ -558,9 +702,14 @@ class LinePlanningMixin:
         self.canvas.draw_idle()
 
     def _update_line_planning_button_states(self):
+        has_points = hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 1
         has_line_planning = hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 2
         if hasattr(self, 'line_edit_btn'):
             self.line_edit_btn.setEnabled(has_line_planning)
+        if hasattr(self, 'line_add_waypoint_btn'):
+            self.line_add_waypoint_btn.setEnabled(has_line_planning)
+        if hasattr(self, 'line_remove_waypoint_btn'):
+            self.line_remove_waypoint_btn.setEnabled(has_points)
         if hasattr(self, 'line_reverse_direction_btn'):
             self.line_reverse_direction_btn.setEnabled(has_line_planning)
 
@@ -680,6 +829,8 @@ class LinePlanningMixin:
     def _reset_line_planning_tab(self):
         self.line_planning_points = []
         self.line_planning_mode = False
+        self.add_line_waypoint_mode = False
+        self.remove_line_waypoint_mode = False
         self.edit_line_planning_mode = False
         if hasattr(self, 'line_planning_line') and self.line_planning_line is not None:
             self.line_planning_line.remove()
@@ -702,6 +853,12 @@ class LinePlanningMixin:
             self.line_start_draw_btn.setText("Start Drawing Line")
         if hasattr(self, 'line_edit_btn'):
             self.line_edit_btn.setEnabled(False)
+        if hasattr(self, 'line_remove_waypoint_btn'):
+            self.line_remove_waypoint_btn.setEnabled(False)
+            self.line_remove_waypoint_btn.setText("Remove Waypoint")
+        if hasattr(self, 'line_add_waypoint_btn'):
+            self.line_add_waypoint_btn.setEnabled(False)
+            self.line_add_waypoint_btn.setText("Add Waypoint")
         if hasattr(self, 'canvas_widget'):
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
         self._update_line_planning_button_states()

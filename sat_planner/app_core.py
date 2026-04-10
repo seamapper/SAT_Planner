@@ -76,7 +76,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         # Initialize figure and axes with fixed size
         self.figure = Figure(figsize=(12, 10))  # Increased size for better visibility
         self.ax = self.figure.add_subplot(111)
-        self.figure.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.08)
+        self.figure.subplots_adjust(left=0.085, right=0.95, top=0.95, bottom=0.08)
 
         # Set fixed plot window limits (global extent that will be maintained)
         # These will be the default limits when no GeoTIFF is loaded
@@ -713,8 +713,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         # Use QScrollArea for scrolling
         self.param_scroll = QScrollArea()
         self.param_scroll.setWidgetResizable(True)
-        self.param_scroll.setMaximumWidth(385)
-        self.param_scroll.setMinimumWidth(385)  # Keep left parameter column at 385 px
+        self.param_scroll.setMaximumWidth(395)
+        self.param_scroll.setMinimumWidth(395)  # Keep left parameter column at 395 px
         self.param_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # Disable horizontal scrollbar
 
         param_widget = QWidget()
@@ -731,14 +731,26 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         geotiff_button_frame = QWidget()
         geotiff_button_layout = QHBoxLayout(geotiff_button_frame)
         geotiff_button_layout.setContentsMargins(0, 0, 0, 0)
+        geotiff_button_layout.setSpacing(4)
         self.load_geotiff_btn = QPushButton("Load GeoTIFF")
         self.load_geotiff_btn.clicked.connect(self._load_geotiff)
         # Set button to orange and bold initially
         self.load_geotiff_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+        self.load_geotiff_btn.setMinimumWidth(0)
+        self.load_geotiff_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         geotiff_button_layout.addWidget(self.load_geotiff_btn)
+        # Zoom to GeoTIFF button - zooms map to original bounds when GeoTIFF was first loaded
+        self.zoom_to_geotiff_btn = QPushButton("Zoom to GeoTIFF")
+        self.zoom_to_geotiff_btn.clicked.connect(self._zoom_to_geotiff)
+        self.zoom_to_geotiff_btn.setEnabled(False)  # Enabled when a GeoTIFF is loaded
+        self.zoom_to_geotiff_btn.setMinimumWidth(0)
+        self.zoom_to_geotiff_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        geotiff_button_layout.addWidget(self.zoom_to_geotiff_btn)
         self.remove_geotiff_btn = QPushButton("Remove GeoTIFF")
         self.remove_geotiff_btn.clicked.connect(self._remove_geotiff)
         self.remove_geotiff_btn.setEnabled(False)  # Disabled initially (no GeoTIFF loaded)
+        self.remove_geotiff_btn.setMinimumWidth(0)
+        self.remove_geotiff_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         geotiff_button_layout.addWidget(self.remove_geotiff_btn)
         geotiff_layout.addWidget(geotiff_button_frame)
         geotiff_layout.addSpacing(3)
@@ -769,22 +781,15 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.elevation_slope_combo.addItems(["Shaded Relief", "Shaded Slope", "Hillshade", "Slope"])
         self.elevation_slope_combo.setCurrentText("Shaded Relief")  # Set default
         self.elevation_slope_combo.currentTextChanged.connect(self._on_geotiff_display_mode_changed)
+        self.elevation_slope_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         display_layout.addWidget(self.elevation_slope_combo)
-        display_layout.addStretch()
-        geotiff_layout.addWidget(display_frame)
-        geotiff_layout.addSpacing(3)
-
-        # Dynamic Resolution button
         self.dynamic_resolution_btn = QPushButton("Dynamic Resolution: ON")
         self.dynamic_resolution_btn.clicked.connect(self._toggle_dynamic_resolution)
-        geotiff_layout.addWidget(self.dynamic_resolution_btn)
-        geotiff_layout.addSpacing(3)
-
-        # Zoom to GeoTIFF button - zooms map to original bounds when GeoTIFF was first loaded
-        self.zoom_to_geotiff_btn = QPushButton("Zoom to GeoTIFF")
-        self.zoom_to_geotiff_btn.clicked.connect(self._zoom_to_geotiff)
-        self.zoom_to_geotiff_btn.setEnabled(False)  # Enabled when a GeoTIFF is loaded
-        geotiff_layout.addWidget(self.zoom_to_geotiff_btn)
+        self.dynamic_resolution_btn.setMinimumWidth(0)
+        self.dynamic_resolution_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        display_layout.addWidget(self.dynamic_resolution_btn)
+        display_layout.addStretch()
+        geotiff_layout.addWidget(display_frame)
         geotiff_layout.addSpacing(3)
 
         # Show Contours checkbox and Interval on same row
@@ -1340,6 +1345,16 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         line_planning_groupbox_layout.addWidget(self.line_edit_btn)
         line_planning_groupbox_layout.addSpacing(3)
 
+        self.line_add_waypoint_btn = QPushButton("Add Waypoint")
+        self.line_add_waypoint_btn.clicked.connect(self._toggle_add_line_waypoint_mode)
+        line_planning_groupbox_layout.addWidget(self.line_add_waypoint_btn)
+        line_planning_groupbox_layout.addSpacing(3)
+
+        self.line_remove_waypoint_btn = QPushButton("Remove Waypoint")
+        self.line_remove_waypoint_btn.clicked.connect(self._toggle_remove_line_waypoint_mode)
+        line_planning_groupbox_layout.addWidget(self.line_remove_waypoint_btn)
+        line_planning_groupbox_layout.addSpacing(3)
+
         self.line_reverse_direction_btn = QPushButton("Reverse Line Direction")
         self.line_reverse_direction_btn.setEnabled(False)
         self.line_reverse_direction_btn.clicked.connect(self._on_reverse_line_planning_direction_clicked)
@@ -1549,7 +1564,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.performance_num_pings_entry = QLineEdit("200")
         test_parameters_layout.addWidget(self.performance_num_pings_entry, test_parameters_row, 1)
         test_parameters_layout.addWidget(QLabel("BIST Time (min)"), test_parameters_row, 2)
-        self.performance_bist_time_entry = QLineEdit("0")
+        self.performance_bist_time_entry = QLineEdit("15")
         test_parameters_layout.addWidget(self.performance_bist_time_entry, test_parameters_row, 3)
         test_parameters_row += 1
 

@@ -402,7 +402,7 @@ class PlottingMixin:
             self.figure.clear()
             self.ax = self.figure.add_subplot(111)
             # Always ensure axes fill the figure area
-            self.figure.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.08)
+            self.figure.subplots_adjust(left=0.085, right=0.95, top=0.95, bottom=0.08)
             self.slope_colorbar = None
             self.elevation_colorbar = None
 
@@ -934,6 +934,44 @@ class PlottingMixin:
                         bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
                     )
 
+            # Plot performance BIST collection segments if present
+            if hasattr(self, 'performance_bist_segments_data') and len(self.performance_bist_segments_data) > 0:
+                for i, segment in enumerate(self.performance_bist_segments_data):
+                    latitudes = [p[0] for p in segment]
+                    longitudes = [p[1] for p in segment]
+                    label = 'BIST Collection' if i == 0 else "_nolegend_"
+                    self.ax.plot(
+                        longitudes,
+                        latitudes,
+                        color='gold',
+                        linewidth=2.0,
+                        linestyle='-',
+                        marker='o',
+                        markersize=3,
+                        label=label,
+                        zorder=14,
+                    )
+                    self.ax.annotate(
+                        f'B{i + 1}S',
+                        (longitudes[0], latitudes[0]),
+                        xytext=(5, 5),
+                        textcoords='offset points',
+                        fontsize=8,
+                        color='goldenrod',
+                        weight='bold',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                    )
+                    self.ax.annotate(
+                        f'B{i + 1}E',
+                        (longitudes[1], latitudes[1]),
+                        xytext=(5, 5),
+                        textcoords='offset points',
+                        fontsize=8,
+                        color='goldenrod',
+                        weight='bold',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                    )
+
             # --- Plot the drawn line in Line Planning tab if it exists ---
             if hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 2:
                 lats = [p[0] for p in self.line_planning_points]
@@ -1055,7 +1093,7 @@ class PlottingMixin:
             # Attempt to recover by reinitializing the plot
             self._clear_plot(full_clear=True)
             self.ax = self.figure.add_subplot(111)
-            self.figure.subplots_adjust(left=0.08, right=0.95, top=0.95, bottom=0.08)
+            self.figure.subplots_adjust(left=0.085, right=0.95, top=0.95, bottom=0.08)
             self.canvas.draw_idle()
 
     def _clear_plot(self, full_clear=True):
@@ -1082,6 +1120,8 @@ class PlottingMixin:
             self.performance_central_point_coords = (None, None)
             if hasattr(self, 'performance_test_lines_data'):
                 self.performance_test_lines_data = []
+            if hasattr(self, 'performance_bist_segments_data'):
+                self.performance_bist_segments_data = []
             if hasattr(self, 'performance_profile_line'):
                 self.performance_profile_line = []
 

@@ -215,10 +215,26 @@ class PerformanceMixin:
         self._update_performance_line_length()
 
     def _update_performance_line_length(self):
-        """Compute line length from test speed (kts) and total test time (sec)."""
+        """Compute line length from test speed and ping-collection time (excludes BIST)."""
         if not hasattr(self, "performance_line_length_m_entry"):
             return
-        total_sec_raw = self._performance_get_text("performance_total_test_time_sec_entry")
+
+        ping_time_sec = self._performance_ping_time_sec()
+        if ping_time_sec is None:
+            self._performance_clear_value("performance_line_length_m_entry")
+            self._performance_clear_value("performance_line_length_km_entry")
+            return
+        try:
+            num_pings = float(self.performance_num_pings_entry.text().strip())
+        except Exception:
+            self._performance_clear_value("performance_line_length_m_entry")
+            self._performance_clear_value("performance_line_length_km_entry")
+            return
+        if num_pings < 0 or not np.isfinite(num_pings):
+            self._performance_clear_value("performance_line_length_m_entry")
+            self._performance_clear_value("performance_line_length_km_entry")
+            return
+        total_sec_raw = f"{num_pings * ping_time_sec}"
         try:
             total_sec = float(total_sec_raw)
         except Exception:
@@ -269,7 +285,7 @@ class PerformanceMixin:
         self._debug_performance_log(
             "H5",
             "performance_mixin.py:_update_performance_line_length",
-            "Computed line length from speed and total time",
+            "Computed line length from speed and ping collection time",
             {
                 "speed_kts": speed_kts,
                 "speed_mps": speed_mps,
@@ -313,11 +329,13 @@ class PerformanceMixin:
             center_lon = float(self.performance_central_lon_entry.text().strip())
             line_length_m = float(self._performance_get_text("performance_line_length_m_entry"))
             swell_direction = float(self.performance_swell_direction_entry.text().strip())
+            bist_min = float(self.performance_bist_time_entry.text().strip()) if self.performance_bist_time_entry.text().strip() else 0.0
+            speed_kts = float(self.performance_test_speed_entry.text().strip())
         except Exception:
             self._show_message(
                 "warning",
                 "Invalid Inputs",
-                "Provide valid Central Latitude, Central Longitude, Swell Direction, and calculated Line Length (m).",
+                "Provide valid Central Latitude, Central Longitude, Swell Direction, Test Speed, and calculated Line Length (m).",
             )
             return
 
@@ -327,18 +345,31 @@ class PerformanceMixin:
         if not np.isfinite(center_lat) or not np.isfinite(center_lon):
             self._show_message("warning", "Invalid Center", "Central Latitude/Longitude values are not valid.")
             return
+        if bist_min < 0 or not np.isfinite(bist_min):
+            self._show_message("warning", "Invalid BIST Time", "BIST Time (min) must be zero or greater.")
+            return
+        if speed_kts < 0 or not np.isfinite(speed_kts):
+            self._show_message("warning", "Invalid Test Speed", "Test Speed (kts) must be zero or greater.")
+            return
 
         geod = pyproj.Geod(ellps="WGS84")
         half_length = line_length_m / 2.0
+        bist_length_m = speed_kts * 0.514444 * bist_min * 60.0
         headings = [((swell_direction + offset) % 360.0) for offset in (0.0, 45.0, 90.0, 135.0)]
 
         lines = []
+        bist_segments = []
         for heading in headings:
             lon1, lat1, _ = geod.fwd(center_lon, center_lat, heading + 180.0, half_length)
             lon2, lat2, _ = geod.fwd(center_lon, center_lat, heading, half_length)
             lines.append([(lat1, lon1), (lat2, lon2)])
+            if bist_length_m > 0:
+                # Extend only from the line end (P?E) in the line heading direction.
+                bist_end_lon, bist_end_lat, _ = geod.fwd(lon2, lat2, heading, bist_length_m)
+                bist_segments.append([(lat2, lon2), (bist_end_lat, bist_end_lon)])
 
         self.performance_test_lines_data = lines
+        self.performance_bist_segments_data = bist_segments
         self.performance_profile_line = lines[0]
         self.performance_central_point_coords = (center_lat, center_lon)
         self.central_point_coords = (center_lat, center_lon)
@@ -355,6 +386,9 @@ class PerformanceMixin:
         points = []
         for line in self.performance_test_lines_data:
             points.extend(line)
+        if hasattr(self, "performance_bist_segments_data"):
+            for segment in self.performance_bist_segments_data:
+                points.extend(segment)
         if not points:
             self._show_message("info", "Zoom to Performance Lines", "No performance lines to zoom to.")
             return
@@ -371,6 +405,7 @@ class PerformanceMixin:
     def _clear_performance_lines(self):
         """Remove performance test lines from map and clear performance profile line."""
         self.performance_test_lines_data = []
+        self.performance_bist_segments_data = []
         self.performance_profile_line = []
         self.performance_central_point_coords = (None, None)
         self._plot_survey_plan(preserve_view_limits=True)
