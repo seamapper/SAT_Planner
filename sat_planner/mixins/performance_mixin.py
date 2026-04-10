@@ -705,9 +705,9 @@ class PerformanceMixin:
         min_lon, max_lon = min(lons), max(lons)
         buffer_lat = (max_lat - min_lat) * 0.05 if (max_lat - min_lat) != 0 else 0.01
         buffer_lon = (max_lon - min_lon) * 0.05 if (max_lon - min_lon) != 0 else 0.01
-        self.ax.set_xlim(min_lon - buffer_lon, max_lon + buffer_lon)
-        self.ax.set_ylim(min_lat - buffer_lat, max_lat + buffer_lat)
-        self.canvas.draw_idle()
+        xlim = (min_lon - buffer_lon, max_lon + buffer_lon)
+        ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
+        self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
 
     def _clear_performance_lines(self):
         """Remove performance test lines from map and clear performance profile line."""

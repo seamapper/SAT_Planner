@@ -231,6 +231,52 @@ class GeoTIFFMixin:
                 elif hasattr(self, 'set_ref_info_text'):
                     self.set_ref_info_text("Warning: Could not update GeoTIFF resolution. Using current view.")
 
+    def _apply_map_zoom_limits_and_reload_geotiff(self, xlim, ylim):
+        """Set map limits, sync zoom/user state, and reload GeoTIFF for the view.
+
+        Programmatic zoom (toolbar buttons) must update ``geotiff_zoom_level`` and
+        redraw before ``_load_geotiff_at_resolution`` runs; otherwise dynamic
+        resolution stays on the old (e.g. zoomed-out) downsampling and the
+        raster looks blocky until a manual zoom refreshes it.
+        """
+        if hasattr(self, "_zoom_timer"):
+            self._zoom_timer.stop()
+        if hasattr(self, "_limit_change_timer"):
+            self._limit_change_timer.stop()
+
+        self.current_xlim = xlim
+        self.current_ylim = ylim
+        self._last_user_xlim = xlim
+        self._last_user_ylim = ylim
+        self.ax.set_xlim(xlim)
+        self.ax.set_ylim(ylim)
+
+        if self.geotiff_extent is not None and self.geotiff_dataset_original is not None:
+            if getattr(self, "dynamic_resolution_enabled", True):
+                full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
+                full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+                current_width = xlim[1] - xlim[0]
+                current_height = ylim[1] - ylim[0]
+                width_ratio = current_width / full_width if full_width > 0 else 1.0
+                height_ratio = current_height / full_height if full_height > 0 else 1.0
+                new_zoom_level = max(width_ratio, height_ratio)
+                new_zoom_level = max(0.01, min(10.0, new_zoom_level))
+                self.geotiff_zoom_level = new_zoom_level
+
+            self.canvas.draw()
+            self.current_xlim = self.ax.get_xlim()
+            self.current_ylim = self.ax.get_ylim()
+            self._last_user_xlim = self.current_xlim
+            self._last_user_ylim = self.current_ylim
+
+            success = self._load_geotiff_at_resolution()
+            if success:
+                self._plot_survey_plan(preserve_view_limits=True)
+            else:
+                self.canvas.draw_idle()
+        else:
+            self.canvas.draw_idle()
+
     def _clear_rapid_zoom_mode(self):
         """Clear the rapid zoom mode flag."""
         if hasattr(self, '_rapid_zoom_mode'):

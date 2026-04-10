@@ -1,4 +1,7 @@
 @echo off
+REM Run from this script's folder so SAT_Planner.spec and paths resolve from any cwd
+cd /d "%~dp0"
+
 REM Build executable for SAT Planner
 REM Output: SAT_Planner_v{version}.exe (version from sat_planner.constants). Icon: media\CCOM.ico
 

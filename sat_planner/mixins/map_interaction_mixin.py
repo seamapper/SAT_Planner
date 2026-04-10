@@ -618,62 +618,7 @@ class MapInteractionMixin:
 
             xlim = (min_lon - buffer_lon, max_lon + buffer_lon)
             ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
-            
-            # Store the new limits
-            self.current_xlim = xlim
-            self.current_ylim = ylim
-            self._last_user_xlim = xlim
-            self._last_user_ylim = ylim
-            
-            # Set axis limits
-            self.ax.set_xlim(xlim)
-            self.ax.set_ylim(ylim)
-            
-            # Update zoom level and reload GeoTIFF data if available
-            if self.geotiff_extent is not None and self.geotiff_dataset_original is not None:
-                # Calculate zoom level based on the view extent vs full GeoTIFF extent
-                if self.dynamic_resolution_enabled:
-                    full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
-                    full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
-                    current_width = xlim[1] - xlim[0]
-                    current_height = ylim[1] - ylim[0]
-                    
-                    width_ratio = current_width / full_width if full_width > 0 else 1.0
-                    height_ratio = current_height / full_height if full_height > 0 else 1.0
-                    # Use the larger ratio (more zoomed in) to determine resolution
-                    new_zoom_level = max(width_ratio, height_ratio)
-                    new_zoom_level = max(0.01, min(10.0, new_zoom_level))
-                    self.geotiff_zoom_level = new_zoom_level
-                
-                # Force draw so axis limits (and aspect) are applied before _load_geotiff_at_resolution reads them
-                self.canvas.draw()
-                self.current_xlim = self.ax.get_xlim()
-                self.current_ylim = self.ax.get_ylim()
-                self._last_user_xlim = self.current_xlim
-                self._last_user_ylim = self.current_ylim
-
-                success = self._load_geotiff_at_resolution()
-                if success:
-                    # Ensure the loaded extent covers the full view - if not, we may need to reload
-                    if hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None:
-                        loaded_left, loaded_right, loaded_bottom, loaded_top = self.geotiff_extent
-                        view_left, view_right = xlim
-                        view_bottom, view_top = ylim
-                        
-                        # Check if loaded extent covers view extent (with small tolerance)
-                        tolerance = 0.0001  # degrees
-                        if (loaded_left > view_left + tolerance or loaded_right < view_right - tolerance or
-                            loaded_bottom > view_bottom + tolerance or loaded_top < view_top - tolerance):
-                            # Extent doesn't fully cover view - this shouldn't happen, but if it does, reload
-                            # The issue might be in _load_geotiff_at_resolution, but for now we'll proceed
-                            pass
-                    
-                    # Replot with new resolution
-                    self._plot_survey_plan(preserve_view_limits=True)
-                else:
-                    self.canvas.draw_idle()
-            else:
-                self.canvas.draw_idle()
+            self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
         else:
             # If nothing to zoom to, just reset view
             self.ax.autoscale_view()
@@ -862,9 +807,9 @@ class MapInteractionMixin:
             # Add a small buffer (5% of range or 0.01 if range is 0)
             buffer_lat = (max_lat - min_lat) * 0.05 if (max_lat - min_lat) != 0 else 0.01
             buffer_lon = (max_lon - min_lon) * 0.05 if (max_lon - min_lon) != 0 else 0.01
-            self.ax.set_xlim(min_lon - buffer_lon, max_lon + buffer_lon)
-            self.ax.set_ylim(min_lat - buffer_lat, max_lat + buffer_lat)
-            self.canvas.draw_idle()
+            xlim = (min_lon - buffer_lon, max_lon + buffer_lon)
+            ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
+            self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
 
     def _zoom_to_line(self):
         """Zoom to the line planning points."""
@@ -883,48 +828,7 @@ class MapInteractionMixin:
         
         xlim = (min_lon - buffer_lon, max_lon + buffer_lon)
         ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
-        
-        # Store the new limits
-        self.current_xlim = xlim
-        self.current_ylim = ylim
-        self._last_user_xlim = xlim
-        self._last_user_ylim = ylim
-        
-        # Set axis limits
-        self.ax.set_xlim(xlim)
-        self.ax.set_ylim(ylim)
-
-        # Update zoom level and reload GeoTIFF data if available
-        if self.geotiff_extent is not None and self.geotiff_dataset_original is not None:
-            # Calculate zoom level based on the view extent vs full GeoTIFF extent
-            if self.dynamic_resolution_enabled:
-                full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
-                full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
-                current_width = xlim[1] - xlim[0]
-                current_height = ylim[1] - ylim[0]
-
-                width_ratio = current_width / full_width if full_width > 0 else 1.0
-                height_ratio = current_height / full_height if full_height > 0 else 1.0
-                # Use the larger ratio (more zoomed in) to determine resolution
-                new_zoom_level = max(width_ratio, height_ratio)
-                new_zoom_level = max(0.01, min(10.0, new_zoom_level))
-                self.geotiff_zoom_level = new_zoom_level
-
-            # Apply limits/aspect before load (was missing; get_xlim was stale → incomplete GeoTIFF window)
-            self.canvas.draw()
-            # Aspect may adjust limits; keep stored view in sync with what the axes actually show
-            self.current_xlim = self.ax.get_xlim()
-            self.current_ylim = self.ax.get_ylim()
-            self._last_user_xlim = self.current_xlim
-            self._last_user_ylim = self.current_ylim
-            success = self._load_geotiff_at_resolution()
-            if success:
-                # Replot with new resolution
-                self._plot_survey_plan(preserve_view_limits=True)
-            else:
-                self.canvas.draw_idle()
-        else:
-            self.canvas.draw_idle()
+        self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
 
     def _zoom_to_any_lines(self):
         # Collect all points from pitch line and heading lines
@@ -949,46 +853,7 @@ class MapInteractionMixin:
         
         xlim = (min_lon - buffer_lon, max_lon + buffer_lon)
         ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
-        
-        # Store the new limits
-        self.current_xlim = xlim
-        self.current_ylim = ylim
-        self._last_user_xlim = xlim
-        self._last_user_ylim = ylim
-        
-        # Set axis limits
-        self.ax.set_xlim(xlim)
-        self.ax.set_ylim(ylim)
-
-        # Update zoom level and reload GeoTIFF data if available
-        if self.geotiff_extent is not None and self.geotiff_dataset_original is not None:
-            # Calculate zoom level based on the view extent vs full GeoTIFF extent
-            if self.dynamic_resolution_enabled:
-                full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
-                full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
-                current_width = xlim[1] - xlim[0]
-                current_height = ylim[1] - ylim[0]
-
-                width_ratio = current_width / full_width if full_width > 0 else 1.0
-                height_ratio = current_height / full_height if full_height > 0 else 1.0
-                # Use the larger ratio (more zoomed in) to determine resolution
-                new_zoom_level = max(width_ratio, height_ratio)
-                new_zoom_level = max(0.01, min(10.0, new_zoom_level))
-                self.geotiff_zoom_level = new_zoom_level
-
-            self.canvas.draw()
-            self.current_xlim = self.ax.get_xlim()
-            self.current_ylim = self.ax.get_ylim()
-            self._last_user_xlim = self.current_xlim
-            self._last_user_ylim = self.current_ylim
-            success = self._load_geotiff_at_resolution()
-            if success:
-                # Replot with new resolution
-                self._plot_survey_plan(preserve_view_limits=True)
-            else:
-                self.canvas.draw_idle()
-        else:
-            self.canvas.draw_idle()
+        self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
 
     def _zoom_to_pitch_heading_lines(self):
         # Collect all points from pitch line and heading lines
@@ -1008,9 +873,9 @@ class MapInteractionMixin:
         # Add a small buffer (5% of range or 0.01 if range is 0)
         buffer_lat = (max_lat - min_lat) * 0.05 if (max_lat - min_lat) != 0 else 0.01
         buffer_lon = (max_lon - min_lon) * 0.05 if (max_lon - min_lon) != 0 else 0.01
-        self.ax.set_xlim(min_lon - buffer_lon, max_lon + buffer_lon)
-        self.ax.set_ylim(min_lat - buffer_lat, max_lat + buffer_lat)
-        self.canvas.draw_idle()
+        xlim = (min_lon - buffer_lon, max_lon + buffer_lon)
+        ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
+        self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
 
     def _zoom_to_roll_line(self):
         # Zoom to the area around the roll line only
@@ -1024,9 +889,9 @@ class MapInteractionMixin:
         # Add a small buffer (5% of range or 0.01 if range is 0)
         buffer_lat = (max_lat - min_lat) * 0.05 if (max_lat - min_lat) != 0 else 0.01
         buffer_lon = (max_lon - min_lon) * 0.05 if (max_lon - min_lon) != 0 else 0.01
-        self.ax.set_xlim(min_lon - buffer_lon, max_lon + buffer_lon)
-        self.ax.set_ylim(min_lat - buffer_lat, max_lat + buffer_lat)
-        self.canvas.draw_idle()
+        xlim = (min_lon - buffer_lon, max_lon + buffer_lon)
+        ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
+        self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
 
     def _on_mouse_motion(self, event):
         """Handle all mouse motion events including hover info, line planning, pitch line, and pick center."""
