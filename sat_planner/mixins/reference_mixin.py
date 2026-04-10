@@ -664,6 +664,16 @@ class ReferenceMixin:
                     self.export_name_entry.setText(base_name)
         except Exception as e:
             print(f"Warning: Error populating parameter fields: {e}")
+        if self.survey_lines_data:
+            try:
+                self.accuracy_central_point_coords = (
+                    float(self.central_lat_entry.text()),
+                    float(self.central_lon_entry.text()),
+                )
+            except (ValueError, TypeError, AttributeError):
+                self.accuracy_central_point_coords = (None, None)
+        else:
+            self.accuracy_central_point_coords = (None, None)
         self._plot_survey_plan(preserve_view_limits=True)
         imported_items = []
         if self.survey_lines_data:
@@ -1028,6 +1038,17 @@ class ReferenceMixin:
                 else:
                     self.set_ref_info_text(f"Saved GeoTIFF not found: {imported_geojson_geotiff_path}. Continuing without GeoTIFF.", append=True)
 
+            if self.survey_lines_data:
+                try:
+                    self.accuracy_central_point_coords = (
+                        float(self.central_lat_entry.text()),
+                        float(self.central_lon_entry.text()),
+                    )
+                except (ValueError, TypeError, AttributeError):
+                    self.accuracy_central_point_coords = (None, None)
+            else:
+                self.accuracy_central_point_coords = (None, None)
+
             # Update plot
             self._plot_survey_plan(preserve_view_limits=True)
 
@@ -1098,6 +1119,7 @@ class ReferenceMixin:
         self.survey_lines_data = []
         self.cross_line_data = []
         self.central_point_coords = (None, None)
+        self.accuracy_central_point_coords = (None, None)
 
         # Reset entry fields to defaults
         if hasattr(self, 'central_lat_entry'):

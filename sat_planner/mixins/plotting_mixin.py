@@ -827,9 +827,13 @@ class PlottingMixin:
                                 fontsize=8, color='darkorchid', weight='bold',
                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
-            # Plot accuracy central point
-            acc_center = getattr(self, 'accuracy_central_point_coords', self.central_point_coords)
-            if acc_center and acc_center[0] is not None:
+            # Plot accuracy central point only when an accuracy plan has set it (not shared with performance central)
+            acc_center = getattr(self, "accuracy_central_point_coords", (None, None))
+            if (
+                acc_center
+                and acc_center[0] is not None
+                and acc_center[1] is not None
+            ):
                 self.ax.plot(acc_center[1], acc_center[0], 'o', color='green', markersize=5, label='Acc Central Pt')
                 self.ax.annotate('ACP', (acc_center[1], acc_center[0]),
                                 xytext=(5, 5), textcoords='offset points',

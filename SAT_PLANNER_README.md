@@ -6,26 +6,27 @@ A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing
 
 ## Overview
 
-The SAT/QAT Planner is a desktop application designed for planning and visualizing multibeam testing operations. It supports three main planning modes:
+The SAT/QAT Planner is a desktop application designed for planning and visualizing multibeam testing operations. It supports four main planning modes:
 - **Calibration Survey Planning**: Plan pitch, roll, and heading calibration lines
 - **Accuracy Survey Planning**: Generate parallel survey lines with customizable parameters
+- **Performance (Swath) Survey Planning**: Four-heading swath performance test with optional RX-noise BIST legs relative to swell direction
 - **Line Planning**: Interactive line drawing with real-time elevation profiles
 
 ## Features
 
 ### Core Functionality
-- **Multi-tab Interface**: Separate tabs for Calibration, Accuracy, and Line planning (left panel)
+- **Multi-tab Interface**: Separate tabs for Calibration, Accuracy, Performance, and Line planning (left panel)
 - **Dark Theme**: Qt GUI uses a dark theme; map (matplotlib) keeps default styling
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
-- **GMRT Download**: Optional download of GMRT bathymetry GeoTIFF when importing surveys (Calibration, Accuracy, Line tabs; configurable buffer)
+- **GMRT Download**: Optional download of GMRT bathymetry GeoTIFF when importing surveys (Calibration, Accuracy, Performance, Line tabs; configurable buffer)
 - **Download Data**: Source selector in GeoTIFF Controls (default `Select Source`; current source `GMRT`) opens the "Download GMRT Grid" dialog immediately on selection and keeps the selected source after successful download
 - **Dynamic Resolution**: Automatically adjust GeoTIFF resolution based on zoom level
 - **Interactive Plotting**: Pan (middle mouse), zoom (scroll), no toolbar
 - **Real-time Statistics**: Survey distances, times, and comprehensive statistics
 - **Elevation Profiles**: View elevation and slope profiles for drawn lines
 - **Activity Log**: Collapsible side panel below the map
-- **Export**: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW, Shapefile; statistics and *_info.txt with waypoint sections (DMM then DDD)
-- **Survey Import**: DDD, DMS, DMM, LNW, CSV, GeoJSON
+- **Export**: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW, Shapefile, GeoJSON, PNG; statistics and *_info.txt with waypoint sections (DMM then DDD); Performance also writes `{name}_performance_params.json`
+- **Survey Import**: DDD, DMS, DMM, LNW, CSV, GeoJSON (Performance uses an assignment dialog when segments are ambiguous)
 - **EEZ Overlay**: EEZ layer with opacity control (default 80%) and hover `GEONAME` tooltip lookup
 
 ### Calibration Survey Planning
@@ -44,6 +45,15 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Survey time breakdown (main lines, crossline, transit, turn)
 - Export via shared `export_utils`
 
+### Performance (Swath) Survey Planning
+- **Purpose**: Swath performance over **four headings** (0°, 45°, 90°, 135° relative to **swell direction**, default **0°**): different aspects into/across/with/oblique to the seas. Each leg is **swath along the main line** (P1S–P4E) plus **RX noise BIST** on the extension from each line end when BIST time is non-zero.
+- Central lat/lon (**Pick Center from GeoTIFF** on Performance), swath angle, sound velocity, depth, pings, test speed, BIST time, turn time; **Line Length (m)** from speed and along-track collection time.
+- **Plot Performance Lines**, zoom/remove, **Show Performance Test Info** (pattern, distances, times, waypoints).
+- **Debounced auto-plot** after parameter edits and after performance pick-center when inputs are valid.
+- **Profile** (Performance tab): line 1 + first BIST segment; colors match map (**sienna** / **gold**).
+- **Performance Import/Export**: same export family as Accuracy; optional GMRT on import; default export basename `Performance_<swath_angle>deg_<speed>_kts`.
+- **Map**: **Perf Central Pt** vs **Acc Central Pt** (green accuracy center only when an accuracy plan exists).
+
 ### Line Planning
 - Interactive line drawing; **Reverse Line Direction** (flip line start/end); real-time elevation profiles; edit by dragging waypoints
 - Optional GMRT download on import; import/export (DDD, DMS, DMM, LNW, CSV, GeoJSON)
@@ -58,8 +68,8 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - EEZ overlay reloads on pan/zoom and supports paused-hover name lookup
 
 ### GeoJSON Metadata
-- Calibration, Accuracy, and Line GeoJSON exports include `survey_speed`
-- Calibration, Accuracy, and Line GeoJSON exports include saved `geotiff_path`
+- Calibration, Accuracy, Performance, and Line GeoJSON exports include `survey_speed` (Performance uses `line_num` 1–4 for swath and 11–14 for BIST where applicable)
+- Calibration, Accuracy, Performance, and Line GeoJSON exports can include saved `geotiff_path`
 - On import, SAT Planner attempts to reload the saved GeoTIFF path; if unavailable, import continues with a warning
 
 ### Download GMRT Grid Dialog
@@ -82,7 +92,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ## Installation
 
 ### Pre-built Executable
-- Download from [Releases](https://github.com/seamapper/SAT_Planner/releases): e.g. `SAT_Planner_v2026.14.exe` (Windows) or newer; version in filename from `sat_planner/constants.py`.
+- Download from [Releases](https://github.com/seamapper/SAT_Planner/releases): e.g. `SAT_Planner_v2026.15.exe` (Windows) or newer; version in filename from `sat_planner/constants.py`.
 
 ### From Source
 1. Clone: `git clone https://github.com/seamapper/SAT_Planner.git && cd SAT_Planner`
@@ -97,11 +107,13 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ## Usage
 
 1. **Load GeoTIFF** (optional): "Load GeoTIFF" or **Download Data** -> **GMRT** (opens GMRT dialog; if split used, app loads bathy grid).
-2. **Planning mode**: Calibration, Accuracy, or Line tab.
-3. **Configure** parameters, generate or draw, view statistics, export.
+2. **Planning mode**: Calibration, Accuracy, Performance, or Line tab.
+3. **Configure** parameters, generate or draw, view statistics / **Show Performance Test Info** (Performance), export.
+
+**Performance quick path**: Load GeoTIFF → Performance tab → set swell (default 0°) and test parameters → **Pick Center from GeoTIFF** or enter lat/lon → **Plot Performance Lines** (or wait for auto-plot when valid).
 
 ### Map Controls (no toolbar)
-- **Left click**: Add waypoint (drawing); pick points in Calibration/Accuracy/Line.
+- **Left click**: Add waypoint (drawing); pick points in Calibration/Accuracy/Performance/Line (pick center when enabled).
 - **Right click**: Finish drawing line.
 - **Middle mouse**: Pan.
 - **Scroll**: Zoom.
@@ -116,13 +128,15 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **`SAT_Planner_PyQt.py`** – Entry point.
 - **`sat_planner/`** – Core package:
   - **`constants.py`** – Version, config path.
-  - **`export_utils.py`** – Shared export: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points (used by Calibration, Accuracy, Line planning).
+  - **`export_utils.py`** – Shared export: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points (used by Calibration, Accuracy, Performance, Line planning).
+  - **`performance_import_dialog.py`** – Performance import: assign imported segments to swath lines 1–4 and optional BIST 1–4.
   - **`utils_geo.py`**, **`utils_ui.py`** – Helpers.
   - **`gmrt_dialog/`** – Embedded GMRT Download dialog (GeoTIFF-only, optional split).
-  - **`mixins/`** – Basemap, GeoTIFF, Plotting, SurveyParsers, GMRTDownload, Reference/Accuracy, Calibration, LinePlanning, Profiles, MapInteraction, ExportImport, Config.
+  - **`mixins/`** – Basemap, GeoTIFF, Plotting, SurveyParsers, GMRTDownload, Reference (Accuracy tab), Calibration, **Performance**, LinePlanning, Profiles (incl. performance profile), MapInteraction, ExportImport (accuracy + performance exports), Config.
 
 ## Version History
 
+- **v2026.15**: **Performance (swath) survey planning** tab: four headings relative to swell, swath lines + optional **RX noise BIST**; **Plot Performance Lines**, zoom/remove, **Show Performance Test Info**; debounced **auto-plot**; performance **elevation profile** (line 1 + BIST, map-matched colors); **Performance Import/Export** (same export family as Accuracy, assignment dialog, optional GMRT on import); default swell **0°**; separate **Perf** vs **Acc** central markers on map; `performance_import_dialog.py`, **PerformanceMixin**. See main **README.md** for full detail.
 - **v2026.14**: Added GeoTIFF Controls **Download Data** source dropdown (`Select Source`, `GMRT`) that opens the source flow immediately and keeps selection after successful download. Added GMRT dialog download progress bar (`x of y` for tiled downloads, indeterminate for single download). Added EEZ pan/zoom-driven EEZ refresh, paused-hover EEZ `GEONAME` tooltip lookups (including without a loaded GeoTIFF), and default EEZ opacity 80%. Improved large-area/world-scale alignment for EEZ and Imagery Basemap overlays. Updated GMRT dialog so **Split Grid Into Bathymetry and Topography** is enabled by default. Fixed line-plan zoom GeoTIFF coverage refresh, line-plan profile refresh after import, and calibration Pitch Line Info refresh after survey import.
 - **v2026.11**: UI and workflow updates. Accuracy tab naming in UI/docs (formerly Reference). Import/Export button labels updated (Import/Export Accuracy Survey, Import/Export Calibration Survey, Import/Export Line Survey) and reordered on tabs. "Download GMRT" defaults to unchecked and placement updated in import/export groups. Activity Log changed to collapsible side panel. GeoJSON export/import now includes `survey_speed` and saved `geotiff_path` for Calibration/Accuracy/Line; missing GeoTIFF path does not block import (warning + continue). Contour interval and slope min/max redraws are debounced while typing. Survey legend now draws above all overlays.
 - **v2026.10**: Shared `export_utils` (DDD/DMM/DMS CSV/TXT, asciiplan, LNW; UTM from points). Calibration: Reverse Line Direction, import suggestion (metadata/geometry), Calibration Survey Info + Calibration Waypoints (DMM/DDD) in dialog and *_info.txt. Reference: import suggestion, Reference Survey Info + Reference Waypoints (DMM/DDD). Line planning: Reverse Line Direction, Survey Info + Line Plan Waypoints (DMM/DDD). Exe build uses version from constants; output `SAT_Planner_v2026.10.exe`.

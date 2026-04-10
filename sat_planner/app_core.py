@@ -90,6 +90,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.survey_lines_data = []  # Stores [(lat1, lon1), (lat2, lon2)] for each line
         self.cross_line_data = []  # Stores [(lat1, lon1), (lat2, lon2)] for the crossline
         self.central_point_coords = (None, None)  # Stores (lat, lon) of central point
+        self.accuracy_central_point_coords = (None, None)  # Accuracy tab center; do not reuse for performance-only maps
 
         self.geotiff_dataset_original = None  # Original rasterio dataset (keeps its CRS)
         self.current_geotiff_path = None  # Path of the currently loaded GeoTIFF (for suggested export names)
@@ -394,6 +395,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.last_cal_import_dir = os.path.expanduser("~")
         self.last_ref_import_dir = os.path.expanduser("~")
         self.last_line_import_dir = os.path.expanduser("~")
+        self.last_perf_import_dir = os.path.expanduser("~")
         self._load_last_used_dir()
         self._load_last_geotiff_dir()
         self._load_last_survey_params_dir()
@@ -401,6 +403,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_last_cal_import_dir()
         self._load_last_ref_import_dir()
         self._load_last_line_import_dir()
+        self._load_last_perf_import_dir()
 
         # After self._setup_layout(), connect the motion event for line planning, pitch line, pick center, and geotiff hover
         # Note: These are now handled by the main _on_mouse_motion method
@@ -1543,7 +1546,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         sonar_environment_row += 1
 
         sonar_environment_layout.addWidget(QLabel("Swell Direction (deg, to):"), sonar_environment_row, 0)
-        self.performance_swell_direction_entry = QLineEdit()
+        self.performance_swell_direction_entry = QLineEdit("0")
         sonar_environment_layout.addWidget(self.performance_swell_direction_entry, sonar_environment_row, 1)
         sonar_environment_row += 1
 
@@ -1612,13 +1615,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         calculated_time_distance_layout.addWidget(self.performance_line_length_km_entry, calculated_row, 1)
         calculated_row += 1
 
-        self.performance_plot_test_lines_btn = QPushButton("Plot Test Lines")
+        self.performance_plot_test_lines_btn = QPushButton("Plot Performance Lines")
         self.performance_plot_test_lines_btn.clicked.connect(self._plot_performance_test_lines)
         calculated_time_distance_layout.addWidget(self.performance_plot_test_lines_btn, calculated_row, 0, 1, 2)
         calculated_row += 1
-
-        swath_perf_layout.addWidget(calculated_time_distance_groupbox, swath_perf_row, 0, 1, 2)
-        swath_perf_row += 1
 
         performance_plot_control_row = QWidget()
         performance_plot_control_layout = QHBoxLayout(performance_plot_control_row)
@@ -1630,7 +1630,75 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.performance_remove_lines_btn = QPushButton("Remove Performance Lines")
         self.performance_remove_lines_btn.clicked.connect(self._clear_performance_lines)
         performance_plot_control_layout.addWidget(self.performance_remove_lines_btn, 1)
-        swath_perf_layout.addWidget(performance_plot_control_row, swath_perf_row, 0, 1, 2)
+        calculated_time_distance_layout.addWidget(performance_plot_control_row, calculated_row, 0, 1, 2)
+        calculated_row += 1
+
+        self.performance_show_test_info_btn = QPushButton("Show Performance Test Info")
+        self.performance_show_test_info_btn.clicked.connect(self._show_performance_test_info)
+        calculated_time_distance_layout.addWidget(self.performance_show_test_info_btn, calculated_row, 0, 1, 2)
+        calculated_row += 1
+
+        swath_perf_layout.addWidget(calculated_time_distance_groupbox, swath_perf_row, 0, 1, 2)
+        swath_perf_row += 1
+
+        perf_import_export_groupbox = QGroupBox("Performance Import/Export")
+        perf_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        perf_import_export_layout = QVBoxLayout(perf_import_export_groupbox)
+        perf_import_export_layout.setSpacing(0)
+        perf_import_export_layout.setContentsMargins(9, 9, 9, 9)
+
+        self.performance_import_survey_btn = QPushButton("Import Performance Survey")
+        self.performance_import_survey_btn.clicked.connect(self._import_performance_survey)
+        perf_import_export_layout.addWidget(self.performance_import_survey_btn)
+        perf_import_export_layout.addSpacing(3)
+
+        perf_gmrt_row = QWidget()
+        perf_gmrt_row_layout = QHBoxLayout(perf_gmrt_row)
+        perf_gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
+        perf_gmrt_row_layout.setSpacing(6)
+        self.performance_download_gmrt_checkbox = QCheckBox("Download GMRT")
+        self.performance_download_gmrt_checkbox.setChecked(False)
+        self.performance_download_gmrt_checkbox.setToolTip(
+            "When enabled, importing a performance survey downloads a GMRT bathymetry GeoTIFF "
+            "(buffer in degrees around the plan) and loads it."
+        )
+        perf_gmrt_row_layout.addWidget(self.performance_download_gmrt_checkbox)
+        self.performance_gmrt_buffer_spin = QDoubleSpinBox()
+        self.performance_gmrt_buffer_spin.setRange(0.01, 10.0)
+        self.performance_gmrt_buffer_spin.setSingleStep(0.1)
+        self.performance_gmrt_buffer_spin.setValue(0.5)
+        self.performance_gmrt_buffer_spin.setDecimals(2)
+        self.performance_gmrt_buffer_spin.setMinimumWidth(60)
+        self.performance_gmrt_buffer_spin.setToolTip("Buffer size in degrees around performance plan extent for GMRT download.")
+        perf_gmrt_row_layout.addWidget(self.performance_gmrt_buffer_spin)
+        perf_gmrt_row_layout.addStretch()
+        perf_import_export_layout.addWidget(perf_gmrt_row)
+        perf_import_export_layout.addSpacing(3)
+
+        self.performance_export_survey_btn = QPushButton("Export Performance Survey")
+        self.performance_export_survey_btn.clicked.connect(self._export_performance_survey_files)
+        perf_import_export_layout.addWidget(self.performance_export_survey_btn)
+        perf_import_export_layout.addSpacing(3)
+
+        perf_export_name_frame = QWidget()
+        perf_export_name_layout = QGridLayout(perf_export_name_frame)
+        perf_export_name_layout.setSpacing(0)
+        perf_export_name_layout.setContentsMargins(0, 0, 0, 0)
+        perf_export_name_layout.setColumnStretch(0, 1)
+        perf_export_name_layout.setColumnStretch(1, 2)
+        perf_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
+        self.performance_export_name_entry = QLineEdit()
+        try:
+            swath_a = self.performance_swath_angle_entry.text().strip() or "0"
+            spd = self.performance_test_speed_entry.text().strip() or "0"
+            perf_export_name = f"Performance_{swath_a}deg_{spd}_kts"
+        except Exception:
+            perf_export_name = "Performance_0deg_0_kts"
+        self.performance_export_name_entry.setText(perf_export_name)
+        perf_export_name_layout.addWidget(self.performance_export_name_entry, 0, 1)
+        perf_import_export_layout.addWidget(perf_export_name_frame)
+
+        swath_perf_layout.addWidget(perf_import_export_groupbox, swath_perf_row, 0, 1, 2)
         swath_perf_row += 1
 
         self.performance_test_depth_entry.textChanged.connect(self._update_performance_ping_time)
@@ -1639,7 +1707,19 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.performance_num_pings_entry.textChanged.connect(self._update_performance_total_test_time)
         self.performance_bist_time_entry.textChanged.connect(self._update_performance_total_test_time)
         self.performance_test_speed_entry.textChanged.connect(self._update_performance_line_length)
+        self.performance_swath_angle_entry.textChanged.connect(self._update_performance_export_name)
+        self.performance_test_speed_entry.textChanged.connect(self._update_performance_export_name)
         self._update_performance_ping_time()
+        # Debounced auto-plot when center/swell are edited (speed/pings/BIST/depth chain already updates line length → schedule)
+        self.performance_central_lat_entry.textChanged.connect(
+            lambda: self._schedule_autoplot_performance_test_lines(400)
+        )
+        self.performance_central_lon_entry.textChanged.connect(
+            lambda: self._schedule_autoplot_performance_test_lines(400)
+        )
+        self.performance_swell_direction_entry.textChanged.connect(
+            lambda: self._schedule_autoplot_performance_test_lines(400)
+        )
 
         performance_layout.addWidget(swath_perf_groupbox, performance_row, 0, 1, 2)
         performance_layout.setRowStretch(performance_row, 0)

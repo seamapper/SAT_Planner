@@ -641,3 +641,290 @@ class ExportImportMixin:
 
         except Exception as e:
             self._show_message("error","Export Error", f"Failed to export survey files: {e}")
+
+    def _export_performance_survey_files(self):
+        """Export performance swath lines and BIST segments (same products as Accuracy export)."""
+        if not GEOSPATIAL_LIBS_AVAILABLE:
+            self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot export.")
+            return
+        if mapping is None:
+            self._show_message("warning", "Export Error", "Shapely is required for shapefile export.")
+            return
+
+        lines = getattr(self, "performance_test_lines_data", None) or []
+        if len(lines) != 4:
+            self._show_message("warning", "No Data", "Plot four performance test lines first (Plot Performance Lines).")
+            return
+
+        export_name = ""
+        if hasattr(self, "performance_export_name_entry"):
+            export_name = self.performance_export_name_entry.text().strip()
+        if not export_name:
+            export_name = "Performance_export"
+        bad = '<>:"/\\|?*'
+        for c in bad:
+            export_name = export_name.replace(c, "_")
+        export_name = export_name.strip().strip(".")
+
+        export_dir = QFileDialog.getExistingDirectory(self, "Select Export Directory", self.last_export_dir)
+        if not export_dir:
+            return
+        self.last_export_dir = export_dir
+        self._save_last_export_dir()
+
+        bist_segs = getattr(self, "performance_bist_segments_data", None) or []
+        has_bist = len(bist_segs) == 4
+
+        try:
+            speed_kts = 8.0
+            if hasattr(self, "performance_test_speed_entry"):
+                try:
+                    speed_kts = float(self.performance_test_speed_entry.text().strip())
+                except (ValueError, TypeError):
+                    speed_kts = 8.0
+
+            perf_rows = []
+            for i, line in enumerate(lines):
+                n = i + 1
+                start, end = line[0], line[1]
+                lname = f"PerformanceLine{n}"
+                perf_rows.append((n, lname, f"P{n}S", start[0], start[1]))
+                perf_rows.append((n, lname, f"P{n}E", end[0], end[1]))
+            if has_bist:
+                for i, seg in enumerate(bist_segs):
+                    bn = i + 1
+                    line_num = 10 + bn
+                    lname = f"BISTLine{bn}"
+                    perf_rows.append((line_num, lname, f"B{bn}S", seg[0][0], seg[0][1]))
+                    perf_rows.append((line_num, lname, f"B{bn}E", seg[1][0], seg[1][1]))
+
+            csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
+            export_utils.write_ddd_csv(csv_file_path, perf_rows, newline="")
+            ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
+            export_utils.write_dmm_csv(ddm_file_path, perf_rows)
+            dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
+            export_utils.write_dms_csv(dms_file_path, perf_rows)
+            ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
+            export_utils.write_dmm_txt(ddm_txt_file_path, perf_rows)
+            dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
+            export_utils.write_dms_txt(dms_txt_file_path, perf_rows)
+            txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
+            export_utils.write_ddd_txt(txt_file_path, perf_rows)
+
+            schema = {"geometry": "LineString", "properties": {"line_num": "int"}}
+            crs_epsg = "EPSG:4326"
+            features = []
+            for i, line_coords in enumerate(lines):
+                shapely_line = LineString([(p[1], p[0]) for p in line_coords])
+                features.append({"geometry": mapping(shapely_line), "properties": {"line_num": i + 1}})
+            if has_bist:
+                for i, seg in enumerate(bist_segs):
+                    shapely_line = LineString([(p[1], p[0]) for p in seg])
+                    features.append({"geometry": mapping(shapely_line), "properties": {"line_num": 11 + i}})
+            shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
+            with fiona.open(shapefile_path, "w", driver="ESRI Shapefile", crs=crs_epsg, schema=schema) as collection:
+                collection.writerecords(features)
+
+            geojson_features = []
+            geotiff_path = self.current_geotiff_path if hasattr(self, "current_geotiff_path") and self.current_geotiff_path else None
+            for i, line in enumerate(lines):
+                geojson_features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": [[line[0][1], line[0][0]], [line[1][1], line[1][0]]],
+                        },
+                        "properties": {
+                            "line_num": i + 1,
+                            "performance_segment": "swath",
+                            "survey_speed": speed_kts,
+                            "test_speed_kts": speed_kts,
+                            "geotiff_path": geotiff_path,
+                            "points": [
+                                {"point_num": 1, "lat": line[0][0], "lon": line[0][1]},
+                                {"point_num": 2, "lat": line[1][0], "lon": line[1][1]},
+                            ],
+                        },
+                    }
+                )
+            if has_bist:
+                for i, seg in enumerate(bist_segs):
+                    geojson_features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "LineString",
+                                "coordinates": [[seg[0][1], seg[0][0]], [seg[1][1], seg[1][0]]],
+                            },
+                            "properties": {
+                                "line_num": 11 + i,
+                                "performance_segment": "bist",
+                                "survey_speed": speed_kts,
+                                "test_speed_kts": speed_kts,
+                                "geotiff_path": geotiff_path,
+                                "points": [
+                                    {"point_num": 1, "lat": seg[0][0], "lon": seg[0][1]},
+                                    {"point_num": 2, "lat": seg[1][0], "lon": seg[1][1]},
+                                ],
+                            },
+                        }
+                    )
+            geojson_collection = {
+                "type": "FeatureCollection",
+                "properties": {"geotiff_path": geotiff_path, "plan_type": "performance"},
+                "features": geojson_features,
+            }
+            geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
+            with open(geojson_file_path, "w", encoding="utf-8") as f:
+                json.dump(geojson_collection, f, indent=2)
+
+            lnw_lines = [(f"PLN{i + 1:03d}", [line[0], line[1]]) for i, line in enumerate(lines)]
+            if has_bist:
+                for i, seg in enumerate(bist_segs):
+                    lnw_lines.append((f"BIST{i + 1:03d}", [seg[0], seg[1]]))
+            lnw_file_path = None
+            if lnw_lines:
+                all_pts = [p for _name, pts in lnw_lines for p in pts]
+                zone, hem = export_utils.compute_utm_zone_from_points(all_pts)
+                utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
+                lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
+                if not export_utils.write_lnw(lnw_file_path, lnw_lines):
+                    lnw_file_path = None
+
+            sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
+            perf_ascii_lines = [(f"Performance{i + 1}", [line[0], line[1]]) for i, line in enumerate(lines)]
+            if has_bist:
+                for i, seg in enumerate(bist_segs):
+                    perf_ascii_lines.append((f"BIST{i + 1}", [seg[0], seg[1]]))
+            export_utils.write_asciiplan(sis_file_path, perf_ascii_lines)
+
+            stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
+            with open(stats_file_path, "w", encoding="utf-8") as f:
+                f.write("PERFORMANCE SURVEY EXPORT\n")
+                f.write("=" * 40 + "\n\n")
+                f.write(f"Plan name: {export_name}\n")
+                f.write(f"Export date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write("TAB PARAMETERS (at export)\n")
+                f.write("-" * 28 + "\n")
+                for label, attr in (
+                    ("Central latitude", "performance_central_lat_entry"),
+                    ("Central longitude", "performance_central_lon_entry"),
+                    ("Swell direction (deg)", "performance_swell_direction_entry"),
+                    ("Swath angle (deg)", "performance_swath_angle_entry"),
+                    ("Test speed (kts)", "performance_test_speed_entry"),
+                    ("BIST time (min)", "performance_bist_time_entry"),
+                    ("Turn time (min)", "performance_turn_time_entry"),
+                ):
+                    w = getattr(self, attr, None)
+                    if w is not None and hasattr(w, "text"):
+                        try:
+                            f.write(f"{label}: {w.text()}\n")
+                        except Exception:
+                            f.write(f"{label}: (n/a)\n")
+                f.write("\nSEGMENTS\n")
+                f.write("-" * 10 + "\n")
+                f.write("Four performance swath lines (P1S–P4E).\n")
+                if has_bist:
+                    f.write("Four BIST collection segments (B1S–B4E).\n")
+                else:
+                    f.write("No BIST segments in this export.\n")
+                f.write("\n")
+                dmm_h = "Waypoints (DMM)"
+                f.write(f"{dmm_h}\n")
+                f.write("-" * len(dmm_h) + "\n")
+                for i, line in enumerate(lines):
+                    n = i + 1
+                    s, e = line[0], line[1]
+                    f.write(
+                        f"P{n}S: {decimal_degrees_to_ddm(s[0], is_latitude=True)}, "
+                        f"{decimal_degrees_to_ddm(s[1], is_latitude=False)}\n"
+                    )
+                    f.write(
+                        f"P{n}E: {decimal_degrees_to_ddm(e[0], is_latitude=True)}, "
+                        f"{decimal_degrees_to_ddm(e[1], is_latitude=False)}\n"
+                    )
+                if has_bist:
+                    for i, seg in enumerate(bist_segs):
+                        n = i + 1
+                        b0, b1 = seg[0], seg[1]
+                        f.write(
+                            f"B{n}S: {decimal_degrees_to_ddm(b0[0], is_latitude=True)}, "
+                            f"{decimal_degrees_to_ddm(b0[1], is_latitude=False)}\n"
+                        )
+                        f.write(
+                            f"B{n}E: {decimal_degrees_to_ddm(b1[0], is_latitude=True)}, "
+                            f"{decimal_degrees_to_ddm(b1[1], is_latitude=False)}\n"
+                        )
+
+            json_metadata_path = os.path.join(export_dir, f"{export_name}_performance_params.json")
+            pmeta = {
+                "export_name": export_name,
+                "plan_type": "performance",
+                "geotiff_path": geotiff_path,
+                "test_speed_kts": speed_kts,
+            }
+            for key, attr in (
+                ("central_lat", "performance_central_lat_entry"),
+                ("central_lon", "performance_central_lon_entry"),
+                ("swell_direction_deg", "performance_swell_direction_entry"),
+                ("swath_angle_deg", "performance_swath_angle_entry"),
+                ("bist_time_min", "performance_bist_time_entry"),
+                ("turn_time_min", "performance_turn_time_entry"),
+                ("num_pings", "performance_num_pings_entry"),
+                ("sound_velocity", "performance_sound_velocity_entry"),
+            ):
+                w = getattr(self, attr, None)
+                if w is not None and hasattr(w, "text"):
+                    try:
+                        pmeta[key] = w.text().strip()
+                    except Exception:
+                        pmeta[key] = None
+                else:
+                    pmeta[key] = None
+            try:
+                ll = getattr(self, "performance_line_length_m_entry", None)
+                if ll is not None and hasattr(ll, "text"):
+                    pmeta["line_length_m_label"] = ll.text().strip()
+            except Exception:
+                pass
+            with open(json_metadata_path, "w", encoding="utf-8") as f:
+                json.dump(pmeta, f, indent=2)
+
+            map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
+            if hasattr(self, "_hide_map_hover_tooltip_for_export"):
+                self._hide_map_hover_tooltip_for_export()
+            self.figure.savefig(map_png_path, dpi=300, bbox_inches="tight", facecolor="white")
+
+            profile_png_path = os.path.join(export_dir, f"{export_name}_profile.png")
+            if hasattr(self, "profile_fig") and self.profile_fig is not None:
+                self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches="tight", facecolor="white")
+
+            msg_lines = [
+                f"- {os.path.basename(csv_file_path)}",
+                f"- {os.path.basename(shapefile_path)} (and sidecars)",
+                f"- {os.path.basename(geojson_file_path)}",
+            ]
+            if lnw_file_path:
+                msg_lines.append(f"- {os.path.basename(lnw_file_path)}")
+            msg_lines.extend(
+                [
+                    f"- {os.path.basename(sis_file_path)}",
+                    f"- {os.path.basename(txt_file_path)}",
+                    f"- {os.path.basename(ddm_file_path)}",
+                    f"- {os.path.basename(dms_file_path)}",
+                    f"- {os.path.basename(stats_file_path)}",
+                    f"- {os.path.basename(map_png_path)}",
+                    f"- {os.path.basename(json_metadata_path)}",
+                ]
+            )
+            if hasattr(self, "profile_fig") and self.profile_fig is not None:
+                msg_lines.append(f"- {os.path.basename(profile_png_path)}")
+            log_msg = "Performance survey exported successfully to:\n" + "\n".join(msg_lines) + f"\nin directory: {export_dir}"
+            if hasattr(self, "set_performance_activity_text"):
+                self.set_performance_activity_text(log_msg, append=False)
+            else:
+                self.set_ref_info_text(log_msg, append=False)
+
+        except Exception as e:
+            self._show_message("error", "Export Error", f"Failed to export performance survey: {e}")

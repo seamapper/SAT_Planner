@@ -357,6 +357,10 @@ class MapInteractionMixin:
             self.export_name_entry.clear()
             self.export_name_entry.setText(export_name_to_set)
 
+        # Performance tab: replot test lines after pick (allow depth/ping/line-length updates to run first)
+        if is_performance_tab and hasattr(self, "_schedule_autoplot_performance_test_lines"):
+            self._schedule_autoplot_performance_test_lines(50)
+
         # Reset "Pick Center from GeoTIFF" button to normal style after center is selected
         if hasattr(self, 'pick_center_btn'):
             self.pick_center_btn.setStyleSheet("")
