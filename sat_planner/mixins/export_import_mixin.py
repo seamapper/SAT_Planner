@@ -188,23 +188,23 @@ class ExportImportMixin:
             # --- Export to ESRI Shapefile (.shp) ---
             schema = {
                 'geometry': 'LineString',
-                'properties': {'line_num': 'int'},
+                'properties': {'line_num': 'int', 'line_name': 'str'},
             }
             crs_epsg = 'EPSG:4326'  # WGS 84
             features = []
-            # Add main survey lines
+            # Add main survey lines (names match CSV / GPX: ReferenceLine1, …)
             for i, line_coords in enumerate(self.survey_lines_data):
                 shapely_line = LineString([(p[1], p[0]) for p in line_coords])
                 features.append({
                     'geometry': mapping(shapely_line),
-                    'properties': {'line_num': i + 1},
+                    'properties': {'line_num': i + 1, 'line_name': f'ReferenceLine{i + 1}'},
                 })
             # Add crossline
             if self.cross_line_data:
                 shapely_cross_line = LineString([(p[1], p[0]) for p in self.cross_line_data])
                 features.append({
                     'geometry': mapping(shapely_cross_line),
-                    'properties': {'line_num': 0},
+                    'properties': {'line_num': 0, 'line_name': 'Crossline'},
                 })
             shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
             with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
@@ -741,16 +741,24 @@ class ExportImportMixin:
             txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
             export_utils.write_ddd_txt(txt_file_path, perf_rows)
 
-            schema = {"geometry": "LineString", "properties": {"line_num": "int"}}
+            schema = {"geometry": "LineString", "properties": {"line_num": "int", "line_name": "str"}}
             crs_epsg = "EPSG:4326"
             features = []
             for i, line_coords in enumerate(lines):
                 shapely_line = LineString([(p[1], p[0]) for p in line_coords])
-                features.append({"geometry": mapping(shapely_line), "properties": {"line_num": i + 1}})
+                n = i + 1
+                features.append({
+                    "geometry": mapping(shapely_line),
+                    "properties": {"line_num": n, "line_name": f"PerformanceLine{n}"},
+                })
             if has_bist:
                 for i, seg in enumerate(bist_segs):
                     shapely_line = LineString([(p[1], p[0]) for p in seg])
-                    features.append({"geometry": mapping(shapely_line), "properties": {"line_num": 11 + i}})
+                    bn = i + 1
+                    features.append({
+                        "geometry": mapping(shapely_line),
+                        "properties": {"line_num": 10 + bn, "line_name": f"BISTLine{bn}"},
+                    })
             shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
             with fiona.open(shapefile_path, "w", driver="ESRI Shapefile", crs=crs_epsg, schema=schema) as collection:
                 collection.writerecords(features)
