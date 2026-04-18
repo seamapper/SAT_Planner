@@ -300,6 +300,32 @@ class ExportImportMixin:
             for i, line in enumerate(self.survey_lines_data):
                 ref_ascii_lines.append((f'Reference{i + 1}', [line[0], line[1]]))
             export_utils.write_asciiplan(sis_file_path, ref_ascii_lines)
+            gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
+            ref_gpx_lines = []
+            if self.cross_line_data:
+                ref_gpx_lines.append(("Crossline", [self.cross_line_data[0], self.cross_line_data[1]]))
+            for i, line in enumerate(self.survey_lines_data):
+                if i % 2 == 0:
+                    start, end = line[0], line[1]
+                else:
+                    start, end = line[1], line[0]
+                ref_gpx_lines.append((f"ReferenceLine{i + 1}", [start, end]))
+            gpx_written = export_utils.write_gpx(gpx_file_path, ref_gpx_lines, creator="SAT Planner Accuracy")
+            acc_gpx_tests = []
+            if self.cross_line_data:
+                acc_gpx_tests.append(
+                    ("Crossline", "Crossline", [self.cross_line_data[0], self.cross_line_data[1]])
+                )
+            for i, line in enumerate(self.survey_lines_data):
+                if i % 2 == 0:
+                    start, end = line[0], line[1]
+                else:
+                    start, end = line[1], line[0]
+                suf = f"Line{i + 1:02d}"
+                acc_gpx_tests.append((suf, f"ReferenceLine{i + 1}", [start, end]))
+            gpx_per_test_names = export_utils.write_gpx_per_test_files(
+                export_dir, export_name, acc_gpx_tests, creator="SAT Planner Accuracy"
+            )
 
             # Update success message to include SIS
             ref_msg2 = (f"Survey exported successfully to:\n"
@@ -613,6 +639,10 @@ class ExportImportMixin:
             ]
             if lnw_file_path:
                 success_files.append(f"- {os.path.basename(lnw_file_path)}")
+            if gpx_written:
+                success_files.append(f"- {os.path.basename(gpx_file_path)}")
+            for bn in gpx_per_test_names:
+                success_files.append(f"- {bn}")
             success_files.extend([
                 f"- {os.path.basename(sis_file_path)}",
                 f"- {os.path.basename(txt_file_path)}",
@@ -799,6 +829,25 @@ class ExportImportMixin:
                     perf_ascii_lines.append((f"BIST{i + 1}", [seg[0], seg[1]]))
             export_utils.write_asciiplan(sis_file_path, perf_ascii_lines)
 
+            gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
+            perf_gpx_lines = [(f"Performance{i + 1}", [line[0], line[1]]) for i, line in enumerate(lines)]
+            if has_bist:
+                for i, seg in enumerate(bist_segs):
+                    perf_gpx_lines.append((f"BIST{i + 1}", [seg[0], seg[1]]))
+            gpx_written = export_utils.write_gpx(
+                gpx_file_path, perf_gpx_lines, creator="SAT Planner Performance"
+            )
+            perf_gpx_tests = [
+                (f"Performance{i + 1}", f"Performance{i + 1}", [line[0], line[1]])
+                for i, line in enumerate(lines)
+            ]
+            if has_bist:
+                for i, seg in enumerate(bist_segs):
+                    perf_gpx_tests.append((f"BIST{i + 1}", f"BIST{i + 1}", [seg[0], seg[1]]))
+            gpx_per_test_names = export_utils.write_gpx_per_test_files(
+                export_dir, export_name, perf_gpx_tests, creator="SAT Planner Performance"
+            )
+
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
             with open(stats_file_path, "w", encoding="utf-8") as f:
                 f.write("PERFORMANCE SURVEY EXPORT\n")
@@ -810,6 +859,7 @@ class ExportImportMixin:
                 for label, attr in (
                     ("Central latitude", "performance_central_lat_entry"),
                     ("Central longitude", "performance_central_lon_entry"),
+                    ("Test depth (m)", "performance_test_depth_entry"),
                     ("Swell direction (deg)", "performance_swell_direction_entry"),
                     ("Swath angle (deg)", "performance_swath_angle_entry"),
                     ("Test speed (kts)", "performance_test_speed_entry"),
@@ -867,6 +917,7 @@ class ExportImportMixin:
             for key, attr in (
                 ("central_lat", "performance_central_lat_entry"),
                 ("central_lon", "performance_central_lon_entry"),
+                ("test_depth_m", "performance_test_depth_entry"),
                 ("swell_direction_deg", "performance_swell_direction_entry"),
                 ("swath_angle_deg", "performance_swath_angle_entry"),
                 ("bist_time_min", "performance_bist_time_entry"),
@@ -905,6 +956,10 @@ class ExportImportMixin:
                 f"- {os.path.basename(shapefile_path)} (and sidecars)",
                 f"- {os.path.basename(geojson_file_path)}",
             ]
+            if gpx_written:
+                msg_lines.append(f"- {os.path.basename(gpx_file_path)}")
+            for bn in gpx_per_test_names:
+                msg_lines.append(f"- {bn}")
             if lnw_file_path:
                 msg_lines.append(f"- {os.path.basename(lnw_file_path)}")
             msg_lines.extend(

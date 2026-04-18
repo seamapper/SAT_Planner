@@ -9,6 +9,7 @@ Shared survey export writers. All CSV/TXT formats use the same row conventions:
 import csv
 import datetime
 import os
+from xml.sax.saxutils import escape
 
 try:
     from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj
@@ -93,6 +94,37 @@ def write_dms_txt(path, rows, *, encoding='utf-8'):
             f.write(f"{point_label} {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
 
 
+def sanitize_export_basename(name):
+    """Make a string safe for use as a Windows filename stem (no path)."""
+    bad = '<>:"/\\|?*'
+    s = str(name).strip()
+    for c in bad:
+        s = s.replace(c, "_")
+    return s.strip().strip(".")
+
+
+def write_gpx_per_test_files(export_dir, export_base, tests, *, creator="SAT Planner"):
+    """Write one GPX file per test: ``{export_base}_{suffix}.gpx`` with a single ``<trk>``.
+
+    ``tests`` is an iterable of ``(filename_suffix, gpx_track_name, points)`` where
+    ``points`` is a list of ``(lat, lon)``. ``gpx_track_name`` is the ``<name>`` inside the GPX.
+
+    Returns a list of basenames (filenames) written successfully.
+    """
+    base = sanitize_export_basename(export_base)
+    written = []
+    for suffix, trk_name, pts in tests:
+        if not pts:
+            continue
+        stem = sanitize_export_basename(suffix)
+        if not stem:
+            continue
+        path = os.path.join(export_dir, f"{base}_{stem}.gpx")
+        if write_gpx(path, [(trk_name, pts)], creator=creator):
+            written.append(os.path.basename(path))
+    return written
+
+
 def write_asciiplan(path, lines, *, encoding='utf-8'):
     """Write SIS .asciiplan. lines: list of (line_name, points) where points is list of (lat, lon) in decimal degrees."""
     ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
@@ -101,6 +133,39 @@ def write_asciiplan(path, lines, *, encoding='utf-8'):
         for line_index, (line_name, pts) in enumerate(lines):
             coords = " ".join(f"{lat:.6f} {lon:.6f}" for lat, lon in pts)
             f.write(f'_LINE {line_name} {line_index} {ts} 0 {coords} "\n')
+
+
+def write_gpx(path, lines, *, creator="SAT Planner", encoding='utf-8'):
+    """Write GPX 1.1 with one track per line.
+    lines: list of (line_name, points) where points is list of (lat, lon).
+    Returns True if written, False otherwise.
+    """
+    ts = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    try:
+        with open(path, "w", encoding=encoding) as f:
+            f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+            f.write(
+                '<gpx version="1.1" creator="{creator}" xmlns="http://www.topografix.com/GPX/1/1" '
+                'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+                'xsi:schemaLocation="http://www.topografix.com/GPX/1/1 '
+                'http://www.topografix.com/GPX/1/1/gpx.xsd">\n'.format(creator=escape(str(creator)))
+            )
+            f.write(f"  <metadata><time>{ts}</time></metadata>\n")
+            for line_name, pts in lines:
+                if not pts:
+                    continue
+                safe_name = escape(str(line_name))
+                f.write("  <trk>\n")
+                f.write(f"    <name>{safe_name}</name>\n")
+                f.write("    <trkseg>\n")
+                for lat, lon in pts:
+                    f.write(f'      <trkpt lat="{lat:.8f}" lon="{lon:.8f}"></trkpt>\n')
+                f.write("    </trkseg>\n")
+                f.write("  </trk>\n")
+            f.write("</gpx>\n")
+    except OSError:
+        return False
+    return True
 
 
 def compute_utm_zone_from_points(points):

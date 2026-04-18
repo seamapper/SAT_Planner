@@ -6,6 +6,7 @@ import os
 import csv
 import json
 import datetime
+import xml.etree.ElementTree as ET
 
 import numpy as np
 from PyQt6.QtWidgets import QFileDialog, QDialog
@@ -449,6 +450,19 @@ class LinePlanningMixin:
                     lnw_file_path = None
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
             export_utils.write_asciiplan(sis_file_path, [(export_name, list(self.line_planning_points))])
+            gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
+            gpx_written = export_utils.write_gpx(
+                gpx_file_path,
+                [(export_name, list(self.line_planning_points))],
+                creator="SAT Planner Line",
+            )
+            base_stem = export_utils.sanitize_export_basename(export_name)
+            gpx_lineplan_path = os.path.join(export_dir, f"{base_stem}_LinePlan.gpx")
+            gpx_lineplan_written = export_utils.write_gpx(
+                gpx_lineplan_path,
+                [("LinePlan", list(self.line_planning_points))],
+                creator="SAT Planner Line",
+            )
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
             if hasattr(self, "_hide_map_hover_tooltip_for_export"):
                 self._hide_map_hover_tooltip_for_export()
@@ -499,6 +513,10 @@ class LinePlanningMixin:
             if lnw_file_path:
                 success_msg += f"- {os.path.basename(lnw_file_path)}\n"
             success_msg += f"- {os.path.basename(sis_file_path)}\n"
+            if gpx_written:
+                success_msg += f"- {os.path.basename(gpx_file_path)}\n"
+            if gpx_lineplan_written:
+                success_msg += f"- {os.path.basename(gpx_lineplan_path)}\n"
             success_msg += f"- {os.path.basename(dms_txt_file_path)}\n- {os.path.basename(map_png_path)}\n"
             if profile_png_path:
                 success_msg += f"- {os.path.basename(profile_png_path)}\n"
@@ -538,12 +556,48 @@ class LinePlanningMixin:
             default_directory=getattr(self, "last_line_import_dir", None),
         )
 
+    def _parse_gpx_file_as_polyline(self, file_path):
+        """Parse GPX tracks/routes into one polyline in file order."""
+        try:
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+        except Exception:
+            return None
+
+        points = []
+
+        def append_point(lat, lon):
+            pt = (lat, lon)
+            if not points or points[-1] != pt:
+                points.append(pt)
+
+        for trk in root.findall('.//{*}trk'):
+            for seg in trk.findall('{*}trkseg'):
+                for trkpt in seg.findall('{*}trkpt'):
+                    try:
+                        lat = float(trkpt.attrib.get('lat'))
+                        lon = float(trkpt.attrib.get('lon'))
+                    except (TypeError, ValueError):
+                        continue
+                    append_point(lat, lon)
+
+        for rte in root.findall('.//{*}rte'):
+            for rtept in rte.findall('{*}rtept'):
+                try:
+                    lat = float(rtept.attrib.get('lat'))
+                    lon = float(rtept.attrib.get('lon'))
+                except (TypeError, ValueError):
+                    continue
+                append_point(lat, lon)
+
+        return points if len(points) >= 2 else None
+
     def _import_drawn_line(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Line Plan File to Import", self.last_line_import_dir,
-            "Known Line Plan Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DDD.csv *.csv *.geojson *.json);;"
+            "Known Line Plan Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DDD.csv *.csv *.geojson *.json *.gpx);;"
             "Decimal Degrees (*_DDD.txt);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
-            "Hypack LNW (*.lnw);;Decimal Degree CSV (*_DDD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;All files (*.*)")
+            "Hypack LNW (*.lnw);;Decimal Degree CSV (*_DDD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;GPX (*.gpx);;All files (*.*)")
         if not file_path:
             return
         import_dir = os.path.dirname(file_path)
@@ -578,6 +632,11 @@ class LinePlanningMixin:
                     return
                 utm_zone, hemisphere = utm_dialog.get_utm_info()
                 points = self._parse_lnw_file_as_polyline(file_path, utm_zone, hemisphere)
+                if points is not None:
+                    self.line_planning_points = points
+                    file_processed = True
+            elif file_ext == '.gpx':
+                points = self._parse_gpx_file_as_polyline(file_path)
                 if points is not None:
                     self.line_planning_points = points
                     file_processed = True
@@ -641,7 +700,7 @@ class LinePlanningMixin:
                 return
             if hasattr(self, 'line_export_name_entry'):
                 file_basename = os.path.splitext(os.path.basename(file_path))[0]
-                for suffix in ['_DDD', '_DMM', '_DM', '_DD', '_DMS', '.geojson', '.shp', '.lnw']:
+                for suffix in ['_DDD', '_DMM', '_DM', '_DD', '_DMS', '.geojson', '.shp', '.lnw', '.gpx']:
                     if file_basename.endswith(suffix):
                         file_basename = file_basename[:-len(suffix)]
                 self.line_export_name_entry.setText(file_basename)

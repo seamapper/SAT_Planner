@@ -608,6 +608,9 @@ class GeoTIFFMixin:
             self.initial_geotiff_ylim = self.current_ylim
             self._zoom_to_geotiff()
 
+            if hasattr(self, "_on_geotiff_loaded_performance_depth"):
+                self._on_geotiff_loaded_performance_depth()
+
         except RasterioIOError as e:
             progress_window.destroy()
             self._show_message("error", "GeoTIFF Error", f"Could not open GeoTIFF file: {e}")

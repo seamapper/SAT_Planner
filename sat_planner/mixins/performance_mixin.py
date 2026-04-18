@@ -6,6 +6,7 @@ import csv
 import json
 import os
 import time
+import xml.etree.ElementTree as ET
 
 import numpy as np
 from PyQt6.QtCore import QTimer
@@ -341,6 +342,70 @@ class PerformanceMixin:
                 self.performance_test_depth_entry.clear()
         except Exception:
             self.performance_test_depth_entry.clear()
+
+    def _perf_depth_entry_needs_fill(self):
+        """True if test depth is missing or not a positive number."""
+        if not hasattr(self, "performance_test_depth_entry"):
+            return True
+        raw = self.performance_test_depth_entry.text().strip()
+        if not raw:
+            return True
+        try:
+            return float(raw) <= 0 or not np.isfinite(float(raw))
+        except (TypeError, ValueError):
+            return True
+
+    def _perf_fill_test_depth_from_geotiff_if_needed(self, lat, lon):
+        """If depth is empty/invalid and a GeoTIFF is loaded, set depth from bathy at (lat, lon) like pick-center."""
+        if not self._perf_depth_entry_needs_fill():
+            return
+        if getattr(self, "geotiff_data_array", None) is None:
+            return
+        if not hasattr(self, "_get_depth_at_point"):
+            return
+        try:
+            z = self._get_depth_at_point(float(lat), float(lon))
+        except (TypeError, ValueError):
+            return
+        if z is None:
+            return
+        try:
+            zf = float(z)
+        except (TypeError, ValueError):
+            return
+        if not np.isfinite(zf) or np.isnan(zf):
+            return
+        depth_m = abs(zf)
+        if depth_m <= 0:
+            return
+        self.performance_test_depth_entry.setText(f"{depth_m:.1f}")
+
+    def _on_geotiff_loaded_performance_depth(self):
+        """After any GeoTIFF load: refresh performance test depth from grid at current PCP if applicable."""
+        lines = getattr(self, "performance_test_lines_data", None) or []
+        if len(lines) != 4:
+            return
+        plat, plon = None, None
+        if hasattr(self, "performance_central_lat_entry") and hasattr(self, "performance_central_lon_entry"):
+            try:
+                tla = self.performance_central_lat_entry.text().strip()
+                tlo = self.performance_central_lon_entry.text().strip()
+                if tla and tlo:
+                    plat, plon = float(tla), float(tlo)
+            except (ValueError, TypeError):
+                pass
+        if plat is None:
+            c = getattr(self, "performance_central_point_coords", None)
+            if c and c[0] is not None and c[1] is not None:
+                try:
+                    plat, plon = float(c[0]), float(c[1])
+                except (TypeError, ValueError):
+                    return
+        if plat is None:
+            return
+        self._perf_fill_test_depth_from_geotiff_if_needed(plat, plon)
+        if hasattr(self, "_update_performance_ping_time"):
+            self._update_performance_ping_time()
 
     def _plot_performance_test_lines(self, quiet=False):
         """Plot 4 performance test lines from center/length/swell and draw profile for line 1.
@@ -775,7 +840,6 @@ class PerformanceMixin:
         else:
             self.performance_bist_segments_data = []
         self.performance_profile_line = self.performance_test_lines_data[0]
-        self.central_point_coords = self.performance_test_lines_data[0][0]
 
     def _try_parse_performance_csv(self, file_path):
         """Return (lines4, bist_segs) if CSV uses performance P/B labels; else (None, None)."""
@@ -859,6 +923,43 @@ class PerformanceMixin:
         if len(bist) == 4:
             return lines, [bist[i] for i in range(1, 5)]
         return None, None
+
+    def _gpx_to_unassigned_segments(self, file_path):
+        """Parse GPX tracks/routes into 2-point segments (first/last per segment), for assignment dialog."""
+        try:
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Could not parse GPX file: {e}")
+            return None
+
+        out = []
+        for trk in root.findall(".//{*}trk"):
+            for seg in trk.findall("{*}trkseg"):
+                pts = []
+                for trkpt in seg.findall("{*}trkpt"):
+                    try:
+                        lat = float(trkpt.attrib.get("lat"))
+                        lon = float(trkpt.attrib.get("lon"))
+                        pts.append((lat, lon))
+                    except (TypeError, ValueError):
+                        continue
+                if len(pts) >= 2:
+                    out.append([pts[0], pts[-1]])
+
+        for rte in root.findall(".//{*}rte"):
+            pts = []
+            for rtept in rte.findall("{*}rtept"):
+                try:
+                    lat = float(rtept.attrib.get("lat"))
+                    lon = float(rtept.attrib.get("lon"))
+                    pts.append((lat, lon))
+                except (TypeError, ValueError):
+                    continue
+            if len(pts) >= 2:
+                out.append([pts[0], pts[-1]])
+
+        return out
 
     def _geojson_to_unassigned_segments(self, geojson_data):
         """Each LineString feature -> one 2-point segment (first/last), for assignment dialog."""
@@ -948,6 +1049,11 @@ class PerformanceMixin:
                     self.performance_central_lat_entry.setText(str(params["central_lat"]))
                 if params.get("central_lon") is not None and hasattr(self, "performance_central_lon_entry"):
                     self.performance_central_lon_entry.setText(str(params["central_lon"]))
+                td = params.get("test_depth_m")
+                if td is None:
+                    td = params.get("test_depth")
+                if td is not None and hasattr(self, "performance_test_depth_entry"):
+                    self.performance_test_depth_entry.setText(str(td).strip())
                 if params.get("swell_direction_deg") is not None and hasattr(self, "performance_swell_direction_entry"):
                     self.performance_swell_direction_entry.setText(str(params["swell_direction_deg"]))
                 if params.get("swath_angle_deg") is not None and hasattr(self, "performance_swath_angle_entry"):
@@ -992,11 +1098,36 @@ class PerformanceMixin:
         except Exception as e:
             print(f"Warning: performance post-import field update: {e}")
 
+        perf_lat, perf_lon = None, None
+        if hasattr(self, "performance_central_lat_entry") and hasattr(self, "performance_central_lon_entry"):
+            try:
+                tlat = self.performance_central_lat_entry.text().strip()
+                tlon = self.performance_central_lon_entry.text().strip()
+                if tlat and tlon:
+                    perf_lat = float(tlat)
+                    perf_lon = float(tlon)
+            except (ValueError, TypeError):
+                perf_lat, perf_lon = None, None
+        if (perf_lat is None or perf_lon is None) and all_pts:
+            all_lats = [p[0] for p in all_pts]
+            all_lons = [p[1] for p in all_pts]
+            perf_lat = (min(all_lats) + max(all_lats)) / 2.0
+            perf_lon = (min(all_lons) + max(all_lons)) / 2.0
+            if hasattr(self, "performance_central_lat_entry"):
+                self.performance_central_lat_entry.setText(f"{perf_lat:.6f}")
+            if hasattr(self, "performance_central_lon_entry"):
+                self.performance_central_lon_entry.setText(f"{perf_lon:.6f}")
+        if perf_lat is None or perf_lon is None:
+            (la0, lo0), (la1, lo1) = lines[0][0], lines[0][1]
+            perf_lat = (la0 + la1) / 2.0
+            perf_lon = (lo0 + lo1) / 2.0
+
         self.performance_profile_line = lines[0]
-        self.performance_central_point_coords = lines[0][0]
-        self.central_point_coords = lines[0][0]
-        if hasattr(self, "_update_performance_line_length"):
-            self._update_performance_line_length()
+        self.performance_central_point_coords = (perf_lat, perf_lon)
+        self.central_point_coords = (perf_lat, perf_lon)
+        self._perf_fill_test_depth_from_geotiff_if_needed(perf_lat, perf_lon)
+        if hasattr(self, "_update_performance_ping_time"):
+            self._update_performance_ping_time()
         self._plot_survey_plan(preserve_view_limits=True)
         if hasattr(self, "_draw_performance_profile"):
             self._draw_performance_profile()
@@ -1023,9 +1154,9 @@ class PerformanceMixin:
             self,
             "Select Performance Survey File to Import",
             getattr(self, "last_perf_import_dir", os.path.expanduser("~")),
-            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *.csv *.geojson *.json *.lnw);;"
+            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *.csv *.geojson *.json *.gpx *.lnw);;"
             "Hypack LNW files (*.lnw);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
-            "Decimal Degrees (*_DDD.txt);;Decimal Degree CSV (*_DDD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json)",
+            "Decimal Degrees (*_DDD.txt);;Decimal Degree CSV (*_DDD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;GPX (*.gpx)",
         )
         if not file_path:
             return
@@ -1140,6 +1271,24 @@ class PerformanceMixin:
                 imported_lines = self._geojson_to_unassigned_segments(geojson_data)
                 if not imported_lines:
                     self._show_message("warning", "Import Warning", "No LineString features found in GeoJSON.")
+                    return
+                dialog = PerformanceLineAssignmentDialog(self, imported_lines)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self._apply_performance_assignments(dialog.get_assignments(), imported_lines)
+                self._perf_import_post_import(file_path)
+                return
+
+            if file_ext == ".gpx":
+                imported_lines = self._gpx_to_unassigned_segments(file_path)
+                if imported_lines is None:
+                    return
+                if not imported_lines:
+                    self._show_message(
+                        "warning",
+                        "Import Warning",
+                        "No valid GPX track or route segments found (need at least one segment with 2+ points).",
+                    )
                     return
                 dialog = PerformanceLineAssignmentDialog(self, imported_lines)
                 if dialog.exec() != QDialog.DialogCode.Accepted:

@@ -57,6 +57,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # Set minimum window size
         self.setMinimumSize(1600, 1110)
+        self.setWindowState(Qt.WindowState.WindowMaximized)
 
         # Auto-regenerate timer: wait 800ms after last parameter change before regenerating
         self.auto_regenerate_timer = QTimer()

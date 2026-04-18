@@ -4,6 +4,8 @@ Reference tab: survey lines validation, export/import, info text, reset, statist
 import os
 import csv
 import json
+import re
+import xml.etree.ElementTree as ET
 
 from PyQt6.QtWidgets import (QFileDialog, QDialog, QVBoxLayout, QHBoxLayout,
                              QLabel, QComboBox, QPushButton, QWidget)
@@ -521,6 +523,95 @@ class ReferenceMixin:
         except Exception:
             return None
 
+    def _reference_role_from_name(self, line_name):
+        """Infer role from line/track name for GPX imports."""
+        normalized = re.sub(r'[^a-z0-9]+', '', (line_name or '').lower())
+        if not normalized:
+            return None
+        if normalized.startswith("cross"):
+            return "crossline"
+        m = re.search(r'(?:reference|line|l)(\d+)', normalized)
+        if m:
+            try:
+                n = int(m.group(1))
+            except (TypeError, ValueError):
+                return None
+            if n > 0:
+                return f"ref_{n}"
+        return None
+
+    def _parse_gpx_segments_for_reference(self, file_path):
+        """Parse GPX tracks/routes into 2-point line segments for accuracy import.
+        Returns (imported_lines, suggested_assignments)."""
+        try:
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Could not parse GPX file: {e}")
+            return None, None
+
+        named_lines = []
+
+        track_idx = 1
+        for trk in root.findall('.//{*}trk'):
+            trk_name_elem = trk.find('{*}name')
+            trk_name = trk_name_elem.text.strip() if trk_name_elem is not None and trk_name_elem.text else f"Track{track_idx}"
+            trksegs = trk.findall('{*}trkseg')
+            for seg_idx, seg in enumerate(trksegs):
+                pts = []
+                for trkpt in seg.findall('{*}trkpt'):
+                    try:
+                        lat = float(trkpt.attrib.get('lat'))
+                        lon = float(trkpt.attrib.get('lon'))
+                        pts.append((lat, lon))
+                    except (TypeError, ValueError):
+                        continue
+                if len(pts) >= 2:
+                    seg_name = trk_name if len(trksegs) == 1 else f"{trk_name}_seg{seg_idx + 1}"
+                    named_lines.append((seg_name, [pts[0], pts[-1]]))
+            track_idx += 1
+
+        route_idx = 1
+        for rte in root.findall('.//{*}rte'):
+            rte_name_elem = rte.find('{*}name')
+            rte_name = rte_name_elem.text.strip() if rte_name_elem is not None and rte_name_elem.text else f"Route{route_idx}"
+            pts = []
+            for rtept in rte.findall('{*}rtept'):
+                try:
+                    lat = float(rtept.attrib.get('lat'))
+                    lon = float(rtept.attrib.get('lon'))
+                    pts.append((lat, lon))
+                except (TypeError, ValueError):
+                    continue
+            if len(pts) >= 2:
+                named_lines.append((rte_name, [pts[0], pts[-1]]))
+            route_idx += 1
+
+        imported_lines = [line for _name, line in named_lines]
+        if not imported_lines:
+            return [], {}
+
+        suggested = {}
+        used_ref_nums = set()
+        crossline_assigned = False
+        for idx, (line_name, _line) in enumerate(named_lines):
+            role = self._reference_role_from_name(line_name)
+            if not role:
+                continue
+            if role == "crossline":
+                if not crossline_assigned:
+                    suggested[idx] = role
+                    crossline_assigned = True
+            elif role.startswith("ref_"):
+                try:
+                    ref_num = int(role.split("_", 1)[1])
+                except (TypeError, ValueError):
+                    continue
+                if ref_num > 0 and ref_num not in used_ref_nums:
+                    suggested[idx] = role
+                    used_ref_nums.add(ref_num)
+        return imported_lines, suggested
+
     def _ref_import_post_import(self, file_path):
         """Shared post-import: validate, load params, populate fields, plot, message."""
         if not self.survey_lines_data and not self.cross_line_data:
@@ -693,12 +784,13 @@ class ReferenceMixin:
             self._show_message("warning", "Import Warning", "No valid survey lines found in the selected file.")
 
     def _import_survey_files(self):
-        """Import reference planning survey lines from CSV, GeoJSON, or DDD/DMS/DMM/LNW text files."""
+        """Import reference planning survey lines from CSV, GeoJSON, GPX, or DDD/DMS/DMM/LNW text files."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Survey File to Import",
             self.last_ref_import_dir,
-            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *.csv *.geojson *.json *.lnw);;"
+            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *.csv *.geojson *.json *.gpx *.lnw);;"
+            "GPX files (*.gpx);;"
             "Hypack LNW files (*.lnw);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
             "Decimal Degrees (*_DDD.txt);;Decimal Degree CSV (*_DDD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json)"
         )
@@ -761,6 +853,31 @@ class ReferenceMixin:
                 if imported_lines is None:
                     return
                 dialog = ReferenceLineAssignmentDialog(self, imported_lines)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self._apply_ref_assignments(dialog.get_assignments(), imported_lines)
+                file_processed = True
+
+            if not file_processed and file_ext == '.gpx':
+                imported_lines, suggested = self._parse_gpx_segments_for_reference(file_path)
+                if imported_lines is None:
+                    return
+                if not imported_lines:
+                    self._show_message("warning", "Import Warning", "No valid GPX track/route segments found.")
+                    return
+                dialog = ReferenceLineAssignmentDialog(self, imported_lines)
+                if suggested:
+                    for line_idx, role in suggested.items():
+                        if role == "crossline":
+                            dialog.comboboxes[line_idx].setCurrentIndex(1)
+                        elif role.startswith("ref_"):
+                            try:
+                                ref_num = int(role.split("_", 1)[1])
+                            except (TypeError, ValueError):
+                                continue
+                            idx = ref_num + 1  # 2=Accuracy Line 1
+                            if 2 <= idx < dialog.comboboxes[line_idx].count():
+                                dialog.comboboxes[line_idx].setCurrentIndex(idx)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return
                 self._apply_ref_assignments(dialog.get_assignments(), imported_lines)

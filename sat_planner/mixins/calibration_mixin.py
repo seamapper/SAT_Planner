@@ -7,6 +7,7 @@ import csv
 import json
 import re
 import datetime
+import xml.etree.ElementTree as ET
 
 from PyQt6.QtWidgets import (QFileDialog, QDialog, QVBoxLayout, QHBoxLayout, 
                              QLabel, QComboBox, QPushButton, QWidget, QLineEdit, QSpinBox, QCheckBox)
@@ -1082,6 +1083,12 @@ class CalibrationMixin:
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
             cal_ascii_lines = [(name, list(pts)) for _num, name, pts in lines]
             export_utils.write_asciiplan(sis_file_path, cal_ascii_lines)
+            gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
+            gpx_written = export_utils.write_gpx(gpx_file_path, cal_ascii_lines)
+            cal_gpx_tests = [(_name, _name, list(pts)) for _num, _name, pts in lines]
+            gpx_per_test_names = export_utils.write_gpx_per_test_files(
+                export_dir, export_name, cal_gpx_tests, creator="SAT Planner Calibration"
+            )
             txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
             export_utils.write_ddd_txt(txt_file_path, cal_rows)
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
@@ -1129,6 +1136,10 @@ class CalibrationMixin:
             if lnw_file_path:
                 success_msg += f"- {os.path.basename(lnw_file_path)}\n"
             success_msg += f"- {os.path.basename(sis_file_path)}\n"
+            if gpx_written:
+                success_msg += f"- {os.path.basename(gpx_file_path)}\n"
+            for bn in gpx_per_test_names:
+                success_msg += f"- {bn}\n"
             success_msg += f"- {os.path.basename(ddm_txt_file_path)}\n"
             success_msg += f"- {os.path.basename(dms_txt_file_path)}\n"
             success_msg += f"- {os.path.basename(stats_file_path)}\n"
@@ -1142,13 +1153,91 @@ class CalibrationMixin:
         except Exception as e:
             self._show_message("error","Export Error", f"Failed to export calibration survey files: {e}")
 
+    def _calibration_role_from_name(self, line_name):
+        """Infer calibration role from a line/track name."""
+        normalized = re.sub(r'[^a-z0-9]+', '', (line_name or '').lower())
+        if not normalized:
+            return None
+        if normalized.startswith('pitch') or normalized in ('pl', 'plsple'):
+            return 'pitch'
+        if normalized.startswith('roll') or normalized in ('rl', 'rlsrle'):
+            return 'roll'
+        m = re.search(r'heading([12])', normalized)
+        if m:
+            return f"heading{m.group(1)}"
+        m = re.search(r'h([12])', normalized)
+        if m:
+            return f"heading{m.group(1)}"
+        return None
+
+    def _parse_gpx_segments_for_calibration(self, file_path):
+        """Parse GPX tracks/routes into 2-point line segments for calibration import.
+        Returns (imported_lines, suggested_assignments)."""
+        try:
+            tree = ET.parse(file_path)
+            root = tree.getroot()
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Could not parse GPX file: {e}")
+            return None, None
+
+        named_lines = []
+
+        track_idx = 1
+        for trk in root.findall('.//{*}trk'):
+            trk_name_elem = trk.find('{*}name')
+            trk_name = trk_name_elem.text.strip() if trk_name_elem is not None and trk_name_elem.text else f"Track{track_idx}"
+            trksegs = trk.findall('{*}trkseg')
+            for seg_idx, seg in enumerate(trksegs):
+                pts = []
+                for trkpt in seg.findall('{*}trkpt'):
+                    try:
+                        lat = float(trkpt.attrib.get('lat'))
+                        lon = float(trkpt.attrib.get('lon'))
+                        pts.append((lat, lon))
+                    except (TypeError, ValueError):
+                        continue
+                if len(pts) >= 2:
+                    seg_name = trk_name if len(trksegs) == 1 else f"{trk_name}_seg{seg_idx + 1}"
+                    named_lines.append((seg_name, [pts[0], pts[-1]]))
+            track_idx += 1
+
+        route_idx = 1
+        for rte in root.findall('.//{*}rte'):
+            rte_name_elem = rte.find('{*}name')
+            rte_name = rte_name_elem.text.strip() if rte_name_elem is not None and rte_name_elem.text else f"Route{route_idx}"
+            pts = []
+            for rtept in rte.findall('{*}rtept'):
+                try:
+                    lat = float(rtept.attrib.get('lat'))
+                    lon = float(rtept.attrib.get('lon'))
+                    pts.append((lat, lon))
+                except (TypeError, ValueError):
+                    continue
+            if len(pts) >= 2:
+                named_lines.append((rte_name, [pts[0], pts[-1]]))
+            route_idx += 1
+
+        imported_lines = [line for _name, line in named_lines]
+        if not imported_lines:
+            return [], {}
+
+        suggested = {}
+        used_roles = set()
+        for idx, (line_name, _line) in enumerate(named_lines):
+            role = self._calibration_role_from_name(line_name)
+            if role and role not in used_roles:
+                suggested[idx] = role
+                used_roles.add(role)
+
+        return imported_lines, suggested
+
     def _import_cal_survey_files(self):
-        """Import calibration survey lines from CSV, GeoJSON, LNW, DMS, DMM, or DDD text file."""
+        """Import calibration survey lines from CSV, GeoJSON, GPX, LNW, DMS, DMM, or DDD text file."""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Survey File to Import",
             self.last_cal_import_dir,
-            "Known Calibration Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *.csv *.geojson *.json *.lnw);;Hypack LNW files (*.lnw);;Degrees Minutes Seconds Text files (*_DMS.txt);;Degrees Decimal Minutes Text files (*_DMM.txt);;Decimal Degrees Text files (*_DDD.txt);;Decimal Degree CSV files (*_DDD.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json)"
+            "Known Calibration Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *.csv *.geojson *.json *.gpx *.lnw);;GPX files (*.gpx);;Hypack LNW files (*.lnw);;Degrees Minutes Seconds Text files (*_DMS.txt);;Degrees Decimal Minutes Text files (*_DMM.txt);;Decimal Degrees Text files (*_DDD.txt);;Decimal Degree CSV files (*_DDD.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json)"
         )
         if not file_path:
             return
@@ -1416,6 +1505,41 @@ class CalibrationMixin:
                             self.heading_lines.append([])
                         if heading_idx < 2:
                             self.heading_lines[heading_idx] = [point1, point2]
+                file_processed = True
+            elif file_ext == '.gpx':
+                imported_lines, suggested = self._parse_gpx_segments_for_calibration(file_path)
+                if imported_lines is None:
+                    return
+                if not imported_lines:
+                    self._show_message("warning", "Import Warning", "No valid GPX track/route segments found.")
+                    return
+                if len(imported_lines) == 4 and (not suggested or len(suggested) < 4):
+                    geom_suggest = _suggest_calibration_assignments_from_geometry(imported_lines)
+                    if geom_suggest:
+                        for idx, role in geom_suggest.items():
+                            if idx not in suggested and role not in suggested.values():
+                                suggested[idx] = role
+                dialog = LineAssignmentDialog(self, imported_lines, suggested if suggested else None)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                assignments = dialog.get_assignments()
+                self.pitch_line_points = []
+                self.roll_line_points = []
+                self.heading_lines = []
+                for line_idx, assignment_type in assignments.items():
+                    if assignment_type == 'pitch':
+                        self.pitch_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'roll':
+                        self.roll_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'heading1':
+                        if len(self.heading_lines) < 1:
+                            self.heading_lines.append([])
+                        self.heading_lines[0] = imported_lines[line_idx]
+                    elif assignment_type == 'heading2':
+                        if len(self.heading_lines) < 2:
+                            while len(self.heading_lines) < 2:
+                                self.heading_lines.append([])
+                        self.heading_lines[1] = imported_lines[line_idx]
                 file_processed = True
             elif not file_processed:
                 self._show_message("error","Import Error", f"Unsupported file format: {file_ext}")

@@ -5,7 +5,7 @@ cd /d "%~dp0"
 REM Build executable for SAT Planner
 REM Output: SAT_Planner_v{version}.exe (version from sat_planner.constants). Icon: media\CCOM.ico
 
-set PYTHON_PATH=C:\Users\pjohnson\PycharmProjects\.venv\Scripts\python.exe
+set PYTHON_PATH=C:\Users\pjohnson\Documents\Python\.venv\Scripts\python.exe
 
 echo Building SAT Planner executable (name and version from code)...
 echo.
