@@ -285,7 +285,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.show_slope_profile_var = True
         self.slope_profile_checkbox = QCheckBox("Show Slope Profile")
         self.slope_profile_checkbox.setChecked(self.show_slope_profile_var)
-        self.slope_profile_checkbox.stateChanged.connect(self._draw_current_profile)
+        self.slope_profile_checkbox.stateChanged.connect(self._on_slope_profile_checkbox_changed)
 
         # Imagery Basemap checkbox
         if not hasattr(self, 'imagery_basemap_checkbox'):
@@ -1236,6 +1236,16 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_plot_control_layout = QVBoxLayout(cal_plot_control_groupbox)
         cal_plot_control_layout.setSpacing(0)
         cal_plot_control_layout.setContentsMargins(9, 9, 9, 9)
+
+        cal_profile_select_row = QHBoxLayout()
+        cal_profile_select_row.addWidget(QLabel("Select Profile:"))
+        self.cal_profile_select_combo = QComboBox()
+        self.cal_profile_select_combo.addItems(["Pitch", "Roll"])
+        self.cal_profile_select_combo.setCurrentIndex(0)
+        self.cal_profile_select_combo.currentIndexChanged.connect(self._on_calibration_profile_select_changed)
+        cal_profile_select_row.addWidget(self.cal_profile_select_combo, 1)
+        cal_plot_control_layout.addLayout(cal_profile_select_row)
+        cal_plot_control_layout.addSpacing(3)
 
         self.zoom_to_all_lines_btn = QPushButton("Zoom to Calibration Plan")
         self.zoom_to_all_lines_btn.clicked.connect(self._zoom_to_any_lines)

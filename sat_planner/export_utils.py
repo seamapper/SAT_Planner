@@ -8,6 +8,7 @@ Shared survey export writers. All CSV/TXT formats use the same row conventions:
 """
 import csv
 import datetime
+import math
 import os
 from xml.sax.saxutils import escape
 
@@ -92,6 +93,55 @@ def write_dms_txt(path, rows, *, encoding='utf-8'):
             lat_d, lat_m, lat_s = _deg_min_sec(lat)
             lon_d, lon_m, lon_s = _deg_min_sec(lon)
             f.write(f"{point_label} {lat_d} {lat_m} {lat_s} {lon_d} {lon_m} {lon_s}\n")
+
+
+def write_profile_csv(path, distances, elevations, slopes, *, newline="", encoding="utf-8"):
+    """Write crossline/pitch-style profile CSV: Distance (m), Elevation (m), Slope (deg).
+
+    ``distances``, ``elevations``, ``slopes`` are equal-length sequences (e.g. numpy arrays).
+    Non-finite elevation/slope cells are written as empty fields.
+    """
+    with open(path, "w", newline=newline, encoding=encoding) as f:
+        w = csv.writer(f)
+        w.writerow(["Distance", "Elevation", "Slope"])
+
+        def _cell(x):
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                return ""
+            if math.isnan(v) or math.isinf(v):
+                return ""
+            return v
+
+        for d, e, s in zip(distances, elevations, slopes):
+            w.writerow([_cell(d), _cell(e), _cell(s)])
+
+
+def write_line_plan_profile_csv(
+    path, distances, elevations, slopes, waypoint_labels, *, newline="", encoding="utf-8"
+):
+    """Write line-plan profile CSV: Distance (m), Elevation (m), Slope (deg), Waypoint.
+
+    ``waypoint_labels`` is the same length as the numeric arrays; use \"\" for rows
+    with no waypoint. Non-finite elevation/slope cells are written as empty fields.
+    """
+    with open(path, "w", newline=newline, encoding=encoding) as f:
+        w = csv.writer(f)
+        w.writerow(["Distance", "Elevation", "Slope", "Waypoint"])
+
+        def _cell(x):
+            try:
+                v = float(x)
+            except (TypeError, ValueError):
+                return ""
+            if math.isnan(v) or math.isinf(v):
+                return ""
+            return v
+
+        for d, e, s, wp in zip(distances, elevations, slopes, waypoint_labels):
+            wp_cell = wp if (wp is not None and str(wp).strip() != "") else ""
+            w.writerow([_cell(d), _cell(e), _cell(s), wp_cell])
 
 
 def sanitize_export_basename(name):

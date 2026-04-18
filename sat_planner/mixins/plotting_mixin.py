@@ -1199,6 +1199,7 @@ class PlottingMixin:
         self.survey_lines_data = []
         self.cross_line_data = []
         self.central_point_coords = (None, None)
+        self.accuracy_central_point_coords = (None, None)
         self._plot_survey_plan(preserve_view_limits=True)
         self._draw_crossline_profile()
 

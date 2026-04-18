@@ -4,6 +4,63 @@ No Qt or app state; safe to unit test.
 """
 
 
+def _signed_deg_min_sec_to_decimal(degrees, minutes, seconds=0.0):
+    """Rebuild decimal degrees from signed degree part and magnitude of min/sec (export_utils convention)."""
+    sign = -1 if float(degrees) < 0 else 1
+    dec = abs(float(degrees)) + float(minutes) / 60.0 + float(seconds) / 3600.0
+    return sign * dec
+
+
+def lat_lon_decimal_from_survey_csv_row(row):
+    """
+    Parse one csv.DictReader row from SAT Planner exports: *_DDD.csv, *_DMM.csv, or *_DMS.csv.
+
+    DDD uses 'Latitude' / 'Longitude' (decimal). DMM/DMS use 'Latitude (Deg)', 'Latitude (Min)',
+    [ 'Latitude (Sec)' ], and the same for Longitude — matching export_utils.write_dmm_csv / write_dms_csv.
+
+    Returns:
+        (lat, lon) as floats.
+
+    Raises:
+        ValueError: if the row does not contain a recognizable coordinate set.
+    """
+    if not isinstance(row, dict):
+        raise ValueError("row must be a dict")
+    lat_ddd = row.get("Latitude")
+    lon_ddd = row.get("Longitude")
+    if lat_ddd not in (None, "") and lon_ddd not in (None, ""):
+        try:
+            return float(lat_ddd), float(lon_ddd)
+        except (TypeError, ValueError) as e:
+            raise ValueError("invalid decimal Latitude/Longitude") from e
+
+    try:
+        lat_deg = float(row["Latitude (Deg)"])
+        lat_min = float(row["Latitude (Min)"])
+        lon_deg = float(row["Longitude (Deg)"])
+        lon_min = float(row["Longitude (Min)"])
+    except (KeyError, TypeError, ValueError) as e:
+        raise ValueError("missing or invalid DMM/DMS CSV columns") from e
+
+    lat_sec_raw = row.get("Latitude (Sec)")
+    lon_sec_raw = row.get("Longitude (Sec)")
+    if lat_sec_raw not in (None, "") and str(lat_sec_raw).strip() != "":
+        try:
+            lat_sec = float(lat_sec_raw)
+            lon_sec = float(lon_sec_raw)
+        except (TypeError, ValueError) as e:
+            raise ValueError("invalid DMS seconds") from e
+        return (
+            _signed_deg_min_sec_to_decimal(lat_deg, lat_min, lat_sec),
+            _signed_deg_min_sec_to_decimal(lon_deg, lon_min, lon_sec),
+        )
+
+    return (
+        _signed_deg_min_sec_to_decimal(lat_deg, lat_min, 0.0),
+        _signed_deg_min_sec_to_decimal(lon_deg, lon_min, 0.0),
+    )
+
+
 def decimal_degrees_to_ddm(decimal_deg, is_latitude=True, decimal_places=3):
     """Convert decimal degrees to degrees and decimal minutes format.
 

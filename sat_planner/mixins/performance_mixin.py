@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import QFileDialog, QDialog
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj
 from sat_planner.performance_import_dialog import PerformanceLineAssignmentDialog
-from sat_planner.utils_geo import decimal_degrees_to_ddm
+from sat_planner.utils_geo import decimal_degrees_to_ddm, lat_lon_decimal_from_survey_csv_row
 from sat_planner.utils_ui import show_statistics_dialog
 
 try:
@@ -851,8 +851,7 @@ class PerformanceMixin:
                     try:
                         line_num = int(row.get("Line Number", -1))
                         point_label = (row.get("Point Label") or "").strip()
-                        lat = float(row.get("Latitude", 0))
-                        lon = float(row.get("Longitude", 0))
+                        lat, lon = lat_lon_decimal_from_survey_csv_row(row)
                     except (ValueError, TypeError):
                         continue
                     if line_num < 0:
@@ -1154,9 +1153,9 @@ class PerformanceMixin:
             self,
             "Select Performance Survey File to Import",
             getattr(self, "last_perf_import_dir", os.path.expanduser("~")),
-            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *.csv *.geojson *.json *.gpx *.lnw);;"
+            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx *.lnw);;"
             "Hypack LNW files (*.lnw);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
-            "Decimal Degrees (*_DDD.txt);;Decimal Degree CSV (*_DDD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;GPX (*.gpx)",
+            "Decimal Degrees (*_DDD.txt);;Decimal Degree CSV (*_DDD.csv);;DMM CSV (*_DMM.csv);;DMS CSV (*_DMS.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;GPX (*.gpx)",
         )
         if not file_path:
             return

@@ -19,6 +19,7 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj
 from sat_planner import decimal_degrees_to_ddm, export_utils
+from sat_planner.utils_geo import lat_lon_decimal_from_survey_csv_row
 from sat_planner.utils_ui import show_statistics_dialog
 
 try:
@@ -506,7 +507,10 @@ class CalibrationMixin:
 
             self._plot_survey_plan()
             self._update_cal_line_offset_from_pitch_line()
-            self._draw_pitch_line_profile()
+            if hasattr(self, "_draw_current_profile"):
+                self._draw_current_profile()
+            elif hasattr(self, "_draw_pitch_line_profile"):
+                self._draw_pitch_line_profile()
             self._update_cal_export_name_from_pitch_line()
             self._update_cal_line_times()
 
@@ -656,7 +660,10 @@ class CalibrationMixin:
                                                        zorder=10, picker=5)
 
             self._update_cal_line_offset_from_pitch_line()
-            self._draw_pitch_line_profile()
+            if hasattr(self, "_draw_current_profile"):
+                self._draw_current_profile()
+            elif hasattr(self, "_draw_pitch_line_profile"):
+                self._draw_pitch_line_profile()
             self._update_cal_export_name_from_pitch_line()
             self._update_cal_line_times()
 
@@ -760,9 +767,11 @@ class CalibrationMixin:
                     )
                     self.set_cal_info_text(summary)
             except Exception as e:
-                self.set_cal_info_text(f"Error calculating updated roll line summary: {e}")
+                    self.set_cal_info_text(f"Error calculating updated roll line summary: {e}")
 
             self.dragging_roll_line_handle = None
+            if hasattr(self, "_draw_current_profile"):
+                self._draw_current_profile()
 
     def _load_last_cal_import_dir(self):
         try:
@@ -801,7 +810,10 @@ class CalibrationMixin:
             self.pitch_median_depth_label.setText("-")
 
         self._plot_survey_plan(preserve_view_limits=True)
-        self._draw_pitch_line_profile()
+        if hasattr(self, "_draw_current_profile"):
+            self._draw_current_profile()
+        elif hasattr(self, "_draw_pitch_line_profile"):
+            self._draw_pitch_line_profile()
         self._update_cal_line_times()
         self._update_cal_export_name_from_pitch_line()
         self._update_pitch_line_button_states()
@@ -862,10 +874,10 @@ class CalibrationMixin:
         for line_type in selected:
             self._reverse_calibration_line(line_type, redraw=False)
         self._plot_survey_plan(preserve_view_limits=True)
-        if hasattr(self, '_draw_pitch_line_profile'):
+        if hasattr(self, "_draw_current_profile"):
+            self._draw_current_profile()
+        elif hasattr(self, "_draw_pitch_line_profile"):
             self._draw_pitch_line_profile()
-        if hasattr(self, '_draw_roll_line_profile'):
-            self._draw_roll_line_profile()
         if hasattr(self, '_update_cal_line_times'):
             self._update_cal_line_times()
         stats = self._calculate_calibration_survey_statistics()
@@ -898,10 +910,10 @@ class CalibrationMixin:
             return
         if redraw:
             self._plot_survey_plan(preserve_view_limits=True)
-            if hasattr(self, '_draw_pitch_line_profile'):
+            if hasattr(self, "_draw_current_profile"):
+                self._draw_current_profile()
+            elif hasattr(self, "_draw_pitch_line_profile"):
                 self._draw_pitch_line_profile()
-            if hasattr(self, '_draw_roll_line_profile'):
-                self._draw_roll_line_profile()
             if hasattr(self, '_update_cal_line_times'):
                 self._update_cal_line_times()
             label = ReverseLineDirectionDialog.LINE_LABELS.get(line_type, line_type)
@@ -985,7 +997,9 @@ class CalibrationMixin:
             self.pick_roll_line_btn.setStyleSheet("")
 
         self._plot_survey_plan(preserve_view_limits=True)
-        if hasattr(self, '_draw_pitch_line_profile'):
+        if hasattr(self, "_draw_current_profile"):
+            self._draw_current_profile()
+        elif hasattr(self, "_draw_pitch_line_profile"):
             self._draw_pitch_line_profile()
         if hasattr(self, '_update_cal_line_times'):
             self._update_cal_line_times()
@@ -1128,10 +1142,37 @@ class CalibrationMixin:
             if hasattr(self, "_hide_map_hover_tooltip_for_export"):
                 self._hide_map_hover_tooltip_for_export()
             self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
-            profile_png_path = None
-            if hasattr(self, 'profile_fig') and self.profile_fig is not None:
-                profile_png_path = os.path.join(export_dir, f"{export_name}_profile.png")
-                self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+            pitch_profile_png_path = None
+            pitch_profile_csv_path = None
+            roll_profile_png_path = None
+            roll_profile_csv_path = None
+            if hasattr(self, "profile_fig") and self.profile_fig is not None:
+                if hasattr(self, "pitch_line_points") and len(self.pitch_line_points) == 2:
+                    if hasattr(self, "_draw_pitch_line_profile"):
+                        self._draw_pitch_line_profile()
+                    pitch_profile_png_path = os.path.join(export_dir, f"{export_name}_pitch_profile.png")
+                    self.profile_fig.savefig(pitch_profile_png_path, dpi=300, bbox_inches="tight", facecolor="white")
+                    p0, p1 = self.pitch_line_points
+                    prof_p = self._profile_arrays_along_segment_endpoints(p0[0], p0[1], p1[0], p1[1])
+                    if prof_p[0] is not None:
+                        pitch_profile_csv_path = os.path.join(export_dir, f"{export_name}_pitch_profile.csv")
+                        export_utils.write_profile_csv(
+                            pitch_profile_csv_path, prof_p[0], prof_p[1], prof_p[2]
+                        )
+                if hasattr(self, "roll_line_points") and len(self.roll_line_points) == 2:
+                    if hasattr(self, "_draw_roll_line_profile"):
+                        self._draw_roll_line_profile()
+                    roll_profile_png_path = os.path.join(export_dir, f"{export_name}_roll_profile.png")
+                    self.profile_fig.savefig(roll_profile_png_path, dpi=300, bbox_inches="tight", facecolor="white")
+                    r0, r1 = self.roll_line_points
+                    prof_r = self._profile_arrays_along_segment_endpoints(r0[0], r0[1], r1[0], r1[1])
+                    if prof_r[0] is not None:
+                        roll_profile_csv_path = os.path.join(export_dir, f"{export_name}_roll_profile.csv")
+                        export_utils.write_profile_csv(
+                            roll_profile_csv_path, prof_r[0], prof_r[1], prof_r[2]
+                        )
+            if hasattr(self, "_draw_current_profile"):
+                self._draw_current_profile()
             success_msg = f"Survey exported successfully to:\n- {os.path.basename(csv_file_path)}\n- {os.path.basename(shapefile_path)}\n- {os.path.basename(geojson_file_path)}\n"
             if lnw_file_path:
                 success_msg += f"- {os.path.basename(lnw_file_path)}\n"
@@ -1146,8 +1187,14 @@ class CalibrationMixin:
             if json_metadata_path:
                 success_msg += f"- {os.path.basename(json_metadata_path)}\n"
             success_msg += f"- {os.path.basename(map_png_path)}\n"
-            if profile_png_path:
-                success_msg += f"- {os.path.basename(profile_png_path)}\n"
+            if pitch_profile_png_path:
+                success_msg += f"- {os.path.basename(pitch_profile_png_path)}\n"
+            if pitch_profile_csv_path and os.path.isfile(pitch_profile_csv_path):
+                success_msg += f"- {os.path.basename(pitch_profile_csv_path)}\n"
+            if roll_profile_png_path:
+                success_msg += f"- {os.path.basename(roll_profile_png_path)}\n"
+            if roll_profile_csv_path and os.path.isfile(roll_profile_csv_path):
+                success_msg += f"- {os.path.basename(roll_profile_csv_path)}\n"
             success_msg += f"in directory: {export_dir}"
             self.set_cal_info_text(success_msg, append=False)
         except Exception as e:
@@ -1237,7 +1284,7 @@ class CalibrationMixin:
             self,
             "Select Survey File to Import",
             self.last_cal_import_dir,
-            "Known Calibration Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *.csv *.geojson *.json *.gpx *.lnw);;GPX files (*.gpx);;Hypack LNW files (*.lnw);;Degrees Minutes Seconds Text files (*_DMS.txt);;Degrees Decimal Minutes Text files (*_DMM.txt);;Decimal Degrees Text files (*_DDD.txt);;Decimal Degree CSV files (*_DDD.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json)"
+            "Known Calibration Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx *.lnw);;GPX files (*.gpx);;Hypack LNW files (*.lnw);;Degrees Minutes Seconds Text files (*_DMS.txt);;Degrees Decimal Minutes Text files (*_DMM.txt);;Decimal Degrees Text files (*_DDD.txt);;Decimal Degree CSV files (*_DDD.csv);;DMM CSV files (*_DMM.csv);;DMS CSV files (*_DMS.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json)"
         )
         if not file_path:
             return
@@ -1420,8 +1467,7 @@ class CalibrationMixin:
                         line_name = row.get('Line Name', '').strip()
                         point_label = row.get('Point Label', '').strip()
                         try:
-                            lat = float(row.get('Latitude', 0))
-                            lon = float(row.get('Longitude', 0))
+                            lat, lon = lat_lon_decimal_from_survey_csv_row(row)
                         except (ValueError, TypeError):
                             continue
                         if not line_name:
@@ -1840,7 +1886,20 @@ class CalibrationMixin:
                 except Exception:
                     pass
             stats_text += f"  Distance (per pass): {stats['pitch_line_distance_m']:.1f} m ({stats['pitch_line_distance_km']:.3f} km, {stats['pitch_line_distance_nm']:.3f} nm)\n"
-            stats_text += f"  Time (total): {stats['pitch_line_time_min']:.1f} min\n\n"
+            stats_text += f"  Time (total): {stats['pitch_line_time_min']:.1f} min\n"
+            if not include_export_date:
+                pitch_depths = self._pitch_line_depth_stats_abs_m()
+                if pitch_depths:
+                    stats_text += f"  Shallowest Depth (m): {pitch_depths['shallowest']:.2f}\n"
+                    stats_text += f"  Maximum Depth (m): {pitch_depths['maximum']:.2f}\n"
+                    stats_text += f"  Mean Depth (m): {pitch_depths['mean']:.2f}\n"
+                    stats_text += f"  Median Depth (m): {pitch_depths['median']:.2f}\n"
+                else:
+                    stats_text += "  Shallowest Depth (m): -\n"
+                    stats_text += "  Maximum Depth (m): -\n"
+                    stats_text += "  Mean Depth (m): -\n"
+                    stats_text += "  Median Depth (m): -\n"
+            stats_text += "\n"
         if stats['roll_line_distance_m'] > 0:
             stats_text += f"Roll Line (2 passes):\n"
             if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2 and pyproj is not None:
@@ -1853,7 +1912,20 @@ class CalibrationMixin:
                 except Exception:
                     pass
             stats_text += f"  Distance (per pass): {stats['roll_line_distance_m']:.1f} m\n"
-            stats_text += f"  Time (total): {stats['roll_line_time_min']:.1f} min\n\n"
+            stats_text += f"  Time (total): {stats['roll_line_time_min']:.1f} min\n"
+            if not include_export_date:
+                roll_depths = self._roll_line_depth_stats_abs_m()
+                if roll_depths:
+                    stats_text += f"  Shallowest Depth (m): {roll_depths['shallowest']:.2f}\n"
+                    stats_text += f"  Maximum Depth (m): {roll_depths['maximum']:.2f}\n"
+                    stats_text += f"  Mean Depth (m): {roll_depths['mean']:.2f}\n"
+                    stats_text += f"  Median Depth (m): {roll_depths['median']:.2f}\n"
+                else:
+                    stats_text += "  Shallowest Depth (m): -\n"
+                    stats_text += "  Maximum Depth (m): -\n"
+                    stats_text += "  Mean Depth (m): -\n"
+                    stats_text += "  Median Depth (m): -\n"
+            stats_text += "\n"
         if stats['heading1_distance_m'] > 0:
             stats_text += f"Heading Line 1: {stats['heading1_distance_m']:.1f} m, {stats['heading1_time_min']:.1f} min\n\n"
         if stats['heading2_distance_m'] > 0:
@@ -1939,6 +2011,42 @@ class CalibrationMixin:
             stats_text += f"Heading2 Start: {h2_start[0]:.6f}, {h2_start[1]:.6f}\n"
             stats_text += f"Heading2 End: {h2_end[0]:.6f}, {h2_end[1]:.6f}\n"
 
+        if include_export_date:
+            stats_text += "\n"
+            stats_text += "PITCH LINE DEPTHS (m)\n"
+            stats_text += "-" * 22 + "\n"
+            if hasattr(self, "pitch_line_points") and len(self.pitch_line_points) == 2:
+                ep = self._pitch_line_depth_stats_abs_m()
+                if ep:
+                    stats_text += f"Shallowest Depth (m): {ep['shallowest']:.2f}\n"
+                    stats_text += f"Maximum Depth (m): {ep['maximum']:.2f}\n"
+                    stats_text += f"Mean Depth (m): {ep['mean']:.2f}\n"
+                    stats_text += f"Median Depth (m): {ep['median']:.2f}\n"
+                else:
+                    stats_text += "Shallowest Depth (m): -\n"
+                    stats_text += "Maximum Depth (m): -\n"
+                    stats_text += "Mean Depth (m): -\n"
+                    stats_text += "Median Depth (m): -\n"
+            else:
+                stats_text += "(Pitch line not defined in this export.)\n"
+            stats_text += "\n"
+            stats_text += "ROLL LINE DEPTHS (m)\n"
+            stats_text += "-" * 20 + "\n"
+            if hasattr(self, "roll_line_points") and len(self.roll_line_points) == 2:
+                er = self._roll_line_depth_stats_abs_m()
+                if er:
+                    stats_text += f"Shallowest Depth (m): {er['shallowest']:.2f}\n"
+                    stats_text += f"Maximum Depth (m): {er['maximum']:.2f}\n"
+                    stats_text += f"Mean Depth (m): {er['mean']:.2f}\n"
+                    stats_text += f"Median Depth (m): {er['median']:.2f}\n"
+                else:
+                    stats_text += "Shallowest Depth (m): -\n"
+                    stats_text += "Maximum Depth (m): -\n"
+                    stats_text += "Mean Depth (m): -\n"
+                    stats_text += "Median Depth (m): -\n"
+            else:
+                stats_text += "(Roll line not defined in this export.)\n"
+
         return stats_text
 
     def _show_calibration_statistics(self):
@@ -1952,12 +2060,18 @@ class CalibrationMixin:
         if stats_text:
             show_statistics_dialog(self, "Calibration Survey Info", stats_text)
 
-    def _update_cal_line_offset_from_pitch_line(self):
-        """Calculate heading line offset from median depth along pitch line."""
-        if (self.geotiff_data_array is None or self.geotiff_extent is None or
-            not hasattr(self, 'pitch_line_points') or len(self.pitch_line_points) != 2):
-            self.cal_line_offset_entry.clear()
-            return
+    def _pitch_line_depth_stats_abs_m(self):
+        """Shallowest / maximum / mean / median depth (m, positive magnitudes) along pitch line from GeoTIFF.
+
+        Matches the Pitch Line Info panel (same sampling as heading offset). Returns None if unavailable.
+        """
+        if (
+            self.geotiff_data_array is None
+            or self.geotiff_extent is None
+            or not hasattr(self, "pitch_line_points")
+            or len(self.pitch_line_points) != 2
+        ):
+            return None
         (lat1, lon1), (lat2, lon2) = self.pitch_line_points
         lats = np.linspace(lat1, lat2, 100)
         lons = np.linspace(lon1, lon2, 100)
@@ -1970,43 +2084,103 @@ class CalibrationMixin:
             ir, ic = int(round(r)), int(round(c))
             elevations.append(self.geotiff_data_array[ir, ic])
         elevations = np.array(elevations)
-        if np.any(~np.isnan(elevations)):
-            median_val = np.nanmedian(elevations)
-            mean_val = np.nanmean(elevations)
-            min_val = np.nanmin(elevations)
-            max_val = np.nanmax(elevations)
-            valid_count = np.sum(~np.isnan(elevations))
-            offset_value = abs(median_val)
+        if not np.any(~np.isnan(elevations)):
+            return None
+        median_val = np.nanmedian(elevations)
+        mean_val = np.nanmean(elevations)
+        min_val = np.nanmin(elevations)
+        max_val = np.nanmax(elevations)
+        valid_count = int(np.sum(~np.isnan(elevations)))
+        return {
+            "shallowest": abs(max_val),
+            "maximum": abs(min_val),
+            "mean": abs(mean_val),
+            "median": abs(median_val),
+            "valid_count": valid_count,
+        }
+
+    def _roll_line_depth_stats_abs_m(self):
+        """Shallowest / maximum / mean / median depth (m, positive magnitudes) along roll line from GeoTIFF.
+
+        Same convention as pitch line depth stats. Returns None if unavailable.
+        """
+        if (
+            self.geotiff_data_array is None
+            or self.geotiff_extent is None
+            or not hasattr(self, "roll_line_points")
+            or len(self.roll_line_points) != 2
+        ):
+            return None
+        (lat1, lon1), (lat2, lon2) = self.roll_line_points
+        lats = np.linspace(lat1, lat2, 100)
+        lons = np.linspace(lon1, lon2, 100)
+        left, right, bottom, top = tuple(self.geotiff_extent)
+        nrows, ncols = self.geotiff_data_array.shape
+        rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
+        cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
+        elevations = []
+        for r, c in zip(rows, cols):
+            ir, ic = int(round(r)), int(round(c))
+            elevations.append(self.geotiff_data_array[ir, ic])
+        elevations = np.array(elevations)
+        if not np.any(~np.isnan(elevations)):
+            return None
+        median_val = np.nanmedian(elevations)
+        mean_val = np.nanmean(elevations)
+        min_val = np.nanmin(elevations)
+        max_val = np.nanmax(elevations)
+        valid_count = int(np.sum(~np.isnan(elevations)))
+        return {
+            "shallowest": abs(max_val),
+            "maximum": abs(min_val),
+            "mean": abs(mean_val),
+            "median": abs(median_val),
+            "valid_count": valid_count,
+        }
+
+    def _update_cal_line_offset_from_pitch_line(self):
+        """Calculate heading line offset from median depth along pitch line."""
+        if (
+            self.geotiff_data_array is None
+            or self.geotiff_extent is None
+            or not hasattr(self, "pitch_line_points")
+            or len(self.pitch_line_points) != 2
+        ):
+            self.cal_line_offset_entry.clear()
+            return
+        pd = self._pitch_line_depth_stats_abs_m()
+        if pd is not None:
+            offset_value = pd["median"]
             self.cal_line_offset_entry.setText(f"{offset_value:.2f}")
-            if hasattr(self, 'pitch_shallowest_depth_label'):
-                self.pitch_shallowest_depth_label.setText(f"{abs(max_val):.2f}")
-            if hasattr(self, 'pitch_max_depth_label'):
-                self.pitch_max_depth_label.setText(f"{abs(min_val):.2f}")
-            if hasattr(self, 'pitch_mean_depth_label'):
-                self.pitch_mean_depth_label.setText(f"{abs(mean_val):.2f}")
-            if hasattr(self, 'pitch_median_depth_label'):
-                self.pitch_median_depth_label.setText(f"{abs(median_val):.2f}")
-            if hasattr(self, 'set_cal_info_text'):
+            if hasattr(self, "pitch_shallowest_depth_label"):
+                self.pitch_shallowest_depth_label.setText(f"{pd['shallowest']:.2f}")
+            if hasattr(self, "pitch_max_depth_label"):
+                self.pitch_max_depth_label.setText(f"{pd['maximum']:.2f}")
+            if hasattr(self, "pitch_mean_depth_label"):
+                self.pitch_mean_depth_label.setText(f"{pd['mean']:.2f}")
+            if hasattr(self, "pitch_median_depth_label"):
+                self.pitch_median_depth_label.setText(f"{pd['median']:.2f}")
+            if hasattr(self, "set_cal_info_text"):
                 self.set_cal_info_text(
-                    f"Heading Line Offset calculated: {offset_value:.2f} m (median of {valid_count} points along pitch line). "
-                    f"Depth range: {abs(max_val):.2f} m (shallowest) to {abs(min_val):.2f} m (deepest). "
-                    f"Mean depth: {abs(mean_val):.2f} m, Median depth: {abs(median_val):.2f} m.",
-                    append=False
+                    f"Heading Line Offset calculated: {offset_value:.2f} m (median of {pd['valid_count']} points along pitch line). "
+                    f"Depth range: {pd['shallowest']:.2f} m (shallowest) to {pd['maximum']:.2f} m (deepest). "
+                    f"Mean depth: {pd['mean']:.2f} m, Median depth: {pd['median']:.2f} m.",
+                    append=False,
                 )
         else:
             self.cal_line_offset_entry.setText("-")
-            if hasattr(self, 'pitch_shallowest_depth_label'):
+            if hasattr(self, "pitch_shallowest_depth_label"):
                 self.pitch_shallowest_depth_label.setText("-")
-            if hasattr(self, 'pitch_max_depth_label'):
+            if hasattr(self, "pitch_max_depth_label"):
                 self.pitch_max_depth_label.setText("-")
-            if hasattr(self, 'pitch_mean_depth_label'):
+            if hasattr(self, "pitch_mean_depth_label"):
                 self.pitch_mean_depth_label.setText("-")
-            if hasattr(self, 'pitch_median_depth_label'):
+            if hasattr(self, "pitch_median_depth_label"):
                 self.pitch_median_depth_label.setText("-")
-            if hasattr(self, 'set_cal_info_text'):
+            if hasattr(self, "set_cal_info_text"):
                 self.set_cal_info_text(
                     "Heading Line Offset: Could not calculate (no valid elevation data along pitch line).",
-                    append=False
+                    append=False,
                 )
 
     def _add_heading_lines_from_pitch_line(self):

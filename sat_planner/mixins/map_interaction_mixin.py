@@ -124,7 +124,10 @@ class MapInteractionMixin:
                     self.set_cal_info_text(f"Error calculating pitch line summary: {e}")
                 # self._show_message("info","Pitch Line Picked", f"Pitch line defined from\nStart: {self.pitch_line_points[0]}\nEnd: {self.pitch_line_points[1]}")
                 self._update_cal_line_offset_from_pitch_line()
-                self._draw_pitch_line_profile()
+                if hasattr(self, "_draw_current_profile"):
+                    self._draw_current_profile()
+                elif hasattr(self, "_draw_pitch_line_profile"):
+                    self._draw_pitch_line_profile()
                 self._update_cal_export_name_from_pitch_line()
                 self._update_cal_line_times()
                 self._update_pitch_line_button_states()
@@ -180,6 +183,8 @@ class MapInteractionMixin:
                     self.set_cal_info_text(summary)
                 except Exception as e:
                     self.set_cal_info_text(f"Error calculating roll line summary: {e}")
+                if hasattr(self, "_draw_current_profile"):
+                    self._draw_current_profile()
                 self._update_cal_line_times()
                 self._update_roll_line_button_states()
             return  # Do not process as center pick if in roll line mode

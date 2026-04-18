@@ -15,6 +15,7 @@ from PyQt6.QtGui import QTextCursor
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, LineString, fiona
 from sat_planner import decimal_degrees_to_ddm, export_utils
+from sat_planner.utils_geo import lat_lon_decimal_from_survey_csv_row
 from sat_planner.utils_ui import show_statistics_dialog
 
 try:
@@ -468,9 +469,18 @@ class LinePlanningMixin:
                 self._hide_map_hover_tooltip_for_export()
             self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
             profile_png_path = None
+            profile_csv_path = None
             if hasattr(self, 'profile_fig') and self.profile_fig is not None:
                 profile_png_path = os.path.join(export_dir, f"{export_name}_profile.png")
                 self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+            prof_export = self._line_plan_profile_arrays()
+            if prof_export is not None:
+                d_exp, e_exp, s_exp, wp_d_exp = prof_export
+                wp_labels_exp = self._line_plan_profile_waypoint_labels(d_exp, wp_d_exp)
+                profile_csv_path = os.path.join(export_dir, f"{export_name}_profile.csv")
+                export_utils.write_line_plan_profile_csv(
+                    profile_csv_path, d_exp, e_exp, s_exp, wp_labels_exp
+                )
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
             stats = self._calculate_line_planning_statistics()
             if stats:
@@ -520,6 +530,8 @@ class LinePlanningMixin:
             success_msg += f"- {os.path.basename(dms_txt_file_path)}\n- {os.path.basename(map_png_path)}\n"
             if profile_png_path:
                 success_msg += f"- {os.path.basename(profile_png_path)}\n"
+            if profile_csv_path:
+                success_msg += f"- {os.path.basename(profile_csv_path)}\n"
             success_msg += f"- {os.path.basename(stats_file_path)}\n"
             success_msg += f"in directory: {export_dir}"
             self.set_line_info_text(success_msg, append=False)
@@ -595,9 +607,9 @@ class LinePlanningMixin:
     def _import_drawn_line(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Line Plan File to Import", self.last_line_import_dir,
-            "Known Line Plan Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DDD.csv *.csv *.geojson *.json *.gpx);;"
+            "Known Line Plan Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx);;"
             "Decimal Degrees (*_DDD.txt);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
-            "Hypack LNW (*.lnw);;Decimal Degree CSV (*_DDD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;GPX (*.gpx);;All files (*.*)")
+            "Hypack LNW (*.lnw);;Decimal Degree CSV (*_DDD.csv);;DMM CSV (*_DMM.csv);;DMS CSV (*_DMS.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;GPX (*.gpx);;All files (*.*)")
         if not file_path:
             return
         import_dir = os.path.dirname(file_path)
@@ -646,8 +658,7 @@ class LinePlanningMixin:
                     csv_reader = csv.DictReader(csvfile)
                     for row in csv_reader:
                         try:
-                            lat = float(row.get('Latitude', 0))
-                            lon = float(row.get('Longitude', 0))
+                            lat, lon = lat_lon_decimal_from_survey_csv_row(row)
                             self.line_planning_points.append((lat, lon))
                         except (ValueError, TypeError):
                             continue
@@ -923,6 +934,88 @@ class LinePlanningMixin:
         self._update_line_planning_button_states()
         self._plot_survey_plan(preserve_view_limits=True)
 
+    _LINE_PLAN_PROFILE_SEG_SAMPLES = 50
+
+    def _line_plan_profile_arrays(self):
+        """Return (dists, elevations, slopes, waypoint_distances) along sampled polyline, or None.
+
+        Sampling matches ``_draw_line_planning_profile`` (geodesic distance, GeoTIFF / fallback).
+        """
+        if not (hasattr(self, "line_planning_points") and len(self.line_planning_points) >= 2):
+            return None
+        if pyproj is None:
+            return None
+        nseg = self._LINE_PLAN_PROFILE_SEG_SAMPLES
+        geod = pyproj.Geod(ellps="WGS84")
+        lats, lons, dists = [], [], [0.0]
+        total_dist = 0.0
+        waypoint_distances = [0.0]
+        for i in range(1, len(self.line_planning_points)):
+            lat1, lon1 = self.line_planning_points[i - 1]
+            lat2, lon2 = self.line_planning_points[i]
+            seg_lats = np.linspace(lat1, lat2, nseg)
+            seg_lons = np.linspace(lon1, lon2, nseg)
+            if i == 1:
+                lats.extend(seg_lats)
+                lons.extend(seg_lons)
+            else:
+                lats.extend(seg_lats[1:])
+                lons.extend(seg_lons[1:])
+            for j in range(1, nseg):
+                _, _, d = geod.inv(seg_lons[j - 1], seg_lats[j - 1], seg_lons[j], seg_lats[j])
+                if not np.isnan(d) and not np.isinf(d):
+                    total_dist += d
+                dists.append(total_dist)
+            waypoint_distances.append(total_dist)
+        lats = np.array(lats)
+        lons = np.array(lons)
+        dists = np.array(dists)
+        elevations, slopes, _ = self._get_profile_data_from_geotiff(lats, lons)
+        if elevations is None:
+            if self.geotiff_data_array is None or self.geotiff_extent is None:
+                return None
+            left, right, bottom, top = tuple(self.geotiff_extent)
+            nrows, ncols = self.geotiff_data_array.shape
+            rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
+            cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
+            elevations, slopes = [], []
+            for r, c in zip(rows, cols):
+                ir, ic = int(round(r)), int(round(c))
+                elev = self.geotiff_data_array[ir, ic]
+                elevations.append(elev)
+                slope = np.nan
+                if 0 < ir < nrows - 1 and 0 < ic < ncols - 1:
+                    center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
+                    m_per_deg_lat, m_per_deg_lon = 111320.0, 111320.0 * np.cos(np.radians(center_lat_geotiff))
+                    res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / nrows
+                    res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / ncols
+                    dx_m, dy_m = res_lon_deg * m_per_deg_lon, res_lat_deg * m_per_deg_lat
+                    window = self.geotiff_data_array[ir - 1 : ir + 2, ic - 1 : ic + 2]
+                    if window.shape == (3, 3) and not np.all(np.isnan(window)):
+                        dz_dy, dz_dx = np.gradient(window, dy_m, dx_m)
+                        slope = np.degrees(np.arctan(np.sqrt(dz_dx[1, 1] ** 2 + dz_dy[1, 1] ** 2)))
+                slopes.append(slope)
+            elevations = np.array(elevations)
+            slopes = np.array(slopes)
+        return dists, elevations, slopes, np.array(waypoint_distances, dtype=float)
+
+    def _line_plan_profile_waypoint_labels(self, dists, waypoint_distances):
+        """One label per profile row: ``WP1``… at nearest unused sample to each waypoint distance."""
+        n = len(dists)
+        labels = [""] * n
+        used = set()
+        wd_list = list(np.asarray(waypoint_distances, dtype=float).flat)
+        for j, wd in enumerate(wd_list):
+            err = np.abs(dists - wd)
+            order = np.argsort(err)
+            for k in order:
+                k = int(k)
+                if k not in used:
+                    labels[k] = f"WP{j + 1}"
+                    used.add(k)
+                    break
+        return labels
+
     def _draw_line_planning_profile(self):
         self.profile_ax.clear()
         for ax in self.profile_fig.get_axes():
@@ -938,64 +1031,20 @@ class LinePlanningMixin:
             if hasattr(self, 'profile_canvas'):
                 self.profile_canvas.draw_idle()
             return
-        geod = pyproj.Geod(ellps="WGS84")
-        lats, lons, dists = [], [], [0.0]
-        total_dist = 0.0
-        waypoint_distances = [0.0]
-        for i in range(1, len(self.line_planning_points)):
-            lat1, lon1 = self.line_planning_points[i-1]
-            lat2, lon2 = self.line_planning_points[i]
-            seg_lats = np.linspace(lat1, lat2, 50)
-            seg_lons = np.linspace(lon1, lon2, 50)
-            if i == 1:
-                lats.extend(seg_lats)
-                lons.extend(seg_lons)
-            else:
-                lats.extend(seg_lats[1:])
-                lons.extend(seg_lons[1:])
-            for j in range(1, 50):
-                _, _, d = geod.inv(seg_lons[j-1], seg_lats[j-1], seg_lons[j], seg_lats[j])
-                if not np.isnan(d) and not np.isinf(d):
-                    total_dist += d
-                dists.append(total_dist)
-            waypoint_distances.append(total_dist)
-        lats = np.array(lats)
-        lons = np.array(lons)
-        dists = np.array(dists)
-        elevations, slopes, _ = self._get_profile_data_from_geotiff(lats, lons)
-        if elevations is None:
-            if self.geotiff_data_array is None or self.geotiff_extent is None:
-                return
-            left, right, bottom, top = tuple(self.geotiff_extent)
-            nrows, ncols = self.geotiff_data_array.shape
-            rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
-            cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
-            elevations, slopes = [], []
-            for r, c in zip(rows, cols):
-                ir, ic = int(round(r)), int(round(c))
-                elev = self.geotiff_data_array[ir, ic]
-                elevations.append(elev)
-                slope = np.nan
-                if 0 < ir < nrows-1 and 0 < ic < ncols-1:
-                    center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
-                    m_per_deg_lat, m_per_deg_lon = 111320.0, 111320.0 * np.cos(np.radians(center_lat_geotiff))
-                    res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / nrows
-                    res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / ncols
-                    dx_m, dy_m = res_lon_deg * m_per_deg_lon, res_lat_deg * m_per_deg_lat
-                    window = self.geotiff_data_array[ir-1:ir+2, ic-1:ic+2]
-                    if window.shape == (3, 3) and not np.all(np.isnan(window)):
-                        dz_dy, dz_dx = np.gradient(window, dy_m, dx_m)
-                        slope = np.degrees(np.arctan(np.sqrt(dz_dx[1,1]**2 + dz_dy[1,1]**2)))
-                slopes.append(slope)
-            elevations = np.array(elevations)
-            slopes = np.array(slopes)
+        prof = self._line_plan_profile_arrays()
+        if prof is None:
+            self.profile_fig.tight_layout(pad=1.0)
+            if hasattr(self, 'profile_canvas'):
+                self.profile_canvas.draw_idle()
+            return
+        dists, elevations, slopes, waypoint_distances = prof
         self.profile_ax.plot(dists, elevations, color='orange', lw=1, label='Elevation')
         waypoint_elevations = []
-        for i, (lat, lon) in enumerate(self.line_planning_points):
-            _, idx = min((abs(lat - lats[j]) + abs(lon - lons[j]), j) for j in range(len(lats)))
-            waypoint_elevations.append(elevations[idx])
+        for wd in waypoint_distances:
+            k = int(np.argmin(np.abs(dists - wd)))
+            waypoint_elevations.append(elevations[k])
         self.profile_ax.plot(waypoint_distances, waypoint_elevations, 'o', color='orange', markersize=6, label='Waypoints')
-        if np.any(~np.isnan(slopes)):
+        if self._show_slope_on_profile() and np.any(~np.isnan(slopes)):
             slope_ax = self.profile_ax.twinx()
             slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
             slope_ax.set_ylabel('Slope (deg)', fontsize=8)

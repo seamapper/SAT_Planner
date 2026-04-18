@@ -17,6 +17,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 import numpy as np
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, LineString, fiona
 from sat_planner import decimal_degrees_to_ddm, export_utils
+from sat_planner.utils_geo import lat_lon_decimal_from_survey_csv_row
 from sat_planner.utils_ui import show_statistics_dialog
 
 try:
@@ -789,10 +790,10 @@ class ReferenceMixin:
             self,
             "Select Survey File to Import",
             self.last_ref_import_dir,
-            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *.csv *.geojson *.json *.gpx *.lnw);;"
+            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx *.lnw);;"
             "GPX files (*.gpx);;"
             "Hypack LNW files (*.lnw);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
-            "Decimal Degrees (*_DDD.txt);;Decimal Degree CSV (*_DDD.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json)"
+            "Decimal Degrees (*_DDD.txt);;Decimal Degree CSV (*_DDD.csv);;DMM CSV (*_DMM.csv);;DMS CSV (*_DMS.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json)"
         )
         if not file_path:
             return
@@ -901,8 +902,7 @@ class ReferenceMixin:
                         try:
                             line_num = int(row.get('Line Number', -1))
                             point_label = row.get('Point Label', '').strip()
-                            lat = float(row.get('Latitude', 0))
-                            lon = float(row.get('Longitude', 0))
+                            lat, lon = lat_lon_decimal_from_survey_csv_row(row)
                         except (ValueError, TypeError):
                             continue
 

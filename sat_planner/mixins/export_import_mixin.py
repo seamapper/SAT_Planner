@@ -155,6 +155,7 @@ class ExportImportMixin:
         self._save_last_export_dir()
 
         try:
+            profile_csv_path = None
             if mapping is None:
                 raise ImportError("shapely.geometry.mapping is required for shapefile export")
 
@@ -545,6 +546,14 @@ class ExportImportMixin:
             if hasattr(self, 'profile_fig') and self.profile_fig is not None:
                 self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
 
+            # --- Export crossline elevation profile as CSV (Distance m, Elevation m, Slope deg) ---
+            if self.cross_line_data and len(self.cross_line_data) == 2:
+                cl_a, cl_b = self.cross_line_data
+                prof = self._profile_arrays_along_segment_endpoints(cl_a[0], cl_a[1], cl_b[0], cl_b[1])
+                if prof[0] is not None:
+                    profile_csv_path = os.path.join(export_dir, f"{export_name}_profile.csv")
+                    export_utils.write_profile_csv(profile_csv_path, prof[0], prof[1], prof[2])
+
             # --- Export parameters metadata as JSON ---
             json_metadata_path = os.path.join(export_dir, f"{export_name}_params.json")
             try:
@@ -664,7 +673,9 @@ class ExportImportMixin:
             # Add profile PNG if it was created
             if hasattr(self, 'profile_fig') and self.profile_fig is not None:
                 success_files.append(f"- {os.path.basename(profile_png_path)}")
-            
+            if profile_csv_path and os.path.isfile(profile_csv_path):
+                success_files.append(f"- {os.path.basename(profile_csv_path)}")
+
             self.set_ref_info_text(
                 f"Survey exported successfully to:\n" + "\n".join(success_files) + 
                 f"\nin directory: {export_dir}", append=False)
