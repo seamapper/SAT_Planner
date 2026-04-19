@@ -37,6 +37,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Display pitch line depth statistics (shallowest, maximum, mean, median)
 - Configure turn time for accurate time estimates
 - Import calibration surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON); **suggested line assignment** from file labels or geometry (Pitch = middle parallel line, Roll = non-parallel, Heading1/2 by file order); optional GMRT download after import (checkbox + buffer)
+- GeoJSON import loads geometry from **`{name}.geojson`**; **`{name}_params.json`** in the same folder (if present) supplies **survey speed**, **turn time (min)**, **heading line offset**, and **export name** so you can edit those fields without changing the geometry file
 - **Calibration Survey Info** dialog and *_info.txt with **Calibration Waypoints (DMM)** and **Calibration Waypoints (DDD)** sections (Pitch/Roll/Heading1/Heading2 start and end)
 - Comprehensive statistics with survey time, transit time, and turn time breakdowns
 - Validation warning when heading line offset exceeds 2x shallowest depth
@@ -83,10 +84,11 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Survey legend is drawn above map overlays/layers
 - EEZ overlay reloads on pan/zoom and supports paused-hover name lookup
 
-### GeoJSON Metadata
-- Calibration, Accuracy, Performance, and Line GeoJSON exports include `survey_speed` (and performance exports use `line_num` 1–4 for swath and 11–14 for BIST legs where applicable)
-- Calibration, Accuracy, Performance, and Line GeoJSON exports can include saved `geotiff_path`
-- On import, SAT Planner attempts to reload the saved GeoTIFF path; if unavailable, import continues with a warning
+### GeoJSON metadata (and sidecar JSON)
+- **Calibration**: GeoJSON holds line geometry and `line_num` / `line_name` only. The FeatureCollection **`properties`** may include **`geotiff_path`** so a saved raster can be reopened on import. **Survey speed**, **turn time (min)**, **heading line offset**, and **export name** live in **`{export_name}_params.json`** next to the GeoJSON (not in the `.geojson`). On import, that sidecar is optional; if it is absent, the app uses defaults and may repopulate the heading offset from the pitch line after load.
+- **Accuracy** and **Line** GeoJSON exports can include **`survey_speed`** and **`geotiff_path`** (collection and/or feature properties as applicable).
+- **Performance** GeoJSON uses feature properties such as **`line_num`** (1–4 for swath legs, 11–14 for BIST extensions where applicable) and may include speed-related keys; full test parameters are also in **`{name}_performance_params.json`**.
+- Whenever a saved **GeoTIFF** path is present in the imported files, SAT Planner tries to open it; if the file is missing, import continues with a warning.
 
 ## Requirements
 
@@ -292,6 +294,7 @@ The application saves configuration in:
 - **Hypack LNW**: LNW format for Hypack (UTM zone computed from survey points when needed)
 - **Shapefile**: Geospatial vector format for GIS applications
 - **Statistics / *_info.txt**: Text reports with distances, timing, survey details, and waypoint sections (DMM then DDD) for Calibration, Accuracy, and Line plans; Performance exports add a performance-oriented `*_info.txt` and **`{name}_performance_params.json`** (separate from Accuracy `{name}_params.json`)
+- **Calibration `{name}_params.json`**: Sidecar to the calibration GeoJSON export—**`survey_speed`**, **`turn_time`**, **`line_offset`** (heading line offset), and **`export_name`**. Edit this file to tune those values and re-import the `.geojson` without regenerating geometry.
 
 ## Navigation
 
@@ -334,6 +337,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.20**: README: document **calibration** export/import split—**`{name}_params.json`** holds survey speed, turn time, heading line offset, and export name; **calibration GeoJSON** is geometry plus line labels (and optional **`geotiff_path`** on the FeatureCollection). Clarified GeoJSON metadata behavior for Accuracy, Line, and Performance.
 - **v2026.15**: **Performance (swath) survey planning** tab: four headings relative to swell, swath lines plus optional **RX noise BIST** extensions; **Plot Performance Lines**, zoom/remove, **Show Performance Test Info**; debounced **auto-plot** after parameter edits and after performance pick-center; profile for **line 1 + BIST** with map-matched colors; **Performance Import/Export** (same export family as Accuracy, assignment dialog on ambiguous import, optional GMRT on import); default swell direction **0°**; accuracy vs performance **central point** markers fixed so accuracy center shows only when an accuracy plan is present; UI labels (**Plot Performance Lines**, button layout). Added `performance_import_dialog.py` and **PerformanceMixin**; README updated for Performance workflow.
 - **v2026.14**: Added GeoTIFF Controls **Download Data** source dropdown (`Select Source`, `GMRT`) that opens the source flow immediately and keeps selection after successful download. Added GMRT dialog download progress bar (`x of y` for tiled downloads, indeterminate for single download). Added EEZ pan/zoom-driven refresh, paused-hover EEZ `GEONAME` tooltip lookups (including without a loaded GeoTIFF), and default EEZ opacity 80%. Improved large-area/world-scale alignment for EEZ and Imagery Basemap overlays. Updated GMRT dialog so **Split Grid Into Bathymetry and Topography** is enabled by default. Fixed line-plan zoom GeoTIFF coverage refresh, line-plan profile refresh after import, and calibration Pitch Line Info refresh after survey import.
 - **v2026.11**: UI and workflow updates. Accuracy tab naming in UI/docs (formerly Reference). Import/Export button labels updated (Import/Export Accuracy Survey, Import/Export Calibration Survey, Import/Export Line Survey) and reordered on tabs. "Download GMRT" defaults to unchecked and placement updated in import/export groups. Activity Log changed to collapsible side panel. GeoJSON export/import now includes `survey_speed` and saved `geotiff_path` for Calibration/Accuracy/Line; missing GeoTIFF path does not block import (warning + continue). Contour interval and slope min/max redraws are debounced while typing. Survey legend now draws above all overlays.
