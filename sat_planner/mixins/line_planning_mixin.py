@@ -200,6 +200,8 @@ class LinePlanningMixin:
             self.line_remove_waypoint_btn.setText("Remove Waypoint")
         self._clear_line_planning_profile()
         self._update_line_planning_button_states()
+        if hasattr(self, "_update_line_info_depth_labels"):
+            self._update_line_info_depth_labels()
 
     def _clear_line_planning_profile(self):
         """Clear the line planning profile plot."""
@@ -895,6 +897,8 @@ class LinePlanningMixin:
                 handle = self.ax.scatter([lon], [lat], color=color, s=100, marker='o', edgecolors='black', linewidth=2, zorder=10, picker=5)
                 self.line_planning_handles.append(handle)
             self.dragging_line_planning_handle = None
+            if hasattr(self, "_update_line_info_depth_labels"):
+                self._update_line_info_depth_labels()
 
     def _reset_line_planning_tab(self):
         self.line_planning_points = []
@@ -933,6 +937,8 @@ class LinePlanningMixin:
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
         self._update_line_planning_button_states()
         self._plot_survey_plan(preserve_view_limits=True)
+        if hasattr(self, "_update_line_info_depth_labels"):
+            self._update_line_info_depth_labels()
 
     _LINE_PLAN_PROFILE_SEG_SAMPLES = 50
 
@@ -1016,55 +1022,131 @@ class LinePlanningMixin:
                     break
         return labels
 
-    def _draw_line_planning_profile(self):
-        self.profile_ax.clear()
-        for ax in self.profile_fig.get_axes():
-            if ax != self.profile_ax:
-                ax.remove()
-        self.profile_ax.set_title("Line Planning Elevation Profile", fontsize=8)
-        self.profile_ax.set_xlabel("Distance (m)", fontsize=8)
-        self.profile_ax.set_ylabel("Elevation (m)", fontsize=8)
-        self.profile_ax.tick_params(axis='both', which='major', labelsize=7)
-        slope_ax = None
-        if not (hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 2):
-            self.profile_fig.tight_layout(pad=1.0)
-            if hasattr(self, 'profile_canvas'):
-                self.profile_canvas.draw_idle()
-            return
+    def _line_survey_along_line_stats(self):
+        """Shallowest / maximum depth (m) and min / max slope (deg) along the full line survey polyline.
+
+        Uses the same samples as ``_line_plan_profile_arrays`` (geodesic resampling along segments).
+        Depth convention matches Pitch Line Info (positive magnitudes from bathy elevations).
+        """
         prof = self._line_plan_profile_arrays()
         if prof is None:
-            self.profile_fig.tight_layout(pad=1.0)
-            if hasattr(self, 'profile_canvas'):
-                self.profile_canvas.draw_idle()
+            return None
+        _dists, elevations, slopes, _wp = prof
+        elevations = np.asarray(elevations)
+        slopes = np.asarray(slopes, dtype=float)
+        if not np.any(~np.isnan(elevations)):
+            return None
+        min_val = np.nanmin(elevations)
+        max_val = np.nanmax(elevations)
+        valid_count = int(np.sum(~np.isnan(elevations)))
+        slope_min_deg = None
+        slope_max_deg = None
+        finite_sl = np.isfinite(slopes) & ~np.isnan(slopes)
+        if np.any(finite_sl):
+            slope_min_deg = float(np.min(slopes[finite_sl]))
+            slope_max_deg = float(np.max(slopes[finite_sl]))
+        return {
+            "shallowest": abs(max_val),
+            "maximum": abs(min_val),
+            "slope_min_deg": slope_min_deg,
+            "slope_max_deg": slope_max_deg,
+            "valid_count": valid_count,
+        }
+
+    def _format_line_survey_info_text(self, pd):
+        """Human-readable block for Survey Info and *_info.txt (matches Line Info groupbox)."""
+        if pd is None:
+            return ""
+        smin = f"{pd['slope_min_deg']:.2f}" if pd["slope_min_deg"] is not None else "-"
+        smax = f"{pd['slope_max_deg']:.2f}" if pd["slope_max_deg"] is not None else "-"
+        return (
+            "Along-line bathymetry profile samples\n"
+            f"Shallowest Depth (m): {pd['shallowest']:.2f}  Maximum Depth (m): {pd['maximum']:.2f}\n"
+            f"Minimum Slope (deg): {smin}  Maximum Slope (deg): {smax}\n"
+            f"({pd['valid_count']} samples)\n"
+        )
+
+    def _update_line_info_depth_labels(self):
+        """Refresh Line Info: depth extremes and slope range along the full line."""
+        if not hasattr(self, "line_shallowest_depth_label"):
             return
-        dists, elevations, slopes, waypoint_distances = prof
-        self.profile_ax.plot(dists, elevations, color='orange', lw=1, label='Elevation')
-        waypoint_elevations = []
-        for wd in waypoint_distances:
-            k = int(np.argmin(np.abs(dists - wd)))
-            waypoint_elevations.append(elevations[k])
-        self.profile_ax.plot(waypoint_distances, waypoint_elevations, 'o', color='orange', markersize=6, label='Waypoints')
-        if self._show_slope_on_profile() and np.any(~np.isnan(slopes)):
-            slope_ax = self.profile_ax.twinx()
-            slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
-            slope_ax.set_ylabel('Slope (deg)', fontsize=8)
-            slope_ax.tick_params(axis='y', labelsize=7)
-            slope_ax.grid(False)
-        if len(dists) > 0 and not (np.isnan(dists[0]) or np.isinf(dists[0]) or np.isnan(dists[-1]) or np.isinf(dists[-1])):
-            self.profile_ax.set_xlim(dists[0], dists[-1])
-        if np.any(~np.isnan(elevations)):
-            self.profile_ax.set_ylim(np.nanmin(elevations), np.nanmax(elevations))
-        if slope_ax and np.any(~np.isnan(slopes)):
-            slope_ax.set_ylim(0, np.nanmax(slopes[~np.isnan(slopes)]) * 1.1)
-        handles, labels = self.profile_ax.get_legend_handles_labels()
-        if slope_ax:
-            slope_handles, slope_labels = slope_ax.get_legend_handles_labels()
-            handles.extend(slope_handles)
-            labels.extend(slope_labels)
-        if handles:
-            self.profile_ax.legend(handles, labels, fontsize=10, loc='upper right')
-        self.profile_fig.tight_layout(pad=1.0)
-        self.profile_canvas.draw_idle()
+        pd = self._line_survey_along_line_stats()
+        if pd is not None:
+            self.line_shallowest_depth_label.setText(f"{pd['shallowest']:.2f}")
+            self.line_max_depth_label.setText(f"{pd['maximum']:.2f}")
+            if hasattr(self, "line_min_slope_label"):
+                self.line_min_slope_label.setText(
+                    f"{pd['slope_min_deg']:.2f}" if pd["slope_min_deg"] is not None else "-"
+                )
+            if hasattr(self, "line_max_slope_label"):
+                self.line_max_slope_label.setText(
+                    f"{pd['slope_max_deg']:.2f}" if pd["slope_max_deg"] is not None else "-"
+                )
+        else:
+            self.line_shallowest_depth_label.setText("-")
+            self.line_max_depth_label.setText("-")
+            if hasattr(self, "line_min_slope_label"):
+                self.line_min_slope_label.setText("-")
+            if hasattr(self, "line_max_slope_label"):
+                self.line_max_slope_label.setText("-")
+
+    def _on_geotiff_loaded_line_info_depth(self):
+        """After bathymetry loads or reloads, refresh Line Info depths if a line plan exists."""
+        if hasattr(self, "_update_line_info_depth_labels"):
+            self._update_line_info_depth_labels()
+
+    def _draw_line_planning_profile(self):
+        try:
+            self.profile_ax.clear()
+            for ax in self.profile_fig.get_axes():
+                if ax != self.profile_ax:
+                    ax.remove()
+            self.profile_ax.set_title("Line Planning Elevation Profile", fontsize=8)
+            self.profile_ax.set_xlabel("Distance (m)", fontsize=8)
+            self.profile_ax.set_ylabel("Elevation (m)", fontsize=8)
+            self.profile_ax.tick_params(axis='both', which='major', labelsize=7)
+            slope_ax = None
+            if not (hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 2):
+                self.profile_fig.tight_layout(pad=1.0)
+                if hasattr(self, 'profile_canvas'):
+                    self.profile_canvas.draw_idle()
+                return
+            prof = self._line_plan_profile_arrays()
+            if prof is None:
+                self.profile_fig.tight_layout(pad=1.0)
+                if hasattr(self, 'profile_canvas'):
+                    self.profile_canvas.draw_idle()
+                return
+            dists, elevations, slopes, waypoint_distances = prof
+            self.profile_ax.plot(dists, elevations, color='orange', lw=1, label='Elevation')
+            waypoint_elevations = []
+            for wd in waypoint_distances:
+                k = int(np.argmin(np.abs(dists - wd)))
+                waypoint_elevations.append(elevations[k])
+            self.profile_ax.plot(waypoint_distances, waypoint_elevations, 'o', color='orange', markersize=6, label='Waypoints')
+            if self._show_slope_on_profile() and np.any(~np.isnan(slopes)):
+                slope_ax = self.profile_ax.twinx()
+                slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
+                slope_ax.set_ylabel('Slope (deg)', fontsize=8)
+                slope_ax.tick_params(axis='y', labelsize=7)
+                slope_ax.grid(False)
+            if len(dists) > 0 and not (np.isnan(dists[0]) or np.isinf(dists[0]) or np.isnan(dists[-1]) or np.isinf(dists[-1])):
+                self.profile_ax.set_xlim(dists[0], dists[-1])
+            if np.any(~np.isnan(elevations)):
+                self.profile_ax.set_ylim(np.nanmin(elevations), np.nanmax(elevations))
+            if slope_ax and np.any(~np.isnan(slopes)):
+                slope_ax.set_ylim(0, np.nanmax(slopes[~np.isnan(slopes)]) * 1.1)
+            handles, labels = self.profile_ax.get_legend_handles_labels()
+            if slope_ax:
+                slope_handles, slope_labels = slope_ax.get_legend_handles_labels()
+                handles.extend(slope_handles)
+                labels.extend(slope_labels)
+            if handles:
+                self.profile_ax.legend(handles, labels, fontsize=10, loc='upper right')
+            self.profile_fig.tight_layout(pad=1.0)
+            self.profile_canvas.draw_idle()
+        finally:
+            self._update_line_info_depth_labels()
 
     def _calculate_line_planning_statistics(self):
         if not self.line_planning_points or len(self.line_planning_points) < 2:
@@ -1095,12 +1177,8 @@ class LinePlanningMixin:
                 total_time_seconds = total_distance / speed_ms
                 total_time_minutes = total_time_seconds / 60
                 total_time_hours = total_time_minutes / 60
-                depth_info = ""
-                if self.geotiff_data_array is not None:
-                    depths = [self._get_depth_at_point(lat, lon) for lat, lon in self.line_planning_points]
-                    if depths:
-                        min_d, max_d, avg_d = min(depths), max(depths), sum(depths) / len(depths)
-                        depth_info = f"Depth Range: {min_d:.1f} to {max_d:.1f} m (avg: {avg_d:.1f} m)\n"
+                pd_line = self._line_survey_along_line_stats()
+                depth_info = self._format_line_survey_info_text(pd_line)
                 return {'num_points': len(self.line_planning_points), 'total_distance_m': total_distance, 'total_distance_km': total_distance / 1000, 'total_distance_nm': total_distance / 1852, 'heading': heading, 'reciprocal_heading': reciprocal_heading, 'speed_knots': speed_knots, 'total_time_minutes': total_time_minutes, 'total_time_hours': total_time_hours, 'depth_info': depth_info, 'segment_distances': segment_distances}
             return None
         except Exception as e:

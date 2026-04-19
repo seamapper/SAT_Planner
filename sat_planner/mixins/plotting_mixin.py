@@ -1221,3 +1221,7 @@ class PlottingMixin:
             self._draw_current_profile()
         elif hasattr(self, '_draw_pitch_line_profile'):
             self._draw_pitch_line_profile()
+        if hasattr(self, "_update_pitch_line_button_states"):
+            self._update_pitch_line_button_states()
+        if hasattr(self, "_update_roll_line_button_states"):
+            self._update_roll_line_button_states()

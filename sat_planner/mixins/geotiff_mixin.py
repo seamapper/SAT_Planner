@@ -206,6 +206,10 @@ class GeoTIFFMixin:
             if success:
                 # Re-plot with new resolution (preserve_view_limits=True will use _last_user_xlim/_last_user_ylim)
                 self._plot_survey_plan(preserve_view_limits=True)
+                if hasattr(self, "_on_geotiff_loaded_line_info_depth"):
+                    self._on_geotiff_loaded_line_info_depth()
+                if hasattr(self, "_update_roll_line_info_labels"):
+                    self._update_roll_line_info_labels()
 
                 # Ensure limits are set correctly (in case _plot_survey_plan didn't preserve them due to aspect ratio)
                 # Use the stored limits to maintain user's zoom level
@@ -272,6 +276,10 @@ class GeoTIFFMixin:
             success = self._load_geotiff_at_resolution()
             if success:
                 self._plot_survey_plan(preserve_view_limits=True)
+                if hasattr(self, "_on_geotiff_loaded_line_info_depth"):
+                    self._on_geotiff_loaded_line_info_depth()
+                if hasattr(self, "_update_roll_line_info_labels"):
+                    self._update_roll_line_info_labels()
             else:
                 self.canvas.draw_idle()
         else:
@@ -610,6 +618,10 @@ class GeoTIFFMixin:
 
             if hasattr(self, "_on_geotiff_loaded_performance_depth"):
                 self._on_geotiff_loaded_performance_depth()
+            if hasattr(self, "_on_geotiff_loaded_line_info_depth"):
+                self._on_geotiff_loaded_line_info_depth()
+            if hasattr(self, "_update_roll_line_info_labels"):
+                self._update_roll_line_info_labels()
 
         except RasterioIOError as e:
             progress_window.destroy()
@@ -937,6 +949,10 @@ class GeoTIFFMixin:
 
         # Re-plot without GeoTIFF
         self._plot_survey_plan(preserve_view_limits=False)
+        if hasattr(self, "_on_geotiff_loaded_line_info_depth"):
+            self._on_geotiff_loaded_line_info_depth()
+        if hasattr(self, "_update_roll_line_info_labels"):
+            self._update_roll_line_info_labels()
 
         # Show message in activity log
         if hasattr(self, 'set_cal_info_text'):
@@ -1014,6 +1030,10 @@ class GeoTIFFMixin:
         # Replot everything with preserve_view_limits=True to keep our limits
         # This will properly display the GeoTIFF and preserve all existing lines
         self._plot_survey_plan(preserve_view_limits=True)
+        if hasattr(self, "_on_geotiff_loaded_line_info_depth"):
+            self._on_geotiff_loaded_line_info_depth()
+        if hasattr(self, "_update_roll_line_info_labels"):
+            self._update_roll_line_info_labels()
 
     def _calculate_slope_at_point(self, lat, lon):
         """Calculate slope at a given lat/lon point."""

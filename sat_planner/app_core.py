@@ -768,7 +768,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         download_data_layout = QHBoxLayout(download_data_row)
         download_data_layout.setContentsMargins(0, 0, 0, 0)
         download_data_layout.setSpacing(6)
-        download_data_layout.addWidget(QLabel("Download Data"))
+        download_data_layout.addWidget(QLabel("Download Data:"))
         self.download_data_combo = QComboBox()
         self.download_data_combo.setToolTip("Choose a data source to download. GMRT opens the Download GMRT Grid dialog.")
         self._download_data_select_index = 0
@@ -1205,28 +1205,70 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         pitch_line_info_layout.setContentsMargins(9, 9, 9, 9)
         pitch_line_info_layout.setColumnStretch(0, 1)
         pitch_line_info_layout.setColumnStretch(1, 2)
+        pitch_line_info_layout.setColumnStretch(2, 1)
+        pitch_line_info_layout.setColumnStretch(3, 2)
 
         pitch_info_row = 0
-        pitch_line_info_layout.addWidget(QLabel("Shallowest Depth (m):"), pitch_info_row, 0)
+        pitch_line_info_layout.addWidget(QLabel("Min Depth (m):"), pitch_info_row, 0)
         self.pitch_shallowest_depth_label = QLabel("-")
         pitch_line_info_layout.addWidget(self.pitch_shallowest_depth_label, pitch_info_row, 1)
-        pitch_info_row += 1
 
-        pitch_line_info_layout.addWidget(QLabel("Maximum Depth (m):"), pitch_info_row, 0)
+        pitch_line_info_layout.addWidget(QLabel("Max Depth (m):"), pitch_info_row, 2)
         self.pitch_max_depth_label = QLabel("-")
-        pitch_line_info_layout.addWidget(self.pitch_max_depth_label, pitch_info_row, 1)
+        pitch_line_info_layout.addWidget(self.pitch_max_depth_label, pitch_info_row, 3)
         pitch_info_row += 1
 
         pitch_line_info_layout.addWidget(QLabel("Mean Depth (m):"), pitch_info_row, 0)
         self.pitch_mean_depth_label = QLabel("-")
         pitch_line_info_layout.addWidget(self.pitch_mean_depth_label, pitch_info_row, 1)
+
+        pitch_line_info_layout.addWidget(QLabel("Med Depth (m):"), pitch_info_row, 2)
+        self.pitch_median_depth_label = QLabel("-")
+        pitch_line_info_layout.addWidget(self.pitch_median_depth_label, pitch_info_row, 3)
         pitch_info_row += 1
 
-        pitch_line_info_layout.addWidget(QLabel("Median Depth (m):"), pitch_info_row, 0)
-        self.pitch_median_depth_label = QLabel("-")
-        pitch_line_info_layout.addWidget(self.pitch_median_depth_label, pitch_info_row, 1)
+        pitch_line_info_layout.addWidget(QLabel("Min Slope"), pitch_info_row, 0)
+        self.pitch_min_slope_label = QLabel("-")
+        pitch_line_info_layout.addWidget(self.pitch_min_slope_label, pitch_info_row, 1)
+
+        pitch_line_info_layout.addWidget(QLabel("Max Slope"), pitch_info_row, 2)
+        self.pitch_max_slope_label = QLabel("-")
+        pitch_line_info_layout.addWidget(self.pitch_max_slope_label, pitch_info_row, 3)
 
         cal_layout.addWidget(pitch_line_info_groupbox, cal_row, 0, 1, 2)
+        cal_layout.setRowStretch(cal_row, 0)
+        cal_row += 1
+
+        # --- Roll Line Info GroupBox ---
+        roll_line_info_groupbox = QGroupBox("Roll Line Info")
+        roll_line_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        roll_line_info_layout = QGridLayout(roll_line_info_groupbox)
+        roll_line_info_layout.setSpacing(3)
+        roll_line_info_layout.setContentsMargins(9, 9, 9, 9)
+        roll_line_info_layout.setColumnStretch(0, 1)
+        roll_line_info_layout.setColumnStretch(1, 2)
+        roll_line_info_layout.setColumnStretch(2, 1)
+        roll_line_info_layout.setColumnStretch(3, 2)
+
+        roll_info_row = 0
+        roll_line_info_layout.addWidget(QLabel("Min Depth (m):"), roll_info_row, 0)
+        self.roll_shallowest_depth_label = QLabel("-")
+        roll_line_info_layout.addWidget(self.roll_shallowest_depth_label, roll_info_row, 1)
+
+        roll_line_info_layout.addWidget(QLabel("Max Depth (m):"), roll_info_row, 2)
+        self.roll_max_depth_label = QLabel("-")
+        roll_line_info_layout.addWidget(self.roll_max_depth_label, roll_info_row, 3)
+        roll_info_row += 1
+
+        roll_line_info_layout.addWidget(QLabel("Min Slope"), roll_info_row, 0)
+        self.roll_min_slope_label = QLabel("-")
+        roll_line_info_layout.addWidget(self.roll_min_slope_label, roll_info_row, 1)
+
+        roll_line_info_layout.addWidget(QLabel("Max Slope"), roll_info_row, 2)
+        self.roll_max_slope_label = QLabel("-")
+        roll_line_info_layout.addWidget(self.roll_max_slope_label, roll_info_row, 3)
+
+        cal_layout.addWidget(roll_line_info_groupbox, cal_row, 0, 1, 2)
         cal_layout.setRowStretch(cal_row, 0)
         cal_row += 1
 
@@ -1261,28 +1303,29 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_row += 1
 
         # --- Test Plan Info GroupBox ---
-        cal_test_plan_info_groupbox = QGroupBox("Calibration Info")
+        cal_test_plan_info_groupbox = QGroupBox("Calibration Survey Info")
         cal_test_plan_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         cal_test_plan_info_layout = QGridLayout(cal_test_plan_info_groupbox)
         cal_test_plan_info_layout.setSpacing(3)
         cal_test_plan_info_layout.setContentsMargins(9, 9, 9, 9)
         cal_test_plan_info_layout.setColumnStretch(0, 1)
         cal_test_plan_info_layout.setColumnStretch(1, 2)
+        cal_test_plan_info_layout.setColumnStretch(2, 1)
+        cal_test_plan_info_layout.setColumnStretch(3, 2)
 
         cal_test_plan_row = 0
         cal_test_plan_info_layout.addWidget(QLabel("Survey Speed (knots):"), cal_test_plan_row, 0)
         self.cal_survey_speed_entry = QLineEdit("8")
         cal_test_plan_info_layout.addWidget(self.cal_survey_speed_entry, cal_test_plan_row, 1)
-        cal_test_plan_row += 1
 
-        cal_test_plan_info_layout.addWidget(QLabel("Turn Time (min):"), cal_test_plan_row, 0)
+        cal_test_plan_info_layout.addWidget(QLabel("Turn Time (min):"), cal_test_plan_row, 2)
         self.cal_turn_time_entry = QLineEdit("5")
-        cal_test_plan_info_layout.addWidget(self.cal_turn_time_entry, cal_test_plan_row, 1)
+        cal_test_plan_info_layout.addWidget(self.cal_turn_time_entry, cal_test_plan_row, 3)
         cal_test_plan_row += 1
 
         self.cal_show_stats_btn = QPushButton("Show Calibration Test Info")
         self.cal_show_stats_btn.clicked.connect(self._show_calibration_statistics)
-        cal_test_plan_info_layout.addWidget(self.cal_show_stats_btn, cal_test_plan_row, 0, 1, 2)
+        cal_test_plan_info_layout.addWidget(self.cal_show_stats_btn, cal_test_plan_row, 0, 1, 4)
 
         cal_layout.addWidget(cal_test_plan_info_groupbox, cal_row, 0, 1, 2)
         cal_layout.setRowStretch(cal_row, 0)
@@ -1418,6 +1461,26 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         line_test_plan_info_layout.setColumnStretch(1, 2)
 
         line_test_plan_row = 0
+        line_test_plan_info_layout.addWidget(QLabel("Shallowest Depth (m):"), line_test_plan_row, 0)
+        self.line_shallowest_depth_label = QLabel("-")
+        line_test_plan_info_layout.addWidget(self.line_shallowest_depth_label, line_test_plan_row, 1)
+        line_test_plan_row += 1
+
+        line_test_plan_info_layout.addWidget(QLabel("Maximum Depth (m):"), line_test_plan_row, 0)
+        self.line_max_depth_label = QLabel("-")
+        line_test_plan_info_layout.addWidget(self.line_max_depth_label, line_test_plan_row, 1)
+        line_test_plan_row += 1
+
+        line_test_plan_info_layout.addWidget(QLabel("Minimum Slope (deg):"), line_test_plan_row, 0)
+        self.line_min_slope_label = QLabel("-")
+        line_test_plan_info_layout.addWidget(self.line_min_slope_label, line_test_plan_row, 1)
+        line_test_plan_row += 1
+
+        line_test_plan_info_layout.addWidget(QLabel("Maximum Slope (deg):"), line_test_plan_row, 0)
+        self.line_max_slope_label = QLabel("-")
+        line_test_plan_info_layout.addWidget(self.line_max_slope_label, line_test_plan_row, 1)
+        line_test_plan_row += 1
+
         line_test_plan_info_layout.addWidget(QLabel("Survey Speed (knots):"), line_test_plan_row, 0)
         self.line_survey_speed_entry = QLineEdit("8")
         line_test_plan_info_layout.addWidget(self.line_survey_speed_entry, line_test_plan_row, 1)

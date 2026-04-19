@@ -772,6 +772,8 @@ class CalibrationMixin:
             self.dragging_roll_line_handle = None
             if hasattr(self, "_draw_current_profile"):
                 self._draw_current_profile()
+            if hasattr(self, "_update_roll_line_info_labels"):
+                self._update_roll_line_info_labels()
 
     def _load_last_cal_import_dir(self):
         try:
@@ -808,6 +810,18 @@ class CalibrationMixin:
             self.pitch_mean_depth_label.setText("-")
         if hasattr(self, 'pitch_median_depth_label'):
             self.pitch_median_depth_label.setText("-")
+        if hasattr(self, 'pitch_min_slope_label'):
+            self.pitch_min_slope_label.setText("-")
+        if hasattr(self, 'pitch_max_slope_label'):
+            self.pitch_max_slope_label.setText("-")
+        if hasattr(self, "roll_shallowest_depth_label"):
+            self.roll_shallowest_depth_label.setText("-")
+        if hasattr(self, "roll_max_depth_label"):
+            self.roll_max_depth_label.setText("-")
+        if hasattr(self, "roll_min_slope_label"):
+            self.roll_min_slope_label.setText("-")
+        if hasattr(self, "roll_max_slope_label"):
+            self.roll_max_slope_label.setText("-")
 
         self._plot_survey_plan(preserve_view_limits=True)
         if hasattr(self, "_draw_current_profile"):
@@ -843,6 +857,8 @@ class CalibrationMixin:
         if hasattr(self, 'edit_roll_line_btn'):
             self.edit_roll_line_btn.setEnabled(has_roll_line)
         self._update_reverse_line_button_states()
+        if hasattr(self, "_update_roll_line_info_labels"):
+            self._update_roll_line_info_labels()
 
     def _update_reverse_line_button_states(self):
         has_pitch = hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2
@@ -1076,15 +1092,41 @@ class CalibrationMixin:
                 cal_export_speed = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
             except Exception:
                 cal_export_speed = 8.0
+            try:
+                cal_export_turn_time = (
+                    float(self.cal_turn_time_entry.text())
+                    if hasattr(self, "cal_turn_time_entry") and self.cal_turn_time_entry.text()
+                    else 5.0
+                )
+            except Exception:
+                cal_export_turn_time = 5.0
             geojson_features = []
             for num, name, pts in lines:
                 geojson_features.append({
                     "type": "Feature",
                     "geometry": {"type": "LineString", "coordinates": [[pts[0][1], pts[0][0]], [pts[1][1], pts[1][0]]]},
-                    "properties": {"line_num": num, "line_name": name, "survey_speed": cal_export_speed, "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None)}
+                    "properties": {
+                        "line_num": num,
+                        "line_name": name,
+                        "survey_speed": cal_export_speed,
+                        "turn_time": cal_export_turn_time,
+                        "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
+                    }
                 })
             with open(geojson_file_path, 'w', encoding='utf-8') as f:
-                json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None)}, "features": geojson_features}, f, indent=2)
+                json.dump(
+                    {
+                        "type": "FeatureCollection",
+                        "properties": {
+                            "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
+                            "survey_speed": cal_export_speed,
+                            "turn_time": cal_export_turn_time,
+                        },
+                        "features": geojson_features,
+                    },
+                    f,
+                    indent=2,
+                )
             lnw_file_path = None
             lnw_lines = [(name, list(pts)) for _num, name, pts in lines]
             if lnw_lines:
@@ -1132,6 +1174,14 @@ class CalibrationMixin:
                     params['survey_speed'] = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
                 except Exception:
                     params['survey_speed'] = 8.0
+                try:
+                    params['turn_time'] = (
+                        float(self.cal_turn_time_entry.text())
+                        if hasattr(self, "cal_turn_time_entry") and self.cal_turn_time_entry.text()
+                        else 5.0
+                    )
+                except Exception:
+                    params['turn_time'] = 5.0
                 json_metadata_path = os.path.join(export_dir, f"{export_name}_params.json")
                 with open(json_metadata_path, 'w', encoding='utf-8') as f:
                     json.dump(params, f, indent=2)
@@ -1300,6 +1350,7 @@ class CalibrationMixin:
             file_basename = os.path.basename(file_path)
             file_processed = False
             imported_geojson_survey_speed = None
+            imported_geojson_turn_time = None
             imported_geojson_geotiff_path = None
 
             # Handle *.lnw format (Hypack LNW)
@@ -1511,7 +1562,26 @@ class CalibrationMixin:
                     return
                 if geojson_data.get('type') == 'FeatureCollection':
                     features = geojson_data.get('features', [])
-                    imported_geojson_geotiff_path = (geojson_data.get('properties') or {}).get('geotiff_path')
+                    fc_props = geojson_data.get('properties') or {}
+                    imported_geojson_geotiff_path = fc_props.get('geotiff_path')
+                    if imported_geojson_survey_speed is None:
+                        for _key in ('survey_speed', 'speed_knots', 'surveySpeed', 'speedKnots'):
+                            val = fc_props.get(_key)
+                            if val is not None:
+                                try:
+                                    imported_geojson_survey_speed = float(val)
+                                    break
+                                except (TypeError, ValueError):
+                                    pass
+                    if imported_geojson_turn_time is None:
+                        for _key in ('turn_time', 'turnTime', 'turn_time_min', 'turnTimeMin'):
+                            val = fc_props.get(_key)
+                            if val is not None:
+                                try:
+                                    imported_geojson_turn_time = float(val)
+                                    break
+                                except (TypeError, ValueError):
+                                    pass
                 elif geojson_data.get('type') == 'Feature':
                     features = [geojson_data]
                 else:
@@ -1536,6 +1606,15 @@ class CalibrationMixin:
                             if val is not None:
                                 try:
                                     imported_geojson_survey_speed = float(val)
+                                    break
+                                except (TypeError, ValueError):
+                                    pass
+                    if imported_geojson_turn_time is None:
+                        for _key in ('turn_time', 'turnTime', 'turn_time_min', 'turnTimeMin'):
+                            val = properties.get(_key)
+                            if val is not None:
+                                try:
+                                    imported_geojson_turn_time = float(val)
                                     break
                                 except (TypeError, ValueError):
                                     pass
@@ -1609,10 +1688,18 @@ class CalibrationMixin:
                         self.cal_export_name_entry.setText(params['export_name'])
                     if params.get('survey_speed') is not None:
                         self.cal_survey_speed_entry.setText(str(params['survey_speed']))
+                    if params.get('turn_time') is not None and hasattr(self, 'cal_turn_time_entry'):
+                        self.cal_turn_time_entry.setText(str(params['turn_time']))
                 except Exception:
                     pass
             if (not params or not isinstance(params, dict) or params.get('survey_speed') is None) and imported_geojson_survey_speed is not None:
                 self.cal_survey_speed_entry.setText(str(imported_geojson_survey_speed))
+            if (
+                (not params or not isinstance(params, dict) or params.get('turn_time') is None)
+                and imported_geojson_turn_time is not None
+                and hasattr(self, 'cal_turn_time_entry')
+            ):
+                self.cal_turn_time_entry.setText(str(imported_geojson_turn_time))
             if imported_geojson_geotiff_path and hasattr(self, '_load_geotiff_from_path'):
                 if os.path.exists(imported_geojson_geotiff_path):
                     self._load_geotiff_from_path(imported_geojson_geotiff_path)
@@ -1855,7 +1942,7 @@ class CalibrationMixin:
         if not stats:
             return None
         
-        stats_text = "COMPREHENSIVE CALIBRATION SURVEY STATISTICS\n"
+        stats_text = "CALIBRATION SURVEY INFORMATION\n"
         stats_text += "=" * 50 + "\n\n"
         if include_export_date and export_name:
             stats_text += f"Calibration Survey: {export_name}\n"
@@ -1872,7 +1959,7 @@ class CalibrationMixin:
             turn_time_min = 5.0
             stats_text += f"Turn Time (per turn): {turn_time_min} min (default)\n\n"
 
-        stats_text += "SURVEY LINE DISTANCES AND TIMES\n"
+        stats_text += "SURVEY LINE DISTANCES, TIMES, DEPTHS, & SLOPES\n"
         stats_text += "-" * 35 + "\n"
         if stats['pitch_line_distance_m'] > 0:
             stats_text += f"Pitch Line (2 passes):\n"
@@ -1887,18 +1974,17 @@ class CalibrationMixin:
                     pass
             stats_text += f"  Distance (per pass): {stats['pitch_line_distance_m']:.1f} m ({stats['pitch_line_distance_km']:.3f} km, {stats['pitch_line_distance_nm']:.3f} nm)\n"
             stats_text += f"  Time (total): {stats['pitch_line_time_min']:.1f} min\n"
-            if not include_export_date:
-                pitch_depths = self._pitch_line_depth_stats_abs_m()
-                if pitch_depths:
-                    stats_text += f"  Shallowest Depth (m): {pitch_depths['shallowest']:.2f}\n"
-                    stats_text += f"  Maximum Depth (m): {pitch_depths['maximum']:.2f}\n"
-                    stats_text += f"  Mean Depth (m): {pitch_depths['mean']:.2f}\n"
-                    stats_text += f"  Median Depth (m): {pitch_depths['median']:.2f}\n"
-                else:
-                    stats_text += "  Shallowest Depth (m): -\n"
-                    stats_text += "  Maximum Depth (m): -\n"
-                    stats_text += "  Mean Depth (m): -\n"
-                    stats_text += "  Median Depth (m): -\n"
+            pitch_depths = self._pitch_line_depth_stats_abs_m()
+            if pitch_depths:
+                stats_text += f"  Minimum Depth (m): {pitch_depths['shallowest']:.2f}\n"
+                stats_text += f"  Maximum Depth (m): {pitch_depths['maximum']:.2f}\n"
+                stats_text += f"  Minimum Slope (deg): {pitch_depths['min_slope']:.2f}\n" if pitch_depths.get('min_slope') is not None else "  Minimum Slope (deg): -\n"
+                stats_text += f"  Maximum Slope (deg): {pitch_depths['max_slope']:.2f}\n" if pitch_depths.get('max_slope') is not None else "  Maximum Slope (deg): -\n"
+            else:
+                stats_text += "  Minimum Depth (m): -\n"
+                stats_text += "  Maximum Depth (m): -\n"
+                stats_text += "  Minimum Slope (deg): -\n"
+                stats_text += "  Maximum Slope (deg): -\n"
             stats_text += "\n"
         if stats['roll_line_distance_m'] > 0:
             stats_text += f"Roll Line (2 passes):\n"
@@ -1911,33 +1997,70 @@ class CalibrationMixin:
                     stats_text += f"  Reciprocal Heading: {back_az % 360:.1f}°\n"
                 except Exception:
                     pass
-            stats_text += f"  Distance (per pass): {stats['roll_line_distance_m']:.1f} m\n"
+            stats_text += f"  Distance (per pass): {stats['roll_line_distance_m']:.1f} m ({stats['roll_line_distance_km']:.3f} km, {stats['roll_line_distance_nm']:.3f} nm)\n"
             stats_text += f"  Time (total): {stats['roll_line_time_min']:.1f} min\n"
-            if not include_export_date:
-                roll_depths = self._roll_line_depth_stats_abs_m()
-                if roll_depths:
-                    stats_text += f"  Shallowest Depth (m): {roll_depths['shallowest']:.2f}\n"
-                    stats_text += f"  Maximum Depth (m): {roll_depths['maximum']:.2f}\n"
-                    stats_text += f"  Mean Depth (m): {roll_depths['mean']:.2f}\n"
-                    stats_text += f"  Median Depth (m): {roll_depths['median']:.2f}\n"
-                else:
-                    stats_text += "  Shallowest Depth (m): -\n"
-                    stats_text += "  Maximum Depth (m): -\n"
-                    stats_text += "  Mean Depth (m): -\n"
-                    stats_text += "  Median Depth (m): -\n"
+            roll_depths = self._roll_line_depth_stats_abs_m()
+            if roll_depths:
+                stats_text += f"  Minimum Depth (m): {roll_depths['shallowest']:.2f}\n"
+                stats_text += f"  Maximum Depth (m): {roll_depths['maximum']:.2f}\n"
+                stats_text += f"  Minimum Slope (deg): {roll_depths['min_slope']:.2f}\n" if roll_depths.get('min_slope') is not None else "  Minimum Slope (deg): -\n"
+                stats_text += f"  Maximum Slope (deg): {roll_depths['max_slope']:.2f}\n" if roll_depths.get('max_slope') is not None else "  Maximum Slope (deg): -\n"
+            else:
+                stats_text += "  Minimum Depth (m): -\n"
+                stats_text += "  Maximum Depth (m): -\n"
+                stats_text += "  Minimum Slope (deg): -\n"
+                stats_text += "  Maximum Slope (deg): -\n"
             stats_text += "\n"
         if stats['heading1_distance_m'] > 0:
-            stats_text += f"Heading Line 1: {stats['heading1_distance_m']:.1f} m, {stats['heading1_time_min']:.1f} min\n\n"
+            stats_text += "Heading Line 1:\n"
+            if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 1 and pyproj is not None:
+                try:
+                    geod = pyproj.Geod(ellps="WGS84")
+                    (lat1, lon1), (lat2, lon2) = self.heading_lines[0]
+                    fwd_az, _back_az, _ = geod.inv(lon1, lat1, lon2, lat2)
+                    stats_text += f"  Heading: {fwd_az % 360:.1f}°\n"
+                except Exception:
+                    pass
+            stats_text += (
+                f"  Distance (one pass): {stats['heading1_distance_m']:.1f} m "
+                f"({stats['heading1_distance_km']:.3f} km, {stats['heading1_distance_nm']:.3f} nm)\n"
+            )
+            stats_text += f"  Time (total): {stats['heading1_time_min']:.1f} min\n\n"
         if stats['heading2_distance_m'] > 0:
-            stats_text += f"Heading Line 2: {stats['heading2_distance_m']:.1f} m, {stats['heading2_time_min']:.1f} min\n\n"
-        stats_text += "TRAVEL DISTANCES AND TIMES\n"
+            stats_text += "Heading Line 2:\n"
+            if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 2 and pyproj is not None:
+                try:
+                    geod = pyproj.Geod(ellps="WGS84")
+                    (lat1, lon1), (lat2, lon2) = self.heading_lines[1]
+                    fwd_az, _back_az, _ = geod.inv(lon1, lat1, lon2, lat2)
+                    stats_text += f"  Heading: {fwd_az % 360:.1f}°\n"
+                except Exception:
+                    pass
+            stats_text += (
+                f"  Distance (one pass): {stats['heading2_distance_m']:.1f} m "
+                f"({stats['heading2_distance_km']:.3f} km, {stats['heading2_distance_nm']:.3f} nm)\n"
+            )
+            stats_text += f"  Time (total): {stats['heading2_time_min']:.1f} min\n\n"
+        stats_text += "TRANSIT DISTANCES AND TIMES\n"
         stats_text += "-" * 30 + "\n"
         if stats['travel_pitch_to_roll_m'] > 0:
-            stats_text += f"Pitch → Roll: {stats['travel_pitch_to_roll_m']:.1f} m, {stats['travel_pitch_to_roll_min']:.1f} min\n\n"
+            stats_text += (
+                f"Pitch → Roll: {stats['travel_pitch_to_roll_m']:.1f} m "
+                f"({stats['travel_pitch_to_roll_km']:.3f} km, {stats['travel_pitch_to_roll_nm']:.3f} nm), "
+                f"{stats['travel_pitch_to_roll_min']:.1f} min\n\n"
+            )
         if stats['travel_roll_to_heading1_m'] > 0:
-            stats_text += f"Roll → Heading1: {stats['travel_roll_to_heading1_m']:.1f} m, {stats['travel_roll_to_heading1_min']:.1f} min\n\n"
+            stats_text += (
+                f"Roll → Heading1: {stats['travel_roll_to_heading1_m']:.1f} m "
+                f"({stats['travel_roll_to_heading1_km']:.3f} km, {stats['travel_roll_to_heading1_nm']:.3f} nm), "
+                f"{stats['travel_roll_to_heading1_min']:.1f} min\n\n"
+            )
         if stats['travel_heading1_to_heading2_m'] > 0:
-            stats_text += f"Heading1 → Heading2: {stats['travel_heading1_to_heading2_m']:.1f} m, {stats['travel_heading1_to_heading2_min']:.1f} min\n\n"
+            stats_text += (
+                f"Heading1 → Heading2: {stats['travel_heading1_to_heading2_m']:.1f} m "
+                f"({stats['travel_heading1_to_heading2_km']:.3f} km, {stats['travel_heading1_to_heading2_nm']:.3f} nm), "
+                f"{stats['travel_heading1_to_heading2_min']:.1f} min\n\n"
+            )
         # Calculate total turn time
         num_turns = 0
         if stats['pitch_line_distance_m'] > 0:
@@ -2011,42 +2134,6 @@ class CalibrationMixin:
             stats_text += f"Heading2 Start: {h2_start[0]:.6f}, {h2_start[1]:.6f}\n"
             stats_text += f"Heading2 End: {h2_end[0]:.6f}, {h2_end[1]:.6f}\n"
 
-        if include_export_date:
-            stats_text += "\n"
-            stats_text += "PITCH LINE DEPTHS (m)\n"
-            stats_text += "-" * 22 + "\n"
-            if hasattr(self, "pitch_line_points") and len(self.pitch_line_points) == 2:
-                ep = self._pitch_line_depth_stats_abs_m()
-                if ep:
-                    stats_text += f"Shallowest Depth (m): {ep['shallowest']:.2f}\n"
-                    stats_text += f"Maximum Depth (m): {ep['maximum']:.2f}\n"
-                    stats_text += f"Mean Depth (m): {ep['mean']:.2f}\n"
-                    stats_text += f"Median Depth (m): {ep['median']:.2f}\n"
-                else:
-                    stats_text += "Shallowest Depth (m): -\n"
-                    stats_text += "Maximum Depth (m): -\n"
-                    stats_text += "Mean Depth (m): -\n"
-                    stats_text += "Median Depth (m): -\n"
-            else:
-                stats_text += "(Pitch line not defined in this export.)\n"
-            stats_text += "\n"
-            stats_text += "ROLL LINE DEPTHS (m)\n"
-            stats_text += "-" * 20 + "\n"
-            if hasattr(self, "roll_line_points") and len(self.roll_line_points) == 2:
-                er = self._roll_line_depth_stats_abs_m()
-                if er:
-                    stats_text += f"Shallowest Depth (m): {er['shallowest']:.2f}\n"
-                    stats_text += f"Maximum Depth (m): {er['maximum']:.2f}\n"
-                    stats_text += f"Mean Depth (m): {er['mean']:.2f}\n"
-                    stats_text += f"Median Depth (m): {er['median']:.2f}\n"
-                else:
-                    stats_text += "Shallowest Depth (m): -\n"
-                    stats_text += "Maximum Depth (m): -\n"
-                    stats_text += "Mean Depth (m): -\n"
-                    stats_text += "Median Depth (m): -\n"
-            else:
-                stats_text += "(Roll line not defined in this export.)\n"
-
         return stats_text
 
     def _show_calibration_statistics(self):
@@ -2056,15 +2143,24 @@ class CalibrationMixin:
             self._show_message("warning","Statistics Error", "Unable to calculate calibration survey statistics. Please ensure all required lines are drawn.")
             return
 
-        stats_text = self._format_calibration_statistics_text(stats)
+        export_name = ""
+        if hasattr(self, "cal_export_name_entry") and self.cal_export_name_entry is not None:
+            try:
+                export_name = self.cal_export_name_entry.text().strip()
+            except Exception:
+                export_name = ""
+        if not export_name:
+            export_name = "Current Calibration Survey"
+        stats_text = self._format_calibration_statistics_text(
+            stats,
+            include_export_date=True,
+            export_name=export_name,
+        )
         if stats_text:
             show_statistics_dialog(self, "Calibration Survey Info", stats_text)
 
     def _pitch_line_depth_stats_abs_m(self):
-        """Shallowest / maximum / mean / median depth (m, positive magnitudes) along pitch line from GeoTIFF.
-
-        Matches the Pitch Line Info panel (same sampling as heading offset). Returns None if unavailable.
-        """
+        """Depth and slope stats along pitch line from GeoTIFF samples."""
         if (
             self.geotiff_data_array is None
             or self.geotiff_extent is None
@@ -2073,17 +2169,43 @@ class CalibrationMixin:
         ):
             return None
         (lat1, lon1), (lat2, lon2) = self.pitch_line_points
-        lats = np.linspace(lat1, lat2, 100)
-        lons = np.linspace(lon1, lon2, 100)
-        left, right, bottom, top = tuple(self.geotiff_extent)
-        nrows, ncols = self.geotiff_data_array.shape
-        rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
-        cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
-        elevations = []
-        for r, c in zip(rows, cols):
-            ir, ic = int(round(r)), int(round(c))
-            elevations.append(self.geotiff_data_array[ir, ic])
-        elevations = np.array(elevations)
+        dists = elevations = slopes = None
+        if hasattr(self, "_profile_arrays_along_segment_endpoints"):
+            try:
+                dists, elevations, slopes = self._profile_arrays_along_segment_endpoints(lat1, lon1, lat2, lon2, n=100)
+            except Exception:
+                dists = elevations = slopes = None
+        if elevations is None:
+            lats = np.linspace(lat1, lat2, 100)
+            lons = np.linspace(lon1, lon2, 100)
+            left, right, bottom, top = tuple(self.geotiff_extent)
+            nrows, ncols = self.geotiff_data_array.shape
+            rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
+            cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
+            elev_list = []
+            slope_list = []
+            for r, c in zip(rows, cols):
+                ir, ic = int(round(r)), int(round(c))
+                elev_list.append(self.geotiff_data_array[ir, ic])
+                slope = np.nan
+                if 0 < ir < nrows - 1 and 0 < ic < ncols - 1:
+                    center_lat = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
+                    m_per_deg_lat = 111320.0
+                    m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat))
+                    res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / nrows
+                    res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / ncols
+                    dx_m = res_lon_deg * m_per_deg_lon
+                    dy_m = res_lat_deg * m_per_deg_lat
+                    window = self.geotiff_data_array[ir - 1 : ir + 2, ic - 1 : ic + 2]
+                    if window.shape == (3, 3) and not np.all(np.isnan(window)):
+                        dz_dy, dz_dx = np.gradient(window, dy_m, dx_m)
+                        slope = np.degrees(np.arctan(np.sqrt(dz_dx[1, 1] ** 2 + dz_dy[1, 1] ** 2)))
+                slope_list.append(slope)
+            elevations = np.asarray(elev_list)
+            slopes = np.asarray(slope_list)
+        else:
+            elevations = np.asarray(elevations)
+            slopes = np.asarray(slopes)
         if not np.any(~np.isnan(elevations)):
             return None
         median_val = np.nanmedian(elevations)
@@ -2091,19 +2213,21 @@ class CalibrationMixin:
         min_val = np.nanmin(elevations)
         max_val = np.nanmax(elevations)
         valid_count = int(np.sum(~np.isnan(elevations)))
+        finite_slopes = np.isfinite(slopes) & ~np.isnan(slopes)
+        min_slope = float(np.nanmin(slopes[finite_slopes])) if np.any(finite_slopes) else None
+        max_slope = float(np.nanmax(slopes[finite_slopes])) if np.any(finite_slopes) else None
         return {
             "shallowest": abs(max_val),
             "maximum": abs(min_val),
             "mean": abs(mean_val),
             "median": abs(median_val),
+            "min_slope": min_slope,
+            "max_slope": max_slope,
             "valid_count": valid_count,
         }
 
     def _roll_line_depth_stats_abs_m(self):
-        """Shallowest / maximum / mean / median depth (m, positive magnitudes) along roll line from GeoTIFF.
-
-        Same convention as pitch line depth stats. Returns None if unavailable.
-        """
+        """Depth and slope stats along roll line from GeoTIFF samples."""
         if (
             self.geotiff_data_array is None
             or self.geotiff_extent is None
@@ -2112,17 +2236,43 @@ class CalibrationMixin:
         ):
             return None
         (lat1, lon1), (lat2, lon2) = self.roll_line_points
-        lats = np.linspace(lat1, lat2, 100)
-        lons = np.linspace(lon1, lon2, 100)
-        left, right, bottom, top = tuple(self.geotiff_extent)
-        nrows, ncols = self.geotiff_data_array.shape
-        rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
-        cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
-        elevations = []
-        for r, c in zip(rows, cols):
-            ir, ic = int(round(r)), int(round(c))
-            elevations.append(self.geotiff_data_array[ir, ic])
-        elevations = np.array(elevations)
+        dists = elevations = slopes = None
+        if hasattr(self, "_profile_arrays_along_segment_endpoints"):
+            try:
+                dists, elevations, slopes = self._profile_arrays_along_segment_endpoints(lat1, lon1, lat2, lon2, n=100)
+            except Exception:
+                dists = elevations = slopes = None
+        if elevations is None:
+            lats = np.linspace(lat1, lat2, 100)
+            lons = np.linspace(lon1, lon2, 100)
+            left, right, bottom, top = tuple(self.geotiff_extent)
+            nrows, ncols = self.geotiff_data_array.shape
+            rows = ((top - lats) / (top - bottom) * (nrows - 1)).clip(0, nrows - 1)
+            cols = ((lons - left) / (right - left) * (ncols - 1)).clip(0, ncols - 1)
+            elev_list = []
+            slope_list = []
+            for r, c in zip(rows, cols):
+                ir, ic = int(round(r)), int(round(c))
+                elev_list.append(self.geotiff_data_array[ir, ic])
+                slope = np.nan
+                if 0 < ir < nrows - 1 and 0 < ic < ncols - 1:
+                    center_lat = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
+                    m_per_deg_lat = 111320.0
+                    m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat))
+                    res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / nrows
+                    res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / ncols
+                    dx_m = res_lon_deg * m_per_deg_lon
+                    dy_m = res_lat_deg * m_per_deg_lat
+                    window = self.geotiff_data_array[ir - 1 : ir + 2, ic - 1 : ic + 2]
+                    if window.shape == (3, 3) and not np.all(np.isnan(window)):
+                        dz_dy, dz_dx = np.gradient(window, dy_m, dx_m)
+                        slope = np.degrees(np.arctan(np.sqrt(dz_dx[1, 1] ** 2 + dz_dy[1, 1] ** 2)))
+                slope_list.append(slope)
+            elevations = np.asarray(elev_list)
+            slopes = np.asarray(slope_list)
+        else:
+            elevations = np.asarray(elevations)
+            slopes = np.asarray(slopes)
         if not np.any(~np.isnan(elevations)):
             return None
         median_val = np.nanmedian(elevations)
@@ -2130,13 +2280,34 @@ class CalibrationMixin:
         min_val = np.nanmin(elevations)
         max_val = np.nanmax(elevations)
         valid_count = int(np.sum(~np.isnan(elevations)))
+        finite_slopes = np.isfinite(slopes) & ~np.isnan(slopes)
+        min_slope = float(np.nanmin(slopes[finite_slopes])) if np.any(finite_slopes) else None
+        max_slope = float(np.nanmax(slopes[finite_slopes])) if np.any(finite_slopes) else None
         return {
             "shallowest": abs(max_val),
             "maximum": abs(min_val),
             "mean": abs(mean_val),
             "median": abs(median_val),
+            "min_slope": min_slope,
+            "max_slope": max_slope,
             "valid_count": valid_count,
         }
+
+    def _update_roll_line_info_labels(self):
+        """Fill Roll Line Info from along-roll GeoTIFF samples (min/max depth, min/max slope)."""
+        if not hasattr(self, "roll_shallowest_depth_label"):
+            return
+        rd = self._roll_line_depth_stats_abs_m()
+        if rd is not None:
+            self.roll_shallowest_depth_label.setText(f"{rd['shallowest']:.2f}")
+            self.roll_max_depth_label.setText(f"{rd['maximum']:.2f}")
+            self.roll_min_slope_label.setText(f"{rd['min_slope']:.2f}" if rd.get("min_slope") is not None else "-")
+            self.roll_max_slope_label.setText(f"{rd['max_slope']:.2f}" if rd.get("max_slope") is not None else "-")
+        else:
+            self.roll_shallowest_depth_label.setText("-")
+            self.roll_max_depth_label.setText("-")
+            self.roll_min_slope_label.setText("-")
+            self.roll_max_slope_label.setText("-")
 
     def _update_cal_line_offset_from_pitch_line(self):
         """Calculate heading line offset from median depth along pitch line."""
@@ -2160,11 +2331,20 @@ class CalibrationMixin:
                 self.pitch_mean_depth_label.setText(f"{pd['mean']:.2f}")
             if hasattr(self, "pitch_median_depth_label"):
                 self.pitch_median_depth_label.setText(f"{pd['median']:.2f}")
+            if hasattr(self, "pitch_min_slope_label"):
+                self.pitch_min_slope_label.setText(f"{pd['min_slope']:.2f}" if pd.get("min_slope") is not None else "-")
+            if hasattr(self, "pitch_max_slope_label"):
+                self.pitch_max_slope_label.setText(f"{pd['max_slope']:.2f}" if pd.get("max_slope") is not None else "-")
             if hasattr(self, "set_cal_info_text"):
-                self.set_cal_info_text(
+                info_msg = (
                     f"Heading Line Offset calculated: {offset_value:.2f} m (median of {pd['valid_count']} points along pitch line). "
                     f"Depth range: {pd['shallowest']:.2f} m (shallowest) to {pd['maximum']:.2f} m (deepest). "
-                    f"Mean depth: {pd['mean']:.2f} m, Median depth: {pd['median']:.2f} m.",
+                    f"Mean depth: {pd['mean']:.2f} m, Median depth: {pd['median']:.2f} m."
+                )
+                if pd.get("min_slope") is not None and pd.get("max_slope") is not None:
+                    info_msg += f" Slope range: {pd['min_slope']:.2f}° to {pd['max_slope']:.2f}°."
+                self.set_cal_info_text(
+                    info_msg,
                     append=False,
                 )
         else:
@@ -2177,6 +2357,10 @@ class CalibrationMixin:
                 self.pitch_mean_depth_label.setText("-")
             if hasattr(self, "pitch_median_depth_label"):
                 self.pitch_median_depth_label.setText("-")
+            if hasattr(self, "pitch_min_slope_label"):
+                self.pitch_min_slope_label.setText("-")
+            if hasattr(self, "pitch_max_slope_label"):
+                self.pitch_max_slope_label.setText("-")
             if hasattr(self, "set_cal_info_text"):
                 self.set_cal_info_text(
                     "Heading Line Offset: Could not calculate (no valid elevation data along pitch line).",
