@@ -1088,40 +1088,23 @@ class CalibrationMixin:
             with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
                 collection.writerecords(features)
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
-            try:
-                cal_export_speed = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
-            except Exception:
-                cal_export_speed = 8.0
-            try:
-                cal_export_turn_time = (
-                    float(self.cal_turn_time_entry.text())
-                    if hasattr(self, "cal_turn_time_entry") and self.cal_turn_time_entry.text()
-                    else 5.0
-                )
-            except Exception:
-                cal_export_turn_time = 5.0
+            _cal_geotiff = (
+                self.current_geotiff_path
+                if hasattr(self, "current_geotiff_path") and self.current_geotiff_path
+                else None
+            )
             geojson_features = []
             for num, name, pts in lines:
                 geojson_features.append({
                     "type": "Feature",
                     "geometry": {"type": "LineString", "coordinates": [[pts[0][1], pts[0][0]], [pts[1][1], pts[1][0]]]},
-                    "properties": {
-                        "line_num": num,
-                        "line_name": name,
-                        "survey_speed": cal_export_speed,
-                        "turn_time": cal_export_turn_time,
-                        "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
-                    }
+                    "properties": {"line_num": num, "line_name": name},
                 })
             with open(geojson_file_path, 'w', encoding='utf-8') as f:
                 json.dump(
                     {
                         "type": "FeatureCollection",
-                        "properties": {
-                            "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
-                            "survey_speed": cal_export_speed,
-                            "turn_time": cal_export_turn_time,
-                        },
+                        "properties": {"geotiff_path": _cal_geotiff},
                         "features": geojson_features,
                     },
                     f,
@@ -1349,8 +1332,6 @@ class CalibrationMixin:
             file_ext = os.path.splitext(file_path)[1].lower()
             file_basename = os.path.basename(file_path)
             file_processed = False
-            imported_geojson_survey_speed = None
-            imported_geojson_turn_time = None
             imported_geojson_geotiff_path = None
 
             # Handle *.lnw format (Hypack LNW)
@@ -1564,24 +1545,6 @@ class CalibrationMixin:
                     features = geojson_data.get('features', [])
                     fc_props = geojson_data.get('properties') or {}
                     imported_geojson_geotiff_path = fc_props.get('geotiff_path')
-                    if imported_geojson_survey_speed is None:
-                        for _key in ('survey_speed', 'speed_knots', 'surveySpeed', 'speedKnots'):
-                            val = fc_props.get(_key)
-                            if val is not None:
-                                try:
-                                    imported_geojson_survey_speed = float(val)
-                                    break
-                                except (TypeError, ValueError):
-                                    pass
-                    if imported_geojson_turn_time is None:
-                        for _key in ('turn_time', 'turnTime', 'turn_time_min', 'turnTimeMin'):
-                            val = fc_props.get(_key)
-                            if val is not None:
-                                try:
-                                    imported_geojson_turn_time = float(val)
-                                    break
-                                except (TypeError, ValueError):
-                                    pass
                 elif geojson_data.get('type') == 'Feature':
                     features = [geojson_data]
                 else:
@@ -1600,24 +1563,6 @@ class CalibrationMixin:
                     properties = feature.get('properties', {}) or {}
                     if imported_geojson_geotiff_path is None:
                         imported_geojson_geotiff_path = properties.get('geotiff_path')
-                    if imported_geojson_survey_speed is None:
-                        for _key in ('survey_speed', 'speed_knots', 'surveySpeed', 'speedKnots'):
-                            val = properties.get(_key)
-                            if val is not None:
-                                try:
-                                    imported_geojson_survey_speed = float(val)
-                                    break
-                                except (TypeError, ValueError):
-                                    pass
-                    if imported_geojson_turn_time is None:
-                        for _key in ('turn_time', 'turnTime', 'turn_time_min', 'turnTimeMin'):
-                            val = properties.get(_key)
-                            if val is not None:
-                                try:
-                                    imported_geojson_turn_time = float(val)
-                                    break
-                                except (TypeError, ValueError):
-                                    pass
                     line_name = str(properties.get('line_name', '')).strip().lower()
                     if line_name.startswith('pitch'):
                         self.pitch_line_points = [point1, point2]
@@ -1692,14 +1637,6 @@ class CalibrationMixin:
                         self.cal_turn_time_entry.setText(str(params['turn_time']))
                 except Exception:
                     pass
-            if (not params or not isinstance(params, dict) or params.get('survey_speed') is None) and imported_geojson_survey_speed is not None:
-                self.cal_survey_speed_entry.setText(str(imported_geojson_survey_speed))
-            if (
-                (not params or not isinstance(params, dict) or params.get('turn_time') is None)
-                and imported_geojson_turn_time is not None
-                and hasattr(self, 'cal_turn_time_entry')
-            ):
-                self.cal_turn_time_entry.setText(str(imported_geojson_turn_time))
             if imported_geojson_geotiff_path and hasattr(self, '_load_geotiff_from_path'):
                 if os.path.exists(imported_geojson_geotiff_path):
                     self._load_geotiff_from_path(imported_geojson_geotiff_path)

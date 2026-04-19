@@ -801,43 +801,33 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         geotiff_layout.addWidget(display_frame)
         geotiff_layout.addSpacing(3)
 
-        # Show Contours checkbox and Interval on same row
+        # Show Contours/Slopes controls on same row
         contours_interval_frame = QWidget()
         contours_interval_layout = QHBoxLayout(contours_interval_frame)
         contours_interval_layout.setContentsMargins(0, 0, 0, 0)
-        self.show_contours_checkbox = QCheckBox("Contours")
+        self.show_contours_checkbox = QCheckBox("Contours (m)")
         self.show_contours_checkbox.setChecked(self.show_contours_var)
         self.show_contours_checkbox.stateChanged.connect(self._on_contour_checkbox_changed)
         contours_interval_layout.addWidget(self.show_contours_checkbox)
-        contours_interval_layout.addWidget(QLabel("Interval (m):"))
         self.contour_interval_entry = QLineEdit("200")
         self.contour_interval_entry.textChanged.connect(self._on_contour_interval_changed)
         self.contour_interval_entry.setMaximumWidth(80)  # Limit width of entry field
         contours_interval_layout.addWidget(self.contour_interval_entry)
-        contours_interval_layout.addStretch()
-        geotiff_layout.addWidget(contours_interval_frame)
-        geotiff_layout.addSpacing(3)
-
-        # Show Slope overlay checkbox and Min/Max on same row
-        slope_overlay_frame = QWidget()
-        slope_overlay_layout = QHBoxLayout(slope_overlay_frame)
-        slope_overlay_layout.setContentsMargins(0, 0, 0, 0)
         self.show_slope_overlay_checkbox = QCheckBox("Slopes")
         self.show_slope_overlay_checkbox.setChecked(self.show_slope_overlay_var)
         self.show_slope_overlay_checkbox.stateChanged.connect(self._on_slope_overlay_checkbox_changed)
-        slope_overlay_layout.addWidget(self.show_slope_overlay_checkbox)
-        slope_overlay_layout.addWidget(QLabel("Min:"))
+        contours_interval_layout.addWidget(self.show_slope_overlay_checkbox)
         self.slope_overlay_min_entry = QLineEdit("10")
         self.slope_overlay_min_entry.textChanged.connect(self._on_slope_overlay_min_changed)
         self.slope_overlay_min_entry.setMaximumWidth(60)  # Limit width of entry field
-        slope_overlay_layout.addWidget(self.slope_overlay_min_entry)
-        slope_overlay_layout.addWidget(QLabel("Max:"))
+        contours_interval_layout.addWidget(self.slope_overlay_min_entry)
+        contours_interval_layout.addWidget(QLabel("To"))
         self.slope_overlay_max_entry = QLineEdit("20")
         self.slope_overlay_max_entry.textChanged.connect(self._on_slope_overlay_max_changed)
         self.slope_overlay_max_entry.setMaximumWidth(60)  # Limit width of entry field
-        slope_overlay_layout.addWidget(self.slope_overlay_max_entry)
-        slope_overlay_layout.addStretch()
-        geotiff_layout.addWidget(slope_overlay_frame)
+        contours_interval_layout.addWidget(self.slope_overlay_max_entry)
+        contours_interval_layout.addStretch()
+        geotiff_layout.addWidget(contours_interval_frame)
 
         param_layout.addWidget(geotiff_groupbox)
 
