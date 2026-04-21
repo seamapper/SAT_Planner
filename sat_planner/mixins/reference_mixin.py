@@ -5,6 +5,7 @@ import os
 import csv
 import json
 import re
+import datetime
 import xml.etree.ElementTree as ET
 
 from PyQt6.QtWidgets import (QFileDialog, QDialog, QVBoxLayout, QHBoxLayout,
@@ -628,10 +629,13 @@ class ReferenceMixin:
         dir_name = os.path.dirname(file_path)
         metadata_path = os.path.join(dir_name, f"{base_name}_params.json")
         params = None
+        imported_params_geotiff_path = None
         if os.path.exists(metadata_path):
             try:
                 with open(metadata_path, 'r', encoding='utf-8') as f:
                     params = json.load(f)
+                if isinstance(params, dict):
+                    imported_params_geotiff_path = params.get('geotiff_path')
             except Exception as e:
                 print(f"Warning: Could not load metadata file: {e}")
         try:
@@ -756,6 +760,11 @@ class ReferenceMixin:
                     self.export_name_entry.setText(base_name)
         except Exception as e:
             print(f"Warning: Error populating parameter fields: {e}")
+        if imported_params_geotiff_path and hasattr(self, '_load_geotiff_from_path'):
+            if os.path.exists(imported_params_geotiff_path):
+                self._load_geotiff_from_path(imported_params_geotiff_path)
+            else:
+                self.set_ref_info_text(f"Saved GeoTIFF not found: {imported_params_geotiff_path}. Continuing without GeoTIFF.", append=True)
         if self.survey_lines_data:
             try:
                 self.accuracy_central_point_coords = (
@@ -810,6 +819,7 @@ class ReferenceMixin:
             file_processed = False
             imported_geojson_survey_speed = None
             imported_geojson_geotiff_path = None
+            imported_params_geotiff_path = None
 
             # DDD / DMS / DMM / LNW: use calibration parsers + reference assignment dialog
             if file_ext == '.lnw':
@@ -1021,6 +1031,8 @@ class ReferenceMixin:
                 try:
                     with open(metadata_path, 'r', encoding='utf-8') as f:
                         params = json.load(f)
+                    if isinstance(params, dict):
+                        imported_params_geotiff_path = params.get('geotiff_path')
                 except Exception as e:
                     print(f"Warning: Could not load metadata file: {e}")
 
@@ -1149,11 +1161,12 @@ class ReferenceMixin:
 
             if (not params or not isinstance(params, dict) or params.get('survey_speed') is None) and imported_geojson_survey_speed is not None:
                 self.survey_speed_entry.setText(str(imported_geojson_survey_speed))
-            if imported_geojson_geotiff_path and hasattr(self, '_load_geotiff_from_path'):
-                if os.path.exists(imported_geojson_geotiff_path):
-                    self._load_geotiff_from_path(imported_geojson_geotiff_path)
+            geotiff_path_to_load = imported_params_geotiff_path or imported_geojson_geotiff_path
+            if geotiff_path_to_load and hasattr(self, '_load_geotiff_from_path'):
+                if os.path.exists(geotiff_path_to_load):
+                    self._load_geotiff_from_path(geotiff_path_to_load)
                 else:
-                    self.set_ref_info_text(f"Saved GeoTIFF not found: {imported_geojson_geotiff_path}. Continuing without GeoTIFF.", append=True)
+                    self.set_ref_info_text(f"Saved GeoTIFF not found: {geotiff_path_to_load}. Continuing without GeoTIFF.", append=True)
 
             if self.survey_lines_data:
                 try:
@@ -1492,8 +1505,13 @@ class ReferenceMixin:
             return
 
         # Format the statistics for display
-        stats_text = "COMPREHENSIVE REFERENCE PLANNING STATISTICS\n"
+        stats_text = "ACCURACY SURVEY INFORMATION\n"
         stats_text += "=" * 50 + "\n\n"
+        export_name = self.export_name_entry.text().strip() if hasattr(self, 'export_name_entry') else ""
+        if not export_name:
+            export_name = "Unnamed"
+        stats_text += f"Survey Plan: {export_name}\n"
+        stats_text += f"Export Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 
         # Survey parameters
         try:
@@ -1553,6 +1571,52 @@ class ReferenceMixin:
             stats_text += "CROSSLINE\n"
             stats_text += "-" * 10 + "\n"
             stats_text += f"Crossline Passes: {stats['num_crossline_passes']}\n"
+            crossline_min_depth_m = None
+            crossline_max_depth_m = None
+            crossline_min_slope_deg = None
+            crossline_max_slope_deg = None
+            if (
+                self.cross_line_data
+                and len(self.cross_line_data) >= 2
+                and hasattr(self, "_profile_arrays_along_segment_endpoints")
+            ):
+                try:
+                    cl_a, cl_b = self.cross_line_data[0], self.cross_line_data[1]
+                    _dists, elevations, slopes = self._profile_arrays_along_segment_endpoints(
+                        cl_a[0], cl_a[1], cl_b[0], cl_b[1]
+                    )
+                    elevations = np.asarray(elevations, dtype=float) if elevations is not None else np.array([])
+                    slopes = np.asarray(slopes, dtype=float) if slopes is not None else np.array([])
+                    finite_elev = np.isfinite(elevations) & ~np.isnan(elevations)
+                    if np.any(finite_elev):
+                        crossline_min_depth_m = abs(float(np.nanmax(elevations[finite_elev])))
+                        crossline_max_depth_m = abs(float(np.nanmin(elevations[finite_elev])))
+                    finite_slopes = np.isfinite(slopes) & ~np.isnan(slopes)
+                    if np.any(finite_slopes):
+                        crossline_min_slope_deg = float(np.nanmin(slopes[finite_slopes]))
+                        crossline_max_slope_deg = float(np.nanmax(slopes[finite_slopes]))
+                except Exception:
+                    pass
+            stats_text += (
+                f"Crossline Minimum Depth (m): {crossline_min_depth_m:.2f}\n"
+                if crossline_min_depth_m is not None else
+                "Crossline Minimum Depth (m): -\n"
+            )
+            stats_text += (
+                f"Crossline Maximum Depth (m): {crossline_max_depth_m:.2f}\n"
+                if crossline_max_depth_m is not None else
+                "Crossline Maximum Depth (m): -\n"
+            )
+            stats_text += (
+                f"Crossline Minimum Slope (deg): {crossline_min_slope_deg:.2f}\n"
+                if crossline_min_slope_deg is not None else
+                "Crossline Minimum Slope (deg): -\n"
+            )
+            stats_text += (
+                f"Crossline Maximum Slope (deg): {crossline_max_slope_deg:.2f}\n"
+                if crossline_max_slope_deg is not None else
+                "Crossline Maximum Slope (deg): -\n"
+            )
 
             if self.cross_line_data and len(self.cross_line_data) >= 2:
                 try:

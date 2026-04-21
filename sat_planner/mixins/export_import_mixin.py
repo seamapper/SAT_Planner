@@ -59,6 +59,7 @@ class ExportImportMixin:
                 'bisect_lead': float(self.bisect_lead_entry.text()),
                 'survey_speed': float(self.survey_speed_entry.text()),
                 'export_name': self.export_name_entry.text().strip(),
+                'geotiff_path': (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
                 'offset_direction': self.offset_direction_var,
                 'line_length_multiplier': self.line_length_multiplier,
                     'dist_between_lines_multiplier': self.dist_between_lines_multiplier
@@ -229,7 +230,6 @@ class ExportImportMixin:
                     "properties": {
                         "line_num": i + 1,
                         "survey_speed": ref_export_speed,
-                        "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
                         "points": [
                             {"point_num": 1, "lat": line[0][0], "lon": line[0][1]},
                             {"point_num": 2, "lat": line[1][0], "lon": line[1][1]}
@@ -246,7 +246,6 @@ class ExportImportMixin:
                     },
                     "properties": {
                         "line_num": 0,
-                        "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
                         "survey_speed": ref_export_speed,
                         "points": [
                             {"point_num": 1, "lat": self.cross_line_data[0][0], "lon": self.cross_line_data[0][1]},
@@ -256,9 +255,7 @@ class ExportImportMixin:
                 })
             geojson_collection = {
                 "type": "FeatureCollection",
-                "properties": {
-                    "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None)
-                },
+                "properties": {},
                 "features": geojson_features
             }
             with open(geojson_file_path, 'w') as f:
@@ -339,20 +336,25 @@ class ExportImportMixin:
             ref_msg2 += f"in directory: {export_dir}"
             self.set_ref_info_text(ref_msg2, append=False)
 
-            # --- Export Comprehensive Survey Statistics ---
+            # --- Export Accuracy Survey Information ---
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
             total_survey_time = self._calculate_total_survey_time()
             
             with open(stats_file_path, 'w') as f:
-                f.write("COMPREHENSIVE SURVEY STATISTICS\n")
+                f.write("ACCURACY SURVEY INFORMATION\n")
                 f.write("=" * 50 + "\n\n")
                 f.write(f"Survey Plan: {export_name}\n")
                 f.write(f"Export Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
                 
                 f.write("SURVEY INPUT PARAMETERS\n")
                 f.write("-" * 30 + "\n")
+                label_overrides = {
+                    "dist_between_lines": "Distance Between Lines",
+                    "dist_between_lines_multiplier": "Distance Between Lines Multiplier",
+                }
                 for key, value in values.items():
-                    f.write(f"{key.replace('_', ' ').title()}: {value}\n")
+                    label = label_overrides.get(key, key.replace('_', ' ').title())
+                    f.write(f"{label}: {value}\n")
                 f.write("\n")
                 
                 f.write("SURVEY DISTANCE BREAKDOWN\n")
@@ -607,6 +609,12 @@ class ExportImportMixin:
                     params['survey_speed'] = float(self.survey_speed_entry.text())
                 except:
                     params['survey_speed'] = 8.0  # Default
+
+                params['geotiff_path'] = (
+                    self.current_geotiff_path
+                    if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path
+                    else None
+                )
                 
                 try:
                     params['crossline_passes'] = int(self.crossline_passes_entry.text())
@@ -868,63 +876,35 @@ class ExportImportMixin:
             )
 
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
+            try:
+                turn_min = 10.0
+                if hasattr(self, "performance_turn_time_entry"):
+                    raw_turn = self.performance_turn_time_entry.text().strip()
+                    if raw_turn:
+                        turn_min = float(raw_turn)
+                if turn_min < 0:
+                    turn_min = 0.0
+            except Exception:
+                turn_min = 10.0
+
+            try:
+                perf_info_text = self._build_performance_test_info_text(
+                    lines, bist_segs if has_bist else [], float(speed_kts), float(turn_min)
+                )
+            except Exception as e:
+                perf_info_text = (
+                    "PERFORMANCE TEST SUMMARY\n"
+                    + "=" * 24
+                    + "\n"
+                    + f"Could not build detailed performance info: {e}\n"
+                )
+
             with open(stats_file_path, "w", encoding="utf-8") as f:
-                f.write("PERFORMANCE SURVEY EXPORT\n")
-                f.write("=" * 40 + "\n\n")
-                f.write(f"Plan name: {export_name}\n")
-                f.write(f"Export date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                f.write("TAB PARAMETERS (at export)\n")
-                f.write("-" * 28 + "\n")
-                for label, attr in (
-                    ("Central latitude", "performance_central_lat_entry"),
-                    ("Central longitude", "performance_central_lon_entry"),
-                    ("Test depth (m)", "performance_test_depth_entry"),
-                    ("Swell direction (deg)", "performance_swell_direction_entry"),
-                    ("Swath angle (deg)", "performance_swath_angle_entry"),
-                    ("Test speed (kts)", "performance_test_speed_entry"),
-                    ("BIST time (min)", "performance_bist_time_entry"),
-                    ("Turn time (min)", "performance_turn_time_entry"),
-                ):
-                    w = getattr(self, attr, None)
-                    if w is not None and hasattr(w, "text"):
-                        try:
-                            f.write(f"{label}: {w.text()}\n")
-                        except Exception:
-                            f.write(f"{label}: (n/a)\n")
-                f.write("\nSEGMENTS\n")
-                f.write("-" * 10 + "\n")
-                f.write("Four performance swath lines (P1S–P4E).\n")
-                if has_bist:
-                    f.write("Four BIST collection segments (B1S–B4E).\n")
-                else:
-                    f.write("No BIST segments in this export.\n")
-                f.write("\n")
-                dmm_h = "Waypoints (DMM)"
-                f.write(f"{dmm_h}\n")
-                f.write("-" * len(dmm_h) + "\n")
-                for i, line in enumerate(lines):
-                    n = i + 1
-                    s, e = line[0], line[1]
-                    f.write(
-                        f"P{n}S: {decimal_degrees_to_ddm(s[0], is_latitude=True)}, "
-                        f"{decimal_degrees_to_ddm(s[1], is_latitude=False)}\n"
-                    )
-                    f.write(
-                        f"P{n}E: {decimal_degrees_to_ddm(e[0], is_latitude=True)}, "
-                        f"{decimal_degrees_to_ddm(e[1], is_latitude=False)}\n"
-                    )
-                if has_bist:
-                    for i, seg in enumerate(bist_segs):
-                        n = i + 1
-                        b0, b1 = seg[0], seg[1]
-                        f.write(
-                            f"B{n}S: {decimal_degrees_to_ddm(b0[0], is_latitude=True)}, "
-                            f"{decimal_degrees_to_ddm(b0[1], is_latitude=False)}\n"
-                        )
-                        f.write(
-                            f"B{n}E: {decimal_degrees_to_ddm(b1[0], is_latitude=True)}, "
-                            f"{decimal_degrees_to_ddm(b1[1], is_latitude=False)}\n"
-                        )
+                f.write("PERFORMANCE SURVEY INFORMATION\n")
+                f.write("=" * 50 + "\n\n")
+                f.write(f"Performance Survey: {export_name}\n")
+                f.write(f"Export Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+                f.write(perf_info_text)
 
             json_metadata_path = os.path.join(export_dir, f"{export_name}_performance_params.json")
             pmeta = {

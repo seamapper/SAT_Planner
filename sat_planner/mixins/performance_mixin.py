@@ -487,49 +487,17 @@ class PerformanceMixin:
         if hasattr(self, "_draw_performance_profile"):
             self._draw_performance_profile()
 
-    def _show_performance_test_info(self):
-        """Open a dialog summarizing the performance test pattern, legs, transits, and timing."""
-        if not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
-            self._show_message(
-                "warning",
-                "Disabled Feature",
-                "Geospatial libraries not loaded. Cannot summarize performance test geometry.",
-            )
-            return
-        lines = getattr(self, "performance_test_lines_data", None) or []
-        if len(lines) != 4:
-            self._show_message(
-                "info",
-                "No Performance Plan",
-                "Plot performance test lines first (Plot Performance Lines).",
-            )
-            return
-
-        bist_segs = getattr(self, "performance_bist_segments_data", None) or []
+    def _build_performance_test_info_text(self, lines, bist_segs, speed_kts, turn_min):
+        """Build the full Performance Test Info text block used by dialog and exported *_info.txt."""
         has_bist = len(bist_segs) == 4
-        if len(bist_segs) not in (0, 4):
-            self._show_message(
-                "warning",
-                "BIST Geometry",
-                "BIST segments are incomplete; remove lines and plot again, or ignore BIST legs below.",
-            )
-            has_bist = False
-
-        try:
-            speed_kts = float(self.performance_test_speed_entry.text().strip())
-        except Exception:
-            self._show_message("warning", "Invalid Speed", "Test Speed (kts) is not a valid number.")
-            return
-        if not np.isfinite(speed_kts) or speed_kts < 0:
-            self._show_message("warning", "Invalid Speed", "Test Speed (kts) must be zero or greater.")
-            return
-
-        try:
-            turn_min = float(self.performance_turn_time_entry.text().strip())
-        except Exception:
-            turn_min = 10.0
-        if not np.isfinite(turn_min) or turn_min < 0:
-            turn_min = 0.0
+        lines = [list(line) for line in lines]
+        for seg in lines:
+            if len(seg) != 2:
+                raise ValueError("Each performance line must have a start and end.")
+        if has_bist:
+            for seg in bist_segs:
+                if len(seg) != 2:
+                    raise ValueError("Each BIST segment must have two endpoints.")
 
         geod = pyproj.Geod(ellps="WGS84")
         speed_mps = speed_kts * 0.514444
@@ -543,16 +511,10 @@ class PerformanceMixin:
                 return 0.0
             return d_m / speed_mps
 
-        lines = [list(line) for line in lines]
-        for i, seg in enumerate(lines):
-            if len(seg) != 2:
-                self._show_message("warning", "Invalid Lines", "Each performance line must have a start and end.")
-                return
-        if has_bist:
-            for i, seg in enumerate(bist_segs):
-                if len(seg) != 2:
-                    self._show_message("warning", "Invalid BIST", "Each BIST segment must have two endpoints.")
-                    return
+        def fmt_time_min_hr(seconds_value):
+            minutes_value = float(seconds_value) / 60.0
+            hours_value = minutes_value / 60.0
+            return f"{minutes_value:.2f} min ({hours_value:.2f} hr)"
 
         per_line_rows = []
         total_line_dist_m = 0.0
@@ -647,28 +609,28 @@ class PerformanceMixin:
             t.append(f"Line {n}:\n")
             t.append(f"  P{n}S → P{n}E (swath out):     {row['sw_out']:.1f} m")
             if speed_mps > 0:
-                t.append(f"  |  {leg_time_sec(row['sw_out']):.1f} s\n")
+                t.append(f"  |  {fmt_time_min_hr(leg_time_sec(row['sw_out']))}\n")
             else:
                 t.append("\n")
             if has_bist:
                 t.append(f"  B{n}S → B{n}E (BIST out):     {row['b_out']:.1f} m")
                 if speed_mps > 0:
-                    t.append(f"  |  {leg_time_sec(row['b_out']):.1f} s\n")
+                    t.append(f"  |  {fmt_time_min_hr(leg_time_sec(row['b_out']))}\n")
                 else:
                     t.append("\n")
                 t.append(f"  B{n}E → B{n}S (BIST return):   {row['b_back']:.1f} m")
                 if speed_mps > 0:
-                    t.append(f"  |  {leg_time_sec(row['b_back']):.1f} s\n")
+                    t.append(f"  |  {fmt_time_min_hr(leg_time_sec(row['b_back']))}\n")
                 else:
                     t.append("\n")
             t.append(f"  P{n}E → P{n}S (swath return):  {row['sw_back']:.1f} m")
             if speed_mps > 0:
-                t.append(f"  |  {leg_time_sec(row['sw_back']):.1f} s\n")
+                t.append(f"  |  {fmt_time_min_hr(leg_time_sec(row['sw_back']))}\n")
             else:
                 t.append("\n")
             t.append(
                 f"  Line {n} subtotal (pattern only): {row['line_dist']:.1f} m"
-                + (f"  |  {row['line_time_sec']:.1f} s ({row['line_time_sec']/60.0:.2f} min)\n" if speed_mps > 0 else "\n")
+                + (f"  |  {fmt_time_min_hr(row['line_time_sec'])}\n" if speed_mps > 0 else "\n")
             )
             t.append("\n")
 
@@ -677,7 +639,7 @@ class PerformanceMixin:
         for row in transit_rows:
             t.append(
                 f"  P{row['from']}S → P{row['to']}S:  {row['dist_m']:.1f} m"
-                + (f"  |  {row['time_sec']:.1f} s\n" if speed_mps > 0 else "\n")
+                + (f"  |  {fmt_time_min_hr(row['time_sec'])}\n" if speed_mps > 0 else "\n")
             )
         t.append("\n")
 
@@ -690,13 +652,12 @@ class PerformanceMixin:
         t.append(f"  Distance underway (legs + transits): {grand_dist_m:.1f} m ({grand_dist_m/1000.0:.3f} km)\n")
         if speed_mps > 0:
             t.append(
-                f"  Time at speed (legs + transits):     {total_line_time_sec + total_transit_time_sec:.1f} s "
-                f"({(total_line_time_sec + total_transit_time_sec)/60.0:.2f} min)\n"
+                f"  Time at speed (legs + transits):     {fmt_time_min_hr(total_line_time_sec + total_transit_time_sec)}\n"
             )
-        t.append(f"  Turn time (fixed):                   {total_turn_time_sec:.1f} s ({total_turn_time_sec/60.0:.2f} min)\n")
+        t.append(f"  Turn time (fixed):                   {fmt_time_min_hr(total_turn_time_sec)}\n")
         if speed_mps > 0:
             t.append(
-                f"  Grand total (speed + turns):         {grand_time_sec:.1f} s ({grand_time_sec/60.0:.2f} min)\n"
+                f"  Grand total (speed + turns):         {fmt_time_min_hr(grand_time_sec)}\n"
             )
         t.append("\n")
 
@@ -747,8 +708,60 @@ class PerformanceMixin:
 
         append_waypoints_block("Waypoints (DMM)", True)
         append_waypoints_block("Waypoints (decimal degrees)", False)
+        return "".join(t)
 
-        show_statistics_dialog(self, "Performance Test Info", "".join(t))
+    def _show_performance_test_info(self):
+        """Open a dialog summarizing the performance test pattern, legs, transits, and timing."""
+        if not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
+            self._show_message(
+                "warning",
+                "Disabled Feature",
+                "Geospatial libraries not loaded. Cannot summarize performance test geometry.",
+            )
+            return
+        lines = getattr(self, "performance_test_lines_data", None) or []
+        if len(lines) != 4:
+            self._show_message(
+                "info",
+                "No Performance Plan",
+                "Plot performance test lines first (Plot Performance Lines).",
+            )
+            return
+
+        bist_segs = getattr(self, "performance_bist_segments_data", None) or []
+        has_bist = len(bist_segs) == 4
+        if len(bist_segs) not in (0, 4):
+            self._show_message(
+                "warning",
+                "BIST Geometry",
+                "BIST segments are incomplete; remove lines and plot again, or ignore BIST legs below.",
+            )
+            has_bist = False
+            bist_segs = []
+
+        try:
+            speed_kts = float(self.performance_test_speed_entry.text().strip())
+        except Exception:
+            self._show_message("warning", "Invalid Speed", "Test Speed (kts) is not a valid number.")
+            return
+        if not np.isfinite(speed_kts) or speed_kts < 0:
+            self._show_message("warning", "Invalid Speed", "Test Speed (kts) must be zero or greater.")
+            return
+
+        try:
+            turn_min = float(self.performance_turn_time_entry.text().strip())
+        except Exception:
+            turn_min = 10.0
+        if not np.isfinite(turn_min) or turn_min < 0:
+            turn_min = 0.0
+
+        try:
+            stats_text = self._build_performance_test_info_text(lines, bist_segs if has_bist else [], speed_kts, turn_min)
+        except ValueError as e:
+            self._show_message("warning", "Invalid Performance Geometry", str(e))
+            return
+
+        show_statistics_dialog(self, "Performance Test Info", stats_text)
 
     def _zoom_to_performance_lines(self):
         """Zoom map view to all currently plotted performance test lines."""
@@ -819,9 +832,9 @@ class PerformanceMixin:
         if not hasattr(self, "performance_export_name_entry"):
             return
         try:
-            swath_a = self.performance_swath_angle_entry.text().strip() or "0"
+            swell_dir = self.performance_swell_direction_entry.text().strip() or "0"
             spd = self.performance_test_speed_entry.text().strip() or "0"
-            self.performance_export_name_entry.setText(f"Performance_{swath_a}deg_{spd}_kts")
+            self.performance_export_name_entry.setText(f"Performance_{swell_dir}deg_{spd}_kts")
         except Exception:
             pass
 

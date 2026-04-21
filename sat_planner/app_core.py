@@ -1187,8 +1187,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_layout.setRowStretch(cal_row, 0)
         cal_row += 1
 
-        # --- Pitch Line Info GroupBox ---
-        pitch_line_info_groupbox = QGroupBox("Pitch Line Info")
+        # --- Pitch Line Planning Info GroupBox ---
+        pitch_line_info_groupbox = QGroupBox("Pitch Line Planning Info")
         pitch_line_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         pitch_line_info_layout = QGridLayout(pitch_line_info_groupbox)
         pitch_line_info_layout.setSpacing(3)
@@ -1230,7 +1230,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_row += 1
 
         # --- Roll Line Info GroupBox ---
-        roll_line_info_groupbox = QGroupBox("Roll Line Info")
+        roll_line_info_groupbox = QGroupBox("Roll Line Planning Info")
         roll_line_info_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         roll_line_info_layout = QGridLayout(roll_line_info_groupbox)
         roll_line_info_layout.setSpacing(3)
@@ -1758,9 +1758,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         perf_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
         self.performance_export_name_entry = QLineEdit()
         try:
-            swath_a = self.performance_swath_angle_entry.text().strip() or "0"
+            swell_dir = self.performance_swell_direction_entry.text().strip() or "0"
             spd = self.performance_test_speed_entry.text().strip() or "0"
-            perf_export_name = f"Performance_{swath_a}deg_{spd}_kts"
+            perf_export_name = f"Performance_{swell_dir}deg_{spd}_kts"
         except Exception:
             perf_export_name = "Performance_0deg_0_kts"
         self.performance_export_name_entry.setText(perf_export_name)

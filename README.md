@@ -48,7 +48,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Auto-regenerate plans when parameters change (with debounce)
 - Configure line length, spacing, heading, speed, and turn time
 - Import accuracy surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON); **suggested crossline and reference line order** (crossline by orientation, reference lines in file order); optional GMRT download after import (checkbox + buffer)
-- **Accuracy Survey Info** dialog and *_info.txt with **Accuracy Waypoints (DMM)** and **Accuracy Waypoints (DDD)** sections (L1S/L1E, L2S/L2E, …, CLS/CLE)
+- **Accuracy Survey Info** dialog and *_info.txt with **Survey Plan** and **Export Date**, crossline depth/slope extrema (minimum/maximum depth and slope from the full crossline profile), and **Accuracy Waypoints (DMM)** / **Accuracy Waypoints (DDD)** sections (L1S/L1E, L2S/L2E, …, CLS/CLE)
 - Calculate comprehensive survey statistics with time breakdowns
 - Survey time breakdown showing main lines, crossline, transit, and turn times
 - Export accuracy survey plans with detailed statistics (shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`)
@@ -56,10 +56,10 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ### Performance (Swath) Survey Planning
 - **Purpose**: Support **swath performance** evaluation with **four legs** on headings **0°, 45°, 90°, and 135° relative to swell direction** (different aspects into/across/with/oblique to the seas). Each leg combines **swath collection** along the main segment (P1S–P4E) with **RX noise BIST** on the map extension from each line end when BIST time is non-zero.
 - **Parameters**: Central lat/lon (**Pick Center from GeoTIFF** on Performance), **Swell Direction** (default **0°**), swath angle, sound velocity, test depth, pings, test speed, BIST time, turn time; **Line Length (m)** from speed and along-track collection time.
-- **Plot Performance Lines**, **Zoom to Performance Lines**, **Remove Performance Lines**; **Show Performance Test Info** (pattern, legs, transits, times, waypoints DMM/DDD).
+- **Plot Performance Lines**, **Zoom to Performance Lines**, **Remove Performance Lines**; **Show Performance Test Info** (pattern, legs, transits, times, waypoints DMM/DDD). Exported performance `*_info.txt` uses the same detailed content and includes **Performance Survey** and **Export Date** at the top.
 - **Auto-plot** (debounced) after editing test parameters or after performance pick-center when inputs are valid.
 - **Profile** (Performance tab): line 1 swath + first BIST segment; **sienna** / **gold** to match the map.
-- **Performance Import/Export**: same product family as Accuracy exports plus `{name}_performance_params.json`; optional **Download GMRT** on import; assignment dialog when import geometry is ambiguous. Default export basename: `Performance_<swath_angle>deg_<speed>_kts`.
+- **Performance Import/Export**: same product family as Accuracy exports plus `{name}_performance_params.json`; optional **Download GMRT** on import; assignment dialog when import geometry is ambiguous. Default export basename: `Performance_<swell_direction>deg_<speed>_kts`.
 - **Map markers**: **Perf Central Pt** vs **Acc Central Pt** (green accuracy center only when an accuracy plan is loaded).
 
 ### Line Planning
@@ -86,8 +86,9 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 
 ### GeoJSON metadata (and sidecar JSON)
 - **Calibration**: GeoJSON holds line geometry and `line_num` / `line_name` only. The FeatureCollection **`properties`** may include **`geotiff_path`** so a saved raster can be reopened on import. **Survey speed**, **turn time (min)**, **heading line offset**, and **export name** live in **`{export_name}_params.json`** next to the GeoJSON (not in the `.geojson`). On import, that sidecar is optional; if it is absent, the app uses defaults and may repopulate the heading offset from the pitch line after load.
-- **Accuracy** and **Line** GeoJSON exports can include **`survey_speed`** and **`geotiff_path`** (collection and/or feature properties as applicable).
-- **Performance** GeoJSON uses feature properties such as **`line_num`** (1–4 for swath legs, 11–14 for BIST extensions where applicable) and may include speed-related keys; full test parameters are also in **`{name}_performance_params.json`**.
+- **Accuracy**: GeoJSON exports include **`survey_speed`**; saved raster path is stored in **`{export_name}_params.json`** as **`geotiff_path`**.
+- **Line** GeoJSON exports can include **`survey_speed`** and **`geotiff_path`** (collection and/or feature properties as applicable).
+- **Performance** GeoJSON uses feature properties such as **`line_num`** (1–4 for swath legs, 11–14 for BIST extensions where applicable) and may include speed-related keys; full test parameters are also in **`{name}_performance_params.json`** (including **`swell_direction_deg`**, restored on import when the sidecar is present).
 - Whenever a saved **GeoTIFF** path is present in the imported files, SAT Planner tries to open it; if the file is missing, import continues with a warning.
 
 ## Requirements
@@ -293,7 +294,7 @@ The application saves configuration in:
 - **SIS asciiplan**: ASCII plan format for SIS
 - **Hypack LNW**: LNW format for Hypack (UTM zone computed from survey points when needed)
 - **Shapefile**: Geospatial vector format for GIS applications
-- **Statistics / *_info.txt**: Text reports with distances, timing, survey details, and waypoint sections (DMM then DDD) for Calibration, Accuracy, and Line plans; Performance exports add a performance-oriented `*_info.txt` and **`{name}_performance_params.json`** (separate from Accuracy `{name}_params.json`)
+- **Statistics / *_info.txt**: Text reports with distances, timing, survey details, and waypoint sections (DMM then DDD) for Calibration, Accuracy, and Line plans. Performance exports include `*_info.txt` with the same content as **Show Performance Test Info** plus **Performance Survey** and **Export Date** headers, and write **`{name}_performance_params.json`** (separate from Accuracy `{name}_params.json`).
 - **Calibration `{name}_params.json`**: Sidecar to the calibration GeoJSON export—**`survey_speed`**, **`turn_time`**, **`line_offset`** (heading line offset), and **`export_name`**. Edit this file to tune those values and re-import the `.geojson` without regenerating geometry.
 
 ## Navigation
@@ -337,6 +338,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.22**: Accuracy Survey Info now shows **Survey Plan** and **Export Date** at the top and reports crossline full-profile extrema (minimum/maximum depth and slope). Accuracy export/import stores GeoTIFF path in **`{name}_params.json`** (not Accuracy GeoJSON) and restores it from sidecar metadata on import (with GeoJSON fallback for older files). Performance export default basename now uses **swell direction** (`Performance_<swell_direction>deg_<speed>_kts`). Performance `*_info.txt` now mirrors **Show Performance Test Info** content and includes **Performance Survey** + **Export Date** headers.
 - **v2026.20**: README: document **calibration** export/import split—**`{name}_params.json`** holds survey speed, turn time, heading line offset, and export name; **calibration GeoJSON** is geometry plus line labels (and optional **`geotiff_path`** on the FeatureCollection). Clarified GeoJSON metadata behavior for Accuracy, Line, and Performance.
 - **v2026.15**: **Performance (swath) survey planning** tab: four headings relative to swell, swath lines plus optional **RX noise BIST** extensions; **Plot Performance Lines**, zoom/remove, **Show Performance Test Info**; debounced **auto-plot** after parameter edits and after performance pick-center; profile for **line 1 + BIST** with map-matched colors; **Performance Import/Export** (same export family as Accuracy, assignment dialog on ambiguous import, optional GMRT on import); default swell direction **0°**; accuracy vs performance **central point** markers fixed so accuracy center shows only when an accuracy plan is present; UI labels (**Plot Performance Lines**, button layout). Added `performance_import_dialog.py` and **PerformanceMixin**; README updated for Performance workflow.
 - **v2026.14**: Added GeoTIFF Controls **Download Data** source dropdown (`Select Source`, `GMRT`) that opens the source flow immediately and keeps selection after successful download. Added GMRT dialog download progress bar (`x of y` for tiled downloads, indeterminate for single download). Added EEZ pan/zoom-driven refresh, paused-hover EEZ `GEONAME` tooltip lookups (including without a loaded GeoTIFF), and default EEZ opacity 80%. Improved large-area/world-scale alignment for EEZ and Imagery Basemap overlays. Updated GMRT dialog so **Split Grid Into Bathymetry and Topography** is enabled by default. Fixed line-plan zoom GeoTIFF coverage refresh, line-plan profile refresh after import, and calibration Pitch Line Info refresh after survey import.
