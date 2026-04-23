@@ -4,14 +4,16 @@ Toggle, load, and display; reload on zoom/pan is coordinated from map_interactio
 """
 import traceback
 import json
+import os
 import numpy as np
 from urllib.request import urlopen, Request
 from urllib.parse import urlencode
 from io import BytesIO
 
 from PIL import Image
+from PyQt6.QtWidgets import QFileDialog
 
-from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, transform, reproject, Resampling
+from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, transform, reproject, Resampling, fiona
 
 
 class BasemapMixin:
@@ -126,6 +128,193 @@ class BasemapMixin:
                 self.canvas.draw_idle()
             except Exception as e:
                 print(f"Error updating EEZ opacity: {e}")
+
+    def _add_visualization_shapefile(self):
+        """Load a shapefile and render it as a visualization-only overlay."""
+        if not GEOSPATIAL_LIBS_AVAILABLE or fiona is None:
+            self._show_message("warning", "Missing Libraries", "Shapefile visualization requires fiona and pyproj.")
+            return
+
+        start_dir = getattr(self, 'last_shapefile_dir', None) or getattr(self, 'last_used_dir', os.path.expanduser("~"))
+        shapefile_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Shapefile",
+            start_dir,
+            "Shapefile (*.shp)"
+        )
+        if not shapefile_path:
+            return
+
+        try:
+            selected_dir = os.path.dirname(shapefile_path) or start_dir
+            self.last_shapefile_dir = selected_dir
+            if hasattr(self, '_save_last_shapefile_dir'):
+                self._save_last_shapefile_dir()
+            self.last_used_dir = selected_dir
+        except Exception:
+            pass
+
+        try:
+            self._append_visualization_shapefile_data(shapefile_path)
+        except FileNotFoundError:
+            self._show_message("error", "Shapefile Error", f"Shapefile not found:\n{shapefile_path}")
+            return
+        except ValueError as exc:
+            self._show_message("warning", "Unsupported Geometry", str(exc))
+            return
+        except Exception as exc:
+            self._show_message("error", "Shapefile Error", f"Could not load shapefile:\n{exc}")
+            return
+
+        self._plot_survey_plan(preserve_view_limits=True)
+
+    def _append_visualization_shapefile_data(self, shapefile_path):
+        """Append one shapefile's geometries/path to visualization overlay state."""
+        normalized_path = os.path.normpath(shapefile_path)
+        if not os.path.exists(normalized_path):
+            raise FileNotFoundError(normalized_path)
+        geometries = self._read_visualization_shapefile_geometries(normalized_path)
+        if not geometries:
+            raise ValueError("No point, line, or polygon geometries were found in this shapefile.")
+        if not hasattr(self, 'visualization_shapefile_geometries') or self.visualization_shapefile_geometries is None:
+            self.visualization_shapefile_geometries = []
+        self.visualization_shapefile_geometries.extend(geometries)
+        if not hasattr(self, 'visualization_shapefile_paths') or self.visualization_shapefile_paths is None:
+            self.visualization_shapefile_paths = []
+        if normalized_path not in self.visualization_shapefile_paths:
+            self.visualization_shapefile_paths.append(normalized_path)
+
+    def _load_visualization_shapefile_paths(self, shapefile_paths, replace_existing=False, redraw=True):
+        """Load one or more shapefiles by path for visualization overlays."""
+        loaded_paths = []
+        missing_paths = []
+        failed_paths = []
+        if not GEOSPATIAL_LIBS_AVAILABLE or fiona is None:
+            return {"loaded_paths": loaded_paths, "missing_paths": missing_paths, "failed_paths": failed_paths}
+
+        if replace_existing:
+            self.visualization_shapefile_geometries = []
+            self.visualization_shapefile_paths = []
+
+        if isinstance(shapefile_paths, str):
+            path_list = [shapefile_paths]
+        elif isinstance(shapefile_paths, list):
+            path_list = shapefile_paths
+        else:
+            path_list = []
+
+        for path_item in path_list:
+            if not path_item:
+                continue
+            normalized_path = os.path.normpath(str(path_item))
+            try:
+                self._append_visualization_shapefile_data(normalized_path)
+                loaded_paths.append(normalized_path)
+            except FileNotFoundError:
+                missing_paths.append(normalized_path)
+            except Exception as exc:
+                failed_paths.append((normalized_path, str(exc)))
+
+        if redraw:
+            self._plot_survey_plan(preserve_view_limits=True)
+
+        return {
+            "loaded_paths": loaded_paths,
+            "missing_paths": missing_paths,
+            "failed_paths": failed_paths,
+        }
+
+    def _read_visualization_shapefile_geometries(self, shapefile_path):
+        """Read line/polygon geometry from shapefile and return WGS84-ready overlay segments."""
+        from fiona.transform import transform_geom
+
+        geometries = []
+        with fiona.open(shapefile_path, "r") as source:
+            source_crs = source.crs_wkt or source.crs
+            for feature in source:
+                geom = self._get_feature_geometry(feature)
+                if not geom:
+                    continue
+                if source_crs:
+                    geom = transform_geom(source_crs, "EPSG:4326", geom)
+                geometries.extend(self._extract_visualization_geometries(geom))
+        return geometries
+
+    def _get_feature_geometry(self, feature):
+        """Extract geometry mapping from Fiona feature objects across Fiona versions."""
+        geom = None
+        if hasattr(feature, "get"):
+            try:
+                geom = feature.get("geometry")
+            except Exception:
+                geom = None
+        if geom is None:
+            try:
+                geom = feature["geometry"]
+            except Exception:
+                geom = getattr(feature, "geometry", None)
+        if geom is None:
+            return None
+        # Fiona may return model objects; convert to plain geo-interface dict.
+        if hasattr(geom, "__geo_interface__"):
+            return geom.__geo_interface__
+        if isinstance(geom, dict):
+            return geom
+        try:
+            return dict(geom)
+        except Exception:
+            return None
+
+    def _extract_visualization_geometries(self, geom):
+        """Convert GeoJSON-like geometries to simplified overlay instructions."""
+        if geom is None:
+            return []
+        if hasattr(geom, "__geo_interface__"):
+            geom = geom.__geo_interface__
+        elif not isinstance(geom, dict):
+            try:
+                geom = dict(geom)
+            except Exception:
+                return []
+        geom_type = geom.get("type")
+        coords = geom.get("coordinates")
+        if not geom_type or coords is None:
+            return []
+
+        geom_type_upper = str(geom_type).upper()
+        if geom_type_upper.endswith("ZM"):
+            geom_type_upper = geom_type_upper[:-2]
+        elif geom_type_upper.endswith("Z") or geom_type_upper.endswith("M"):
+            geom_type_upper = geom_type_upper[:-1]
+        if geom_type_upper.endswith("25D"):
+            geom_type_upper = geom_type_upper[:-3]
+
+        extracted = []
+        if geom_type_upper == "LINESTRING":
+            if len(coords) >= 2:
+                extracted.append({"type": "line", "coords": [(pt[0], pt[1]) for pt in coords]})
+        elif geom_type_upper == "MULTILINESTRING":
+            for line_coords in coords:
+                if len(line_coords) >= 2:
+                    extracted.append({"type": "line", "coords": [(pt[0], pt[1]) for pt in line_coords]})
+        elif geom_type_upper == "POLYGON":
+            if len(coords) >= 1 and len(coords[0]) >= 3:
+                extracted.append({"type": "polygon", "coords": [(pt[0], pt[1]) for pt in coords[0]]})
+        elif geom_type_upper == "MULTIPOLYGON":
+            for polygon_coords in coords:
+                if len(polygon_coords) >= 1 and len(polygon_coords[0]) >= 3:
+                    extracted.append({"type": "polygon", "coords": [(pt[0], pt[1]) for pt in polygon_coords[0]]})
+        elif geom_type_upper == "POINT":
+            if len(coords) >= 2:
+                extracted.append({"type": "point", "coords": [(coords[0], coords[1])]})
+        elif geom_type_upper == "MULTIPOINT":
+            for point_coords in coords:
+                if len(point_coords) >= 2:
+                    extracted.append({"type": "point", "coords": [(point_coords[0], point_coords[1])]})
+        elif geom_type_upper == "GEOMETRYCOLLECTION":
+            for sub_geom in geom.get("geometries", []):
+                extracted.extend(self._extract_visualization_geometries(sub_geom))
+        return extracted
 
     def _load_and_plot_basemap(self, force_reload=False):
         """Load and display ArcGIS World Imagery basemap tiles."""

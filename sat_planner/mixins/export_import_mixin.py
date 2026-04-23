@@ -52,6 +52,7 @@ class ExportImportMixin:
             params = {
                 'central_lat': float(self.central_lat_entry.text()),
                 'central_lon': float(self.central_lon_entry.text()),
+                'central_point_depth_m': float(getattr(self, '_depth_at_picked_point', 0.0)) if getattr(self, '_depth_at_picked_point', None) is not None else None,
                 'line_length': float(self.line_length_entry.text()),
                 'heading': float(self.heading_entry.text()),
                 'dist_between_lines': float(self.dist_between_lines_entry.text()),
@@ -60,6 +61,7 @@ class ExportImportMixin:
                 'survey_speed': float(self.survey_speed_entry.text()),
                 'export_name': self.export_name_entry.text().strip(),
                 'geotiff_path': (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
+                'visualization_shapefile_paths': list(getattr(self, 'visualization_shapefile_paths', []) or []),
                 'offset_direction': self.offset_direction_var,
                 'line_length_multiplier': self.line_length_multiplier,
                     'dist_between_lines_multiplier': self.dist_between_lines_multiplier
@@ -104,11 +106,11 @@ class ExportImportMixin:
 
             self.offset_direction_var.set(params['offset_direction'])
 
-            self.line_length_multiplier.set(params['line_length_multiplier'])
-            self._update_multiplier_label_len(params['line_length_multiplier'])
+            self.line_length_multiplier = float(params['line_length_multiplier'])
+            self._update_multiplier_label_len(self.line_length_multiplier)
 
-            self.dist_between_lines_multiplier.set(params['dist_between_lines_multiplier'])
-            self._update_multiplier_label_dist(params['dist_between_lines_multiplier'])
+            self.dist_between_lines_multiplier = float(params['dist_between_lines_multiplier'])
+            self._update_multiplier_label_dist(self.dist_between_lines_multiplier)
 
             # Regenerate the plot with loaded parameters
             self._generate_and_plot()
@@ -339,8 +341,12 @@ class ExportImportMixin:
             # --- Export Accuracy Survey Information ---
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
             total_survey_time = self._calculate_total_survey_time()
+            include_crossline = total_survey_time.get('num_crossline_passes', 0) > 0 and total_survey_time.get('crossline_total_distance_m', 0) > 0
             
             with open(stats_file_path, 'w') as f:
+                def _fmt_minutes_and_hours(minutes_val):
+                    return f"{minutes_val:.1f} min ({minutes_val / 60.0:.2f} hr)"
+
                 f.write("ACCURACY SURVEY INFORMATION\n")
                 f.write("=" * 50 + "\n\n")
                 f.write(f"Survey Plan: {export_name}\n")
@@ -388,16 +394,17 @@ class ExportImportMixin:
                 f.write(f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_m']:.1f} m\n")
                 f.write(f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_km']:.3f} km\n")
                 f.write(f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_nm']:.3f} nm\n")
-                f.write(f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_m']:.1f} m\n")
-                f.write(f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_km']:.3f} km\n")
-                f.write(f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_nm']:.3f} nm\n")
-                f.write(f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_m']:.1f} m\n")
-                f.write(f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_km']:.3f} km\n")
-                f.write(f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_nm']:.3f} nm\n")
-                f.write(f"Crossline Passes: {total_survey_time['num_crossline_passes']}\n")
+                if include_crossline:
+                    f.write(f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_m']:.1f} m\n")
+                    f.write(f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_km']:.3f} km\n")
+                    f.write(f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_nm']:.3f} nm\n")
+                    f.write(f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_m']:.1f} m\n")
+                    f.write(f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_km']:.3f} km\n")
+                    f.write(f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_nm']:.3f} nm\n")
+                    f.write(f"Crossline Passes: {total_survey_time['num_crossline_passes']}\n")
                 
                 # Add crossline heading information
-                if self.cross_line_data and len(self.cross_line_data) >= 2:
+                if include_crossline and self.cross_line_data and len(self.cross_line_data) >= 2:
                     try:
                         if pyproj is not None:
                             geod = pyproj.Geod(ellps="WGS84")
@@ -415,9 +422,11 @@ class ExportImportMixin:
                     except Exception:
                         f.write("Crossline Heading: Unable to calculate\n")
                 
-                f.write(f"Crossline Total Distance: {total_survey_time['crossline_total_distance_m']:.1f} m\n")
-                f.write(f"Crossline Total Distance: {total_survey_time['crossline_total_distance_km']:.3f} km\n")
-                f.write(f"Crossline Total Distance: {total_survey_time['crossline_total_distance_nm']:.3f} nm\n\n")
+                if include_crossline:
+                    f.write(f"Crossline Total Distance: {total_survey_time['crossline_total_distance_m']:.1f} m\n")
+                    f.write(f"Crossline Total Distance: {total_survey_time['crossline_total_distance_km']:.3f} km\n")
+                    f.write(f"Crossline Total Distance: {total_survey_time['crossline_total_distance_nm']:.3f} nm\n")
+                f.write("\n")
                 
                 f.write("TOTAL SURVEY DISTANCE\n")
                 f.write("-" * 25 + "\n")
@@ -427,16 +436,21 @@ class ExportImportMixin:
                 
                 f.write("SURVEY TIME BREAKDOWN\n")
                 f.write("-" * 25 + "\n")
-                f.write(f"Main Lines Survey: {total_survey_time['main_lines_minutes']:.1f} min\n")
-                f.write(f"Crossline Survey: {total_survey_time['crossline_minutes']:.1f} min\n")
-                f.write(f"Travel Between Lines: {total_survey_time['travel_minutes']:.1f} min\n")
-                f.write(f"Travel to Crossline: {total_survey_time['travel_to_crossline_minutes']:.1f} min\n")
+                f.write(f"Main Lines Survey: {_fmt_minutes_and_hours(total_survey_time['main_lines_minutes'])}\n")
+                if include_crossline:
+                    f.write(f"Crossline Survey: {_fmt_minutes_and_hours(total_survey_time['crossline_minutes'])}\n")
+                f.write(f"Travel Between Lines: {_fmt_minutes_and_hours(total_survey_time['travel_minutes'])}\n")
+                if include_crossline:
+                    f.write(f"Travel to Crossline: {_fmt_minutes_and_hours(total_survey_time['travel_to_crossline_minutes'])}\n")
                 if 'total_turn_time_min' in total_survey_time:
                     num_turns = (total_survey_time.get('num_turns_between_main_lines', 0) + 
                                total_survey_time.get('num_turns_to_crossline', 0) + 
                                total_survey_time.get('num_turns_between_crossline_passes', 0))
                     turn_time_per_turn = total_survey_time.get('turn_time_per_turn_min', 5.0)
-                    f.write(f"Total Turn Time: {total_survey_time['total_turn_time_min']:.1f} min ({num_turns} turns × {turn_time_per_turn:.1f} min)\n\n")
+                    f.write(
+                        f"Total Turn Time: {_fmt_minutes_and_hours(total_survey_time['total_turn_time_min'])} "
+                        f"({num_turns} turns × {turn_time_per_turn:.1f} min)\n\n"
+                    )
                 else:
                     f.write("\n")
                 
@@ -458,22 +472,22 @@ class ExportImportMixin:
                 
                 f.write("TOTAL SURVEY TIME\n")
                 f.write("-" * 20 + "\n")
-                f.write(f"Total Survey Time: {total_survey_time_only:.1f} min ({total_survey_time_only / 60.0:.2f} hr)\n")
-                f.write(f"Total Transit Time: {total_transit_time_only:.1f} min ({total_transit_time_only / 60.0:.2f} hr)\n")
+                f.write(f"Total Survey Time: {_fmt_minutes_and_hours(total_survey_time_only)}\n")
+                f.write(f"Total Transit Time: {_fmt_minutes_and_hours(total_transit_time_only)}\n")
                 if 'total_turn_time_min' in total_survey_time:
-                    f.write(f"Total Turn Time: {total_survey_time['total_turn_time_min']:.1f} min\n")
-                f.write(f"Total Time: {total_survey_time['total_minutes']:.1f} min ({total_survey_time['total_hours']:.2f} hr)\n\n")
+                    f.write(f"Total Turn Time: {_fmt_minutes_and_hours(total_survey_time['total_turn_time_min'])}\n")
+                f.write(f"Total Time: {_fmt_minutes_and_hours(total_survey_time['total_minutes'])}\n\n")
                 
                 f.write("SURVEY LINE DETAILS\n")
                 f.write("-" * 20 + "\n")
                 f.write(f"Number of Main Survey Lines: {len(self.survey_lines_data)}\n")
-                if self.cross_line_data:
+                if include_crossline and self.cross_line_data and len(self.cross_line_data) >= 2:
                     f.write("Crossline: Present\n")
                 else:
                     f.write("Crossline: Not present\n")
                 f.write(f"Survey Speed: {values.get('survey_speed', '8.0')} knots\n")
                 if 'turn_time_per_turn_min' in total_survey_time:
-                    f.write(f"Turn Time (per turn): {total_survey_time['turn_time_per_turn_min']:.1f} min\n")
+                    f.write(f"Turn Time (per turn): {_fmt_minutes_and_hours(total_survey_time['turn_time_per_turn_min'])}\n")
                 f.write(f"Crossline Passes: {total_survey_time['num_crossline_passes']}\n\n")
                 
                 f.write("SURVEY PATTERN\n")
@@ -482,8 +496,10 @@ class ExportImportMixin:
                 f.write("- Even-numbered lines (2, 4, 6...): Survey from start to end\n")
                 f.write("- Odd-numbered lines (1, 3, 5...): Survey from end to start (flipped)\n")
                 f.write("- This minimizes travel distance between lines\n")
-                f.write("- After completing all main lines, travel to crossline start\n")
-                f.write("- Complete crossline survey with specified number of passes\n\n")
+                if include_crossline:
+                    f.write("- After completing all main lines, travel to crossline start\n")
+                    f.write("- Complete crossline survey with specified number of passes\n")
+                f.write("\n")
                 
                 # Accuracy Waypoints (DMM)
                 dmm_heading = "Accuracy Waypoints (DMM)"
@@ -503,7 +519,7 @@ class ExportImportMixin:
                         end_lon_ddm = decimal_degrees_to_ddm(end[1], is_latitude=False)
                         f.write(f"{start_label}: {start_lat_ddm}, {start_lon_ddm}\n")
                         f.write(f"{end_label}: {end_lat_ddm}, {end_lon_ddm}\n")
-                if self.cross_line_data:
+                if include_crossline and self.cross_line_data and len(self.cross_line_data) >= 2:
                     cls_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
                     cls_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
                     cle_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
@@ -525,7 +541,7 @@ class ExportImportMixin:
                         end_label = f'L{i+1}E'
                         f.write(f"{start_label}: {start[0]:.6f}, {start[1]:.6f}\n")
                         f.write(f"{end_label}: {end[0]:.6f}, {end[1]:.6f}\n")
-                if self.cross_line_data:
+                if include_crossline and self.cross_line_data and len(self.cross_line_data) >= 2:
                     f.write(f"CLS: {self.cross_line_data[0][0]:.6f}, {self.cross_line_data[0][1]:.6f}\n")
                     f.write(f"CLE: {self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f}\n")
                 f.write("\n")
@@ -549,7 +565,7 @@ class ExportImportMixin:
                 self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
 
             # --- Export crossline elevation profile as CSV (Distance m, Elevation m, Slope deg) ---
-            if self.cross_line_data and len(self.cross_line_data) == 2:
+            if include_crossline and self.cross_line_data and len(self.cross_line_data) == 2:
                 cl_a, cl_b = self.cross_line_data
                 prof = self._profile_arrays_along_segment_endpoints(cl_a[0], cl_a[1], cl_b[0], cl_b[1])
                 if prof[0] is not None:
@@ -615,6 +631,12 @@ class ExportImportMixin:
                     if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path
                     else None
                 )
+                params['central_point_depth_m'] = (
+                    float(self._depth_at_picked_point)
+                    if hasattr(self, '_depth_at_picked_point') and self._depth_at_picked_point is not None
+                    else None
+                )
+                params['visualization_shapefile_paths'] = list(getattr(self, 'visualization_shapefile_paths', []) or [])
                 
                 try:
                     params['crossline_passes'] = int(self.crossline_passes_entry.text())
@@ -911,6 +933,7 @@ class ExportImportMixin:
                 "export_name": export_name,
                 "plan_type": "performance",
                 "geotiff_path": geotiff_path,
+                "visualization_shapefile_paths": list(getattr(self, 'visualization_shapefile_paths', []) or []),
                 "test_speed_kts": speed_kts,
             }
             for key, attr in (

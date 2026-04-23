@@ -4,7 +4,7 @@ Single source of truth for version, config path, and geospatial availability.
 """
 import os
 
-__version__ = "2026.22"
+__version__ = "2026.23"
 
 CONFIG_FILENAME = os.path.join(os.path.expanduser("~"), ".cal_ref_planner_config.json")
 

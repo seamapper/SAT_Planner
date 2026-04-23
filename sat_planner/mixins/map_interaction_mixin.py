@@ -286,6 +286,11 @@ class MapInteractionMixin:
                     z_value = self.geotiff_dataset_original.read(1)[row, col]
                     z_value = float(z_value)  # Ensure float type for calculations
                     print(f"DEBUG: Raw Z-value from original GeoTIFF at pixel ({row}, {col}): {z_value}")
+                    if is_accuracy_tab and hasattr(self, 'central_pt_depth_value_label'):
+                        if not np.isnan(z_value):
+                            self.central_pt_depth_value_label.setText(f"{abs(z_value):.1f}")
+                        else:
+                            self.central_pt_depth_value_label.setText("-")
                     if is_performance_tab and hasattr(self, '_update_performance_depth_from_pick'):
                         self._update_performance_depth_from_pick(z_value)
 
@@ -344,6 +349,8 @@ class MapInteractionMixin:
                             f"DEBUG: Warning: Z-value is NaN or positive ({z_value}). Conditions for setting parameters not met.")
                 elif is_accuracy_tab:
                     self._depth_at_picked_point = None
+                    if hasattr(self, 'central_pt_depth_value_label'):
+                        self.central_pt_depth_value_label.setText("-")
                     self._show_message("warning","GeoTIFF Warning",
                                            f"Clicked location (row={row}, col={col}) is outside GeoTIFF bounds (height={self.geotiff_dataset_original.height}, width={self.geotiff_dataset_original.width}). Line spacing and length not set.")
                     print(f"DEBUG: Warning: Clicked location ({row}, {col}) is outside GeoTIFF bounds.")
@@ -355,6 +362,8 @@ class MapInteractionMixin:
                 traceback.print_exc()  # Print full traceback for deeper debugging
         elif is_accuracy_tab:
             self._depth_at_picked_point = None
+            if hasattr(self, 'central_pt_depth_value_label'):
+                self.central_pt_depth_value_label.setText("-")
             print("DEBUG: self.geotiff_dataset_original is None. GeoTIFF not loaded.")
 
         # Set export name if calculated

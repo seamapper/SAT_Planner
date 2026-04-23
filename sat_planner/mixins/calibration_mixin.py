@@ -1165,6 +1165,12 @@ class CalibrationMixin:
                     )
                 except Exception:
                     params['turn_time'] = 5.0
+                params['geotiff_path'] = (
+                    self.current_geotiff_path
+                    if hasattr(self, "current_geotiff_path") and self.current_geotiff_path
+                    else None
+                )
+                params['visualization_shapefile_paths'] = list(getattr(self, 'visualization_shapefile_paths', []) or [])
                 json_metadata_path = os.path.join(export_dir, f"{export_name}_params.json")
                 with open(json_metadata_path, 'w', encoding='utf-8') as f:
                     json.dump(params, f, indent=2)

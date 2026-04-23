@@ -630,12 +630,14 @@ class ReferenceMixin:
         metadata_path = os.path.join(dir_name, f"{base_name}_params.json")
         params = None
         imported_params_geotiff_path = None
+        imported_params_shapefile_paths = None
         if os.path.exists(metadata_path):
             try:
                 with open(metadata_path, 'r', encoding='utf-8') as f:
                     params = json.load(f)
                 if isinstance(params, dict):
                     imported_params_geotiff_path = params.get('geotiff_path')
+                    imported_params_shapefile_paths = params.get('visualization_shapefile_paths')
             except Exception as e:
                 print(f"Warning: Could not load metadata file: {e}")
         try:
@@ -671,11 +673,25 @@ class ReferenceMixin:
                         self.offset_direction_combo.setCurrentIndex(idx)
                     self.offset_direction_var = params['offset_direction']
                 if params.get('line_length_multiplier') is not None and hasattr(self, '_update_multiplier_label_len'):
-                    self.line_length_multiplier.set(params['line_length_multiplier'])
-                    self._update_multiplier_label_len(params['line_length_multiplier'])
+                    self.line_length_multiplier = float(params['line_length_multiplier'])
+                    self._update_multiplier_label_len(self.line_length_multiplier)
                 if params.get('dist_between_lines_multiplier') is not None and hasattr(self, '_update_multiplier_label_dist'):
-                    self.dist_between_lines_multiplier.set(params['dist_between_lines_multiplier'])
-                    self._update_multiplier_label_dist(params['dist_between_lines_multiplier'])
+                    self.dist_between_lines_multiplier = float(params['dist_between_lines_multiplier'])
+                    self._update_multiplier_label_dist(self.dist_between_lines_multiplier)
+                try:
+                    depth_val = params.get('central_point_depth_m')
+                    if depth_val is not None:
+                        self._depth_at_picked_point = float(depth_val)
+                        if hasattr(self, 'central_pt_depth_value_label'):
+                            self.central_pt_depth_value_label.setText(f"{self._depth_at_picked_point:.1f}")
+                    else:
+                        self._depth_at_picked_point = None
+                        if hasattr(self, 'central_pt_depth_value_label'):
+                            self.central_pt_depth_value_label.setText("-")
+                except Exception:
+                    self._depth_at_picked_point = None
+                    if hasattr(self, 'central_pt_depth_value_label'):
+                        self.central_pt_depth_value_label.setText("-")
             else:
                 if pyproj is not None:
                     geod = pyproj.Geod(ellps="WGS84")
@@ -734,7 +750,7 @@ class ReferenceMixin:
                             if depth_m > 0:
                                 line_length_m = float(self.line_length_entry.text())
                                 len_mult = line_length_m / depth_m
-                                len_mult = max(1.0, min(10.0, len_mult))
+                                len_mult = max(0.001, len_mult)
                                 self.line_length_multiplier = len_mult
                                 if hasattr(self, "multiplier_slider_len"):
                                     self.multiplier_slider_len.blockSignals(True)
@@ -745,7 +761,7 @@ class ReferenceMixin:
                             if depth_m > 0 and len(self.survey_lines_data) > 1:
                                 dist_between_m = float(self.dist_between_lines_entry.text())
                                 dist_mult = dist_between_m / depth_m
-                                dist_mult = max(0.0, min(2.0, dist_mult))
+                                dist_mult = max(0.001, dist_mult)
                                 self.dist_between_lines_multiplier = dist_mult
                                 if hasattr(self, "multiplier_slider_dist"):
                                     self.multiplier_slider_dist.blockSignals(True)
@@ -765,6 +781,22 @@ class ReferenceMixin:
                 self._load_geotiff_from_path(imported_params_geotiff_path)
             else:
                 self.set_ref_info_text(f"Saved GeoTIFF not found: {imported_params_geotiff_path}. Continuing without GeoTIFF.", append=True)
+        if imported_params_shapefile_paths is not None and hasattr(self, '_load_visualization_shapefile_paths'):
+            shapefile_load_result = self._load_visualization_shapefile_paths(
+                imported_params_shapefile_paths,
+                replace_existing=True,
+                redraw=False,
+            )
+            missing_paths = shapefile_load_result.get('missing_paths', [])
+            failed_paths = shapefile_load_result.get('failed_paths', [])
+            if missing_paths:
+                self.set_ref_info_text(
+                    "Saved shapefile(s) not found:\n" + "\n".join([f"- {p}" for p in missing_paths]),
+                    append=True,
+                )
+            if failed_paths:
+                fail_lines = [f"- {p}: {err}" for p, err in failed_paths]
+                self.set_ref_info_text("Saved shapefile(s) failed to load:\n" + "\n".join(fail_lines), append=True)
         if self.survey_lines_data:
             try:
                 self.accuracy_central_point_coords = (
@@ -1026,6 +1058,7 @@ class ReferenceMixin:
             dir_name = os.path.dirname(file_path)
             metadata_path = os.path.join(dir_name, f"{base_name}_params.json")
             params = None
+            imported_params_shapefile_paths = None
 
             if os.path.exists(metadata_path):
                 try:
@@ -1033,6 +1066,7 @@ class ReferenceMixin:
                         params = json.load(f)
                     if isinstance(params, dict):
                         imported_params_geotiff_path = params.get('geotiff_path')
+                        imported_params_shapefile_paths = params.get('visualization_shapefile_paths')
                 except Exception as e:
                     print(f"Warning: Could not load metadata file: {e}")
 
@@ -1084,12 +1118,26 @@ class ReferenceMixin:
                         self.offset_direction_var = direction
 
                     if params.get('line_length_multiplier') is not None:
-                        self.line_length_multiplier.set(params['line_length_multiplier'])
-                        self._update_multiplier_label_len(params['line_length_multiplier'])
+                        self.line_length_multiplier = float(params['line_length_multiplier'])
+                        self._update_multiplier_label_len(self.line_length_multiplier)
 
                     if params.get('dist_between_lines_multiplier') is not None:
-                        self.dist_between_lines_multiplier.set(params['dist_between_lines_multiplier'])
-                        self._update_multiplier_label_dist(params['dist_between_lines_multiplier'])
+                        self.dist_between_lines_multiplier = float(params['dist_between_lines_multiplier'])
+                        self._update_multiplier_label_dist(self.dist_between_lines_multiplier)
+                    try:
+                        depth_val = params.get('central_point_depth_m')
+                        if depth_val is not None:
+                            self._depth_at_picked_point = float(depth_val)
+                            if hasattr(self, 'central_pt_depth_value_label'):
+                                self.central_pt_depth_value_label.setText(f"{self._depth_at_picked_point:.1f}")
+                        else:
+                            self._depth_at_picked_point = None
+                            if hasattr(self, 'central_pt_depth_value_label'):
+                                self.central_pt_depth_value_label.setText("-")
+                    except Exception:
+                        self._depth_at_picked_point = None
+                        if hasattr(self, 'central_pt_depth_value_label'):
+                            self.central_pt_depth_value_label.setText("-")
                 else:
                     # Calculate parameters from imported lines
                     if pyproj is not None:
@@ -1167,6 +1215,22 @@ class ReferenceMixin:
                     self._load_geotiff_from_path(geotiff_path_to_load)
                 else:
                     self.set_ref_info_text(f"Saved GeoTIFF not found: {geotiff_path_to_load}. Continuing without GeoTIFF.", append=True)
+            if imported_params_shapefile_paths is not None and hasattr(self, '_load_visualization_shapefile_paths'):
+                shapefile_load_result = self._load_visualization_shapefile_paths(
+                    imported_params_shapefile_paths,
+                    replace_existing=True,
+                    redraw=False,
+                )
+                missing_paths = shapefile_load_result.get('missing_paths', [])
+                failed_paths = shapefile_load_result.get('failed_paths', [])
+                if missing_paths:
+                    self.set_ref_info_text(
+                        "Saved shapefile(s) not found:\n" + "\n".join([f"- {p}" for p in missing_paths]),
+                        append=True,
+                    )
+                if failed_paths:
+                    fail_lines = [f"- {p}: {err}" for p, err in failed_paths]
+                    self.set_ref_info_text("Saved shapefile(s) failed to load:\n" + "\n".join(fail_lines), append=True)
 
             if self.survey_lines_data:
                 try:
@@ -1256,6 +1320,8 @@ class ReferenceMixin:
             self.central_lat_entry.clear()
         if hasattr(self, 'central_lon_entry'):
             self.central_lon_entry.clear()
+        if hasattr(self, 'central_pt_depth_value_label'):
+            self.central_pt_depth_value_label.setText("-")
         if hasattr(self, 'line_length_entry'):
             self.line_length_entry.clear()
         if hasattr(self, 'heading_entry'):
@@ -1292,6 +1358,8 @@ class ReferenceMixin:
                 self.multiplier_slider_len.setValue(int(8.0 * 10))
             if hasattr(self, 'multiplier_label_len'):
                 self.multiplier_label_len.setText("8.0")
+            if hasattr(self, 'multiplier_entry_len'):
+                self.multiplier_entry_len.setText("8.0")
         if hasattr(self, 'dist_between_lines_multiplier'):
             if hasattr(self.dist_between_lines_multiplier, 'set'):
                 self.dist_between_lines_multiplier.set(1.0)
@@ -1301,6 +1369,8 @@ class ReferenceMixin:
                 self.multiplier_slider_dist.setValue(int(1.0 * 10))
             if hasattr(self, 'multiplier_label_dist'):
                 self.multiplier_label_dist.setText("1.0")
+            if hasattr(self, 'multiplier_entry_dist'):
+                self.multiplier_entry_dist.setText("1.0")
 
         # Redraw plot (without clearing GeoTIFF)
         self._plot_survey_plan(preserve_view_limits=True)
@@ -1318,6 +1388,12 @@ class ReferenceMixin:
             travel_between_lines_total_distance = 0
             travel_to_crossline_distance = 0
             crossline_single_pass_distance = 0
+            try:
+                requested_crossline_passes = int(self.crossline_passes_entry.text()) if self.crossline_passes_entry.text() else 2
+            except (ValueError, AttributeError):
+                requested_crossline_passes = 2
+            requested_crossline_passes = max(0, requested_crossline_passes)
+            include_crossline = bool(self.cross_line_data) and len(self.cross_line_data) >= 2 and requested_crossline_passes > 0
 
             # Calculate main lines survey time and distance (all main lines)
             main_lines_survey_time_minutes = 0
@@ -1351,7 +1427,7 @@ class ReferenceMixin:
 
             # Calculate travel time and distance from last main line to crossline
             travel_to_crossline_minutes = 0
-            if self.cross_line_data and self.survey_lines_data:
+            if include_crossline and self.survey_lines_data:
                 last_line_index = len(self.survey_lines_data) - 1
                 if last_line_index % 2 == 0:
                     last_end_lat, last_end_lon = self.survey_lines_data[last_line_index][1]
@@ -1376,8 +1452,8 @@ class ReferenceMixin:
 
             # Calculate crossline survey time and distance
             crossline_survey_minutes = 0
-            num_passes = 1
-            if self.cross_line_data:
+            num_passes = requested_crossline_passes if include_crossline else 0
+            if include_crossline:
                 lat1, lon1 = self.cross_line_data[0]
                 lat2, lon2 = self.cross_line_data[1]
                 _, _, crossline_length = geod.inv(lon1, lat1, lon2, lat2)
@@ -1385,22 +1461,15 @@ class ReferenceMixin:
                 crossline_time_hours = crossline_length / speed_m_per_h if speed_m_per_h > 0 else 0
                 crossline_survey_minutes = crossline_time_hours * 60
 
-                try:
-                    num_passes = int(self.crossline_passes_entry.text()) if self.crossline_passes_entry.text() else 2
-                    crossline_survey_minutes *= num_passes
-                    # Add turn times between crossline passes (num_passes - 1 turns)
-                    if num_passes > 1:
-                        crossline_survey_minutes += turn_time_min * (num_passes - 1)
-                except (ValueError, AttributeError):
-                    num_passes = 2
-                    crossline_survey_minutes *= num_passes
-                    if num_passes > 1:
-                        crossline_survey_minutes += turn_time_min * (num_passes - 1)
+                crossline_survey_minutes *= num_passes
+                # Add turn times between crossline passes (num_passes - 1 turns)
+                if num_passes > 1:
+                    crossline_survey_minutes += turn_time_min * (num_passes - 1)
 
             # Calculate turn times
             num_turns_between_main_lines = len(self.survey_lines_data) - 1 if len(self.survey_lines_data) > 1 else 0
-            num_turns_to_crossline = 1 if (self.cross_line_data and self.survey_lines_data) else 0
-            num_turns_between_crossline_passes = (num_passes - 1) if (self.cross_line_data and num_passes > 1) else 0
+            num_turns_to_crossline = 1 if (include_crossline and self.survey_lines_data) else 0
+            num_turns_between_crossline_passes = (num_passes - 1) if (include_crossline and num_passes > 1) else 0
             total_turn_time_min = turn_time_min * (num_turns_between_main_lines + num_turns_to_crossline + num_turns_between_crossline_passes)
 
             # Calculate total time and distance
@@ -1504,7 +1573,11 @@ class ReferenceMixin:
             self._show_message("warning","Statistics Error", "Unable to calculate reference planning statistics. Please ensure survey lines are generated.")
             return
 
+        def _fmt_minutes_and_hours(minutes_val):
+            return f"{minutes_val:.1f} min ({minutes_val / 60.0:.2f} hr)"
+
         # Format the statistics for display
+        include_crossline = stats.get('num_crossline_passes', 0) > 0 and stats.get('crossline_single_pass_distance_m', 0) > 0
         stats_text = "ACCURACY SURVEY INFORMATION\n"
         stats_text += "=" * 50 + "\n\n"
         export_name = self.export_name_entry.text().strip() if hasattr(self, 'export_name_entry') else ""
@@ -1521,10 +1594,10 @@ class ReferenceMixin:
             stats_text += "Survey Speed: 8.0 knots (default)\n"
         try:
             turn_time_min = float(self.ref_turn_time_entry.text()) if hasattr(self, 'ref_turn_time_entry') and self.ref_turn_time_entry.text() else 5.0
-            stats_text += f"Turn Time (per turn): {turn_time_min} min\n\n"
+            stats_text += f"Turn Time (per turn): {_fmt_minutes_and_hours(turn_time_min)}\n\n"
         except Exception:
             turn_time_min = 5.0
-            stats_text += f"Turn Time (per turn): {turn_time_min} min (default)\n\n"
+            stats_text += f"Turn Time (per turn): {_fmt_minutes_and_hours(turn_time_min)} (default)\n\n"
 
         # Main survey lines
         stats_text += "MAIN SURVEY LINES\n"
@@ -1557,17 +1630,17 @@ class ReferenceMixin:
             single_line_length_nm = single_line_length_m / 1852
             stats_text += f"Length of Main Line: {single_line_length_m:.1f} m ({single_line_length_km:.3f} km, {single_line_length_nm:.3f} nm)\n"
         stats_text += f"Total Distance: {stats['main_lines_distance_m']:.1f} m ({stats['main_lines_distance_km']:.3f} km, {stats['main_lines_distance_nm']:.3f} nm)\n"
-        stats_text += f"Survey Time: {stats['main_lines_minutes']:.1f} min\n\n"
+        stats_text += f"Survey Time: {_fmt_minutes_and_hours(stats['main_lines_minutes'])}\n\n"
 
         # Travel between lines
         if stats['travel_between_lines_distance_m'] > 0:
             stats_text += "TRAVEL BETWEEN LINES\n"
             stats_text += "-" * 25 + "\n"
             stats_text += f"Total Travel Distance: {stats['travel_between_lines_distance_m']:.1f} m ({stats['travel_between_lines_distance_km']:.3f} km, {stats['travel_between_lines_distance_nm']:.3f} nm)\n"
-            stats_text += f"Travel Time: {stats['travel_minutes']:.1f} min\n\n"
+            stats_text += f"Travel Time: {_fmt_minutes_and_hours(stats['travel_minutes'])}\n\n"
 
         # Crossline information
-        if stats['crossline_single_pass_distance_m'] > 0:
+        if include_crossline:
             stats_text += "CROSSLINE\n"
             stats_text += "-" * 10 + "\n"
             stats_text += f"Crossline Passes: {stats['num_crossline_passes']}\n"
@@ -1638,21 +1711,24 @@ class ReferenceMixin:
 
             stats_text += f"Crossline (per pass): {stats['crossline_single_pass_distance_m']:.1f} m ({stats['crossline_single_pass_distance_km']:.3f} km, {stats['crossline_single_pass_distance_nm']:.3f} nm)\n"
             stats_text += f"Crossline Total Distance: {stats['crossline_total_distance_m']:.1f} m ({stats['crossline_total_distance_km']:.3f} km, {stats['crossline_total_distance_nm']:.3f} nm)\n"
-            stats_text += f"Crossline Time: {stats['crossline_minutes']:.1f} min\n"
+            stats_text += f"Crossline Time: {_fmt_minutes_and_hours(stats['crossline_minutes'])}\n"
             if stats['travel_to_crossline_distance_m'] > 0:
                 stats_text += f"Travel to Crossline: {stats['travel_to_crossline_distance_m']:.1f} m ({stats['travel_to_crossline_distance_km']:.3f} km, {stats['travel_to_crossline_distance_nm']:.3f} nm)\n"
-            stats_text += f"Travel to Crossline Time: {stats['travel_to_crossline_minutes']:.1f} min\n"
+            stats_text += f"Travel to Crossline Time: {_fmt_minutes_and_hours(stats['travel_to_crossline_minutes'])}\n"
             stats_text += "\n"
 
         # Survey Time Breakdown
         stats_text += "SURVEY TIME BREAKDOWN\n"
         stats_text += "-" * 25 + "\n"
-        stats_text += f"Main Lines Survey: {stats['main_lines_minutes']:.1f} min\n"
-        stats_text += f"Crossline Survey: {stats['crossline_minutes']:.1f} min\n"
-        stats_text += f"Travel Between Lines: {stats['travel_minutes']:.1f} min\n"
+        stats_text += f"Main Lines Survey: {_fmt_minutes_and_hours(stats['main_lines_minutes'])}\n"
+        stats_text += f"Crossline Survey: {_fmt_minutes_and_hours(stats['crossline_minutes'])}\n"
+        stats_text += f"Travel Between Lines: {_fmt_minutes_and_hours(stats['travel_minutes'])}\n"
         if stats['travel_to_crossline_minutes'] > 0:
-            stats_text += f"Travel to Crossline: {stats['travel_to_crossline_minutes']:.1f} min\n"
-        stats_text += f"Total Turn Time: {stats['total_turn_time_min']:.1f} min ({stats['num_turns_between_main_lines'] + stats['num_turns_to_crossline'] + stats['num_turns_between_crossline_passes']} turns × {stats['turn_time_per_turn_min']:.1f} min)\n\n"
+            stats_text += f"Travel to Crossline: {_fmt_minutes_and_hours(stats['travel_to_crossline_minutes'])}\n"
+        stats_text += (
+            f"Total Turn Time: {_fmt_minutes_and_hours(stats['total_turn_time_min'])} "
+            f"({stats['num_turns_between_main_lines'] + stats['num_turns_to_crossline'] + stats['num_turns_between_crossline_passes']} turns × {stats['turn_time_per_turn_min']:.1f} min)\n\n"
+        )
         
         # Calculate total survey time (main lines + crossline, without turn times)
         # Crossline minutes includes turn times between passes, so subtract them
@@ -1686,7 +1762,7 @@ class ReferenceMixin:
         stats_text += "SURVEY PATTERN\n"
         stats_text += "-" * 15 + "\n"
         stats_text += "1. Run main survey lines (zigzag pattern)\n"
-        if stats['crossline_single_pass_distance_m'] > 0:
+        if include_crossline:
             stats_text += "2. Travel from last main line to crossline start\n"
             stats_text += f"3. Run crossline ({stats['num_crossline_passes']} passes)\n"
         stats_text += "\n"
@@ -1709,7 +1785,7 @@ class ReferenceMixin:
                 end_lon_ddm = decimal_degrees_to_ddm(end[1], is_latitude=False)
                 stats_text += f"{start_label}: {start_lat_ddm}, {start_lon_ddm}\n"
                 stats_text += f"{end_label}: {end_lat_ddm}, {end_lon_ddm}\n"
-        if self.cross_line_data:
+        if include_crossline and self.cross_line_data and len(self.cross_line_data) >= 2:
             cls_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
             cls_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
             cle_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
@@ -1731,7 +1807,7 @@ class ReferenceMixin:
                 end_label = f'L{i+1}E'
                 stats_text += f"{start_label}: {start[0]:.6f}, {start[1]:.6f}\n"
                 stats_text += f"{end_label}: {end[0]:.6f}, {end[1]:.6f}\n"
-        if self.cross_line_data:
+        if include_crossline and self.cross_line_data and len(self.cross_line_data) >= 2:
             stats_text += f"CLS: {self.cross_line_data[0][0]:.6f}, {self.cross_line_data[0][1]:.6f}\n"
             stats_text += f"CLE: {self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f}\n"
 
@@ -1739,12 +1815,34 @@ class ReferenceMixin:
         show_statistics_dialog(self, "Accuracy Survey Info", stats_text)
 
     def _update_multiplier_label_len(self, val):
-        """Updates the label next to the line length multiplier slider."""
-        self.multiplier_label_len.setText(f"{float(val):.1f}")
+        """Updates the line length multiplier display/control."""
+        if hasattr(self, 'multiplier_label_len'):
+            self.multiplier_label_len.setText(f"{float(val):.1f}")
+        if hasattr(self, 'multiplier_entry_len'):
+            self.multiplier_entry_len.setText(f"{float(val):.3f}".rstrip('0').rstrip('.'))
 
-    def _on_line_length_multiplier_changed(self, val):
+    def _on_line_length_multiplier_changed(self, val=None):
         """Update line length multiplier; if depth-at-picked-point is set, recompute line length and trigger plan regenerate."""
-        mult = val / 10.0
+        previous_mult = float(getattr(self, 'line_length_multiplier', 8.0))
+        if val is None:
+            if hasattr(self, 'multiplier_entry_len'):
+                raw_val = self.multiplier_entry_len.text().strip()
+            else:
+                raw_val = ""
+            try:
+                mult = float(raw_val)
+            except (ValueError, TypeError):
+                self._show_message("warning", "Input Error", "Line Length Multiplier must be a number greater than 0.")
+                if hasattr(self, 'multiplier_entry_len'):
+                    self.multiplier_entry_len.setText(f"{previous_mult:.3f}".rstrip('0').rstrip('.'))
+                return
+        else:
+            mult = val / 10.0 if isinstance(val, int) else float(val)
+        if mult <= 0:
+            self._show_message("warning", "Input Error", "Line Length Multiplier must be greater than 0.")
+            if hasattr(self, 'multiplier_entry_len'):
+                self.multiplier_entry_len.setText(f"{previous_mult:.3f}".rstrip('0').rstrip('.'))
+            return
         self.line_length_multiplier = mult
         self._update_multiplier_label_len(mult)
         depth = getattr(self, "_depth_at_picked_point", None)
@@ -1757,12 +1855,34 @@ class ReferenceMixin:
         self._on_parameter_changed()
 
     def _update_multiplier_label_dist(self, val):
-        """Updates the label next to the distance between lines multiplier slider."""
-        self.multiplier_label_dist.setText(f"{float(val):.1f}")
+        """Updates the separation multiplier display/control."""
+        if hasattr(self, 'multiplier_label_dist'):
+            self.multiplier_label_dist.setText(f"{float(val):.1f}")
+        if hasattr(self, 'multiplier_entry_dist'):
+            self.multiplier_entry_dist.setText(f"{float(val):.3f}".rstrip('0').rstrip('.'))
 
-    def _on_separation_multiplier_changed(self, val):
+    def _on_separation_multiplier_changed(self, val=None):
         """Update separation multiplier; if depth-at-picked-point is set, recompute distance between lines and bisect lead, then trigger plan regenerate."""
-        mult = val / 10.0
+        previous_mult = float(getattr(self, 'dist_between_lines_multiplier', 1.0))
+        if val is None:
+            if hasattr(self, 'multiplier_entry_dist'):
+                raw_val = self.multiplier_entry_dist.text().strip()
+            else:
+                raw_val = ""
+            try:
+                mult = float(raw_val)
+            except (ValueError, TypeError):
+                self._show_message("warning", "Input Error", "Separation Multiplier must be a number greater than 0.")
+                if hasattr(self, 'multiplier_entry_dist'):
+                    self.multiplier_entry_dist.setText(f"{previous_mult:.3f}".rstrip('0').rstrip('.'))
+                return
+        else:
+            mult = val / 10.0 if isinstance(val, int) else float(val)
+        if mult <= 0:
+            self._show_message("warning", "Input Error", "Separation Multiplier must be greater than 0.")
+            if hasattr(self, 'multiplier_entry_dist'):
+                self.multiplier_entry_dist.setText(f"{previous_mult:.3f}".rstrip('0').rstrip('.'))
+            return
         self.dist_between_lines_multiplier = mult
         self._update_multiplier_label_dist(mult)
         depth = getattr(self, "_depth_at_picked_point", None)
@@ -1777,6 +1897,46 @@ class ReferenceMixin:
                 self.bisect_lead_entry.setText(f"{bisect_lead:.2f}")
                 self.bisect_lead_entry.blockSignals(False)
         self._on_parameter_changed()
+
+    def _on_dist_between_lines_manual_changed(self):
+        """When user edits distance between lines, recalculate separation multiplier from picked depth."""
+        depth = getattr(self, "_depth_at_picked_point", None)
+        if depth is None or depth <= 0:
+            return
+        raw_val = self.dist_between_lines_entry.text().strip() if hasattr(self, 'dist_between_lines_entry') else ""
+        if not raw_val:
+            return
+        try:
+            dist_between_lines = float(raw_val)
+        except (ValueError, TypeError):
+            return
+        if dist_between_lines <= 0:
+            return
+        new_multiplier = dist_between_lines / depth
+        if new_multiplier <= 0:
+            return
+        self.dist_between_lines_multiplier = new_multiplier
+        self._update_multiplier_label_dist(new_multiplier)
+
+    def _on_line_length_manual_changed(self):
+        """When user edits line length, recalculate line length multiplier from picked depth."""
+        depth = getattr(self, "_depth_at_picked_point", None)
+        if depth is None or depth <= 0:
+            return
+        raw_val = self.line_length_entry.text().strip() if hasattr(self, 'line_length_entry') else ""
+        if not raw_val:
+            return
+        try:
+            line_length = float(raw_val)
+        except (ValueError, TypeError):
+            return
+        if line_length <= 0:
+            return
+        new_multiplier = line_length / depth
+        if new_multiplier <= 0:
+            return
+        self.line_length_multiplier = new_multiplier
+        self._update_multiplier_label_len(new_multiplier)
 
     def _on_parameter_changed(self):
         """Handle parameter changes by restarting the auto-regenerate timer."""

@@ -330,6 +330,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self.eez_opacity_slider.valueChanged.connect(self._update_eez_opacity)
             if not hasattr(self, 'eez_image_plot'):
                 self.eez_image_plot = None
+            self.visualization_shapefile_geometries = []
+            self.visualization_shapefile_paths = []
+            self.add_shapefile_btn = QPushButton("Add Shapefile")
+            self.add_shapefile_btn.clicked.connect(self._add_visualization_shapefile)
+            self.add_shapefile_btn.setToolTip("Load a polygon/line shapefile for map visualization only.")
 
         # About button (only create once)
         if not hasattr(self, 'about_btn'):
@@ -372,6 +377,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.remove_geotiff_btn.setEnabled(False)  # Disable Remove GeoTIFF button
             if hasattr(self, 'zoom_to_geotiff_btn'):
                 self.zoom_to_geotiff_btn.setEnabled(False)
+            if hasattr(self, 'add_shapefile_btn'):
+                self.add_shapefile_btn.setEnabled(False)
 
         # Bind parameter changes to update the plot
         self._updating_from_code = False  # Flag to prevent recursion
@@ -397,6 +404,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.last_ref_import_dir = os.path.expanduser("~")
         self.last_line_import_dir = os.path.expanduser("~")
         self.last_perf_import_dir = os.path.expanduser("~")
+        self.last_shapefile_dir = os.path.expanduser("~")
         self._load_last_used_dir()
         self._load_last_geotiff_dir()
         self._load_last_survey_params_dir()
@@ -405,6 +413,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_last_ref_import_dir()
         self._load_last_line_import_dir()
         self._load_last_perf_import_dir()
+        self._load_last_shapefile_dir()
 
         # After self._setup_layout(), connect the motion event for line planning, pitch line, pick center, and geotiff hover
         # Note: These are now handled by the main _on_mouse_motion method
@@ -590,6 +599,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                     if hasattr(self, 'eez_opacity_slider'):
                         self.eez_opacity_slider.setMaximumWidth(100)
                         checkbox_button_layout.addWidget(self.eez_opacity_slider)
+                    if hasattr(self, 'add_shapefile_btn'):
+                        checkbox_button_layout.addWidget(self.add_shapefile_btn)
                 checkbox_button_layout.addStretch()
                 if hasattr(self, 'about_btn'):
                     checkbox_button_layout.addWidget(self.about_btn)
@@ -919,6 +930,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_line_params_layout.addWidget(self.central_lon_entry, ref_line_row, 1)
         ref_line_row += 1
 
+        ref_line_params_layout.addWidget(QLabel("Central Pt Depth (m):"), ref_line_row, 0)
+        self.central_pt_depth_value_label = QLabel("-")
+        ref_line_params_layout.addWidget(self.central_pt_depth_value_label, ref_line_row, 1)
+        ref_line_row += 1
+
         ref_line_params_layout.addWidget(QLabel("Number of Lines:"), ref_line_row, 0)
         self.num_lines_entry = QLineEdit("5")
         ref_line_params_layout.addWidget(self.num_lines_entry, ref_line_row, 1)
@@ -936,6 +952,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_line_params_layout.addWidget(QLabel("Line Length (m):"), ref_line_row, 0)
         self.line_length_entry = QLineEdit()
         ref_line_params_layout.addWidget(self.line_length_entry, ref_line_row, 1)
+        self.line_length_entry.editingFinished.connect(self._on_line_length_manual_changed)
         ref_line_row += 1
 
         ref_line_params_layout.addWidget(QLabel("Heading (deg, 0-360):"), ref_line_row, 0)
@@ -946,6 +963,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_line_params_layout.addWidget(QLabel("Distance Between Lines (m):"), ref_line_row, 0)
         self.dist_between_lines_entry = QLineEdit()
         ref_line_params_layout.addWidget(self.dist_between_lines_entry, ref_line_row, 1)
+        self.dist_between_lines_entry.editingFinished.connect(self._on_dist_between_lines_manual_changed)
         ref_line_row += 1
 
         ref_line_params_layout.addWidget(QLabel("Crossline Lead-in/out (m):"), ref_line_row, 0)
@@ -957,14 +975,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         slider_frame_len = QWidget()
         slider_layout_len = QHBoxLayout(slider_frame_len)
         slider_layout_len.setContentsMargins(0, 0, 0, 0)
-        self.multiplier_slider_len = QSlider(Qt.Orientation.Horizontal)
-        self.multiplier_slider_len.setMinimum(10)  # 1.0 * 10
-        self.multiplier_slider_len.setMaximum(100)  # 10.0 * 10
-        self.multiplier_slider_len.setValue(int(self.line_length_multiplier * 10))
-        self.multiplier_slider_len.valueChanged.connect(self._on_line_length_multiplier_changed)
-        slider_layout_len.addWidget(self.multiplier_slider_len)
-        self.multiplier_label_len = QLabel(f"{self.line_length_multiplier:.1f}")
-        slider_layout_len.addWidget(self.multiplier_label_len)
+        self.multiplier_entry_len = QLineEdit(f"{self.line_length_multiplier:.1f}")
+        self.multiplier_entry_len.setMaximumWidth(80)
+        self.multiplier_entry_len.editingFinished.connect(self._on_line_length_multiplier_changed)
+        slider_layout_len.addWidget(self.multiplier_entry_len)
+        slider_layout_len.addStretch()
         ref_line_params_layout.addWidget(slider_frame_len, ref_line_row, 1)
         ref_line_row += 1
 
@@ -972,14 +987,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         slider_frame_dist = QWidget()
         slider_layout_dist = QHBoxLayout(slider_frame_dist)
         slider_layout_dist.setContentsMargins(0, 0, 0, 0)
-        self.multiplier_slider_dist = QSlider(Qt.Orientation.Horizontal)
-        self.multiplier_slider_dist.setMinimum(0)  # 0.0 * 10
-        self.multiplier_slider_dist.setMaximum(20)  # 2.0 * 10
-        self.multiplier_slider_dist.setValue(int(self.dist_between_lines_multiplier * 10))
-        self.multiplier_slider_dist.valueChanged.connect(self._on_separation_multiplier_changed)
-        slider_layout_dist.addWidget(self.multiplier_slider_dist)
-        self.multiplier_label_dist = QLabel(f"{self.dist_between_lines_multiplier:.1f}")
-        slider_layout_dist.addWidget(self.multiplier_label_dist)
+        self.multiplier_entry_dist = QLineEdit(f"{self.dist_between_lines_multiplier:.1f}")
+        self.multiplier_entry_dist.setMaximumWidth(80)
+        self.multiplier_entry_dist.editingFinished.connect(self._on_separation_multiplier_changed)
+        slider_layout_dist.addWidget(self.multiplier_entry_dist)
+        slider_layout_dist.addStretch()
         ref_line_params_layout.addWidget(slider_frame_dist, ref_line_row, 1)
         ref_line_row += 1
 
@@ -1044,6 +1056,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_test_plan_info_layout.addWidget(QLabel("Number of Crossline Passes:"), ref_test_plan_row, 0)
         self.crossline_passes_entry = QLineEdit("2")
         ref_test_plan_info_layout.addWidget(self.crossline_passes_entry, ref_test_plan_row, 1)
+        self.crossline_passes_entry.textChanged.connect(self._on_parameter_changed)
         ref_test_plan_row += 1
 
         self.ref_show_info_btn = QPushButton("Show Accuracy Test Info")
@@ -1269,16 +1282,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_plot_control_layout.setSpacing(0)
         cal_plot_control_layout.setContentsMargins(9, 9, 9, 9)
 
-        cal_profile_select_row = QHBoxLayout()
-        cal_profile_select_row.addWidget(QLabel("Select Profile:"))
-        self.cal_profile_select_combo = QComboBox()
-        self.cal_profile_select_combo.addItems(["Pitch", "Roll"])
-        self.cal_profile_select_combo.setCurrentIndex(0)
-        self.cal_profile_select_combo.currentIndexChanged.connect(self._on_calibration_profile_select_changed)
-        cal_profile_select_row.addWidget(self.cal_profile_select_combo, 1)
-        cal_plot_control_layout.addLayout(cal_profile_select_row)
-        cal_plot_control_layout.addSpacing(3)
-
         self.zoom_to_all_lines_btn = QPushButton("Zoom to Calibration Plan")
         self.zoom_to_all_lines_btn.clicked.connect(self._zoom_to_any_lines)
         cal_plot_control_layout.addWidget(self.zoom_to_all_lines_btn)
@@ -1316,6 +1319,14 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.cal_show_stats_btn = QPushButton("Show Calibration Test Info")
         self.cal_show_stats_btn.clicked.connect(self._show_calibration_statistics)
         cal_test_plan_info_layout.addWidget(self.cal_show_stats_btn, cal_test_plan_row, 0, 1, 4)
+        cal_test_plan_row += 1
+
+        cal_test_plan_info_layout.addWidget(QLabel("Select Profile:"), cal_test_plan_row, 0, 1, 1)
+        self.cal_profile_select_combo = QComboBox()
+        self.cal_profile_select_combo.addItems(["Pitch", "Roll"])
+        self.cal_profile_select_combo.setCurrentIndex(0)
+        self.cal_profile_select_combo.currentIndexChanged.connect(self._on_calibration_profile_select_changed)
+        cal_test_plan_info_layout.addWidget(self.cal_profile_select_combo, cal_test_plan_row, 1, 1, 3)
 
         cal_layout.addWidget(cal_test_plan_info_groupbox, cal_row, 0, 1, 2)
         cal_layout.setRowStretch(cal_row, 0)

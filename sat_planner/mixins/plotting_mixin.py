@@ -93,42 +93,49 @@ class PlottingMixin:
                 except Exception as e:
                     print(f"DEBUG: Could not calculate azimuth for line {i+1}: {e}")
 
-            # Calculate crossline (perpendicular to main lines, geodetic)
-            # Connect midpoints of first and last main survey lines, then extend by lead-in/out
-            if len(self.survey_lines_data) >= 2:
-                # Get first and last survey lines
-                first_line = self.survey_lines_data[0]
-                last_line = self.survey_lines_data[-1]
+            # Calculate crossline only when requested by the number of passes.
+            try:
+                requested_crossline_passes = int(self.crossline_passes_entry.text()) if self.crossline_passes_entry.text() else 2
+            except (ValueError, AttributeError):
+                requested_crossline_passes = 2
+            if requested_crossline_passes > 0:
+                # Calculate crossline (perpendicular to main lines, geodetic)
+                # Connect midpoints of first and last main survey lines, then extend by lead-in/out
+                if len(self.survey_lines_data) >= 2:
+                    # Get first and last survey lines
+                    first_line = self.survey_lines_data[0]
+                    last_line = self.survey_lines_data[-1]
 
-                # Calculate midpoints of first and last lines
-                first_mid_lat = (first_line[0][0] + first_line[1][0]) / 2
-                first_mid_lon = (first_line[0][1] + first_line[1][1]) / 2
-                last_mid_lat = (last_line[0][0] + last_line[1][0]) / 2
-                last_mid_lon = (last_line[0][1] + last_line[1][1]) / 2
+                    # Calculate midpoints of first and last lines
+                    first_mid_lat = (first_line[0][0] + first_line[1][0]) / 2
+                    first_mid_lon = (first_line[0][1] + first_line[1][1]) / 2
+                    last_mid_lat = (last_line[0][0] + last_line[1][0]) / 2
+                    last_mid_lon = (last_line[0][1] + last_line[1][1]) / 2
 
-                # Calculate the azimuth from first midpoint to last midpoint
-                _, _, crossline_distance = geod.inv(first_mid_lon, first_mid_lat, last_mid_lon, last_mid_lat)
-                crossline_azimuth, _, _ = geod.inv(first_mid_lon, first_mid_lat, last_mid_lon, last_mid_lat)
+                    # Calculate the azimuth from first midpoint to last midpoint
+                    crossline_azimuth, _, _ = geod.inv(first_mid_lon, first_mid_lat, last_mid_lon, last_mid_lat)
 
-                # Extend the crossline by lead-in/out distance on each end
-                # Start point: extend from last midpoint in forward direction (closer to main survey area)
-                lon1, lat1, _ = geod.fwd(last_mid_lon, last_mid_lat, crossline_azimuth, bisect_lead)
-                # End point: extend from first midpoint in opposite direction (farther from main survey area)
-                lon2, lat2, _ = geod.fwd(first_mid_lon, first_mid_lat, crossline_azimuth + 180, bisect_lead)
+                    # Extend the crossline by lead-in/out distance on each end
+                    # Start point: extend from last midpoint in forward direction (closer to main survey area)
+                    lon1, lat1, _ = geod.fwd(last_mid_lon, last_mid_lat, crossline_azimuth, bisect_lead)
+                    # End point: extend from first midpoint in opposite direction (farther from main survey area)
+                    lon2, lat2, _ = geod.fwd(first_mid_lon, first_mid_lat, crossline_azimuth + 180, bisect_lead)
 
-                self.cross_line_data = [(lat1, lon1), (lat2, lon2)]
+                    self.cross_line_data = [(lat1, lon1), (lat2, lon2)]
+                else:
+                    # Fallback to original method if only one line
+                    crossline_azimuth1 = (heading + 90) % 360
+                    crossline_azimuth2 = (heading + 270) % 360  # Equivalent to heading - 90
+                    cross_line_length_total = line_length + (2 * bisect_lead)
+
+                    # Endpoint 1
+                    lon1, lat1, _ = geod.fwd(central_lon, central_lat, crossline_azimuth1, cross_line_length_total / 2)
+                    # Endpoint 2
+                    lon2, lat2, _ = geod.fwd(central_lon, central_lat, crossline_azimuth2, cross_line_length_total / 2)
+
+                    self.cross_line_data = [(lat1, lon1), (lat2, lon2)]
             else:
-                # Fallback to original method if only one line
-                crossline_azimuth1 = (heading + 90) % 360
-                crossline_azimuth2 = (heading + 270) % 360  # Equivalent to heading - 90
-                cross_line_length_total = line_length + (2 * bisect_lead)
-
-                # Endpoint 1
-                lon1, lat1, _ = geod.fwd(central_lon, central_lat, crossline_azimuth1, cross_line_length_total / 2)
-                # Endpoint 2
-                lon2, lat2, _ = geod.fwd(central_lon, central_lat, crossline_azimuth2, cross_line_length_total / 2)
-
-                self.cross_line_data = [(lat1, lon1), (lat2, lon2)]
+                self.cross_line_data = []
 
             self._plot_survey_plan()
             if auto_zoom:
@@ -148,22 +155,9 @@ class PlottingMixin:
                 speed_m_per_h = speed_knots * 1852
                 main_time_h = main_length_m / speed_m_per_h if speed_m_per_h > 0 else 0
                 main_time_min = main_time_h * 60
-                # Crossline
-                (clat1, clon1), (clat2, clon2) = self.cross_line_data
-                _, _, cross_length_m = geod.inv(clon1, clat1, clon2, clat2)
-                cross_length_km = cross_length_m / 1000.0
-                cross_length_nm = cross_length_m / 1852.0
-                cross_time_h = cross_length_m / speed_m_per_h if speed_m_per_h > 0 else 0
-                cross_time_min = cross_time_h * 60
-
-                # Get number of crossline passes
-                try:
-                    num_passes = int(self.crossline_passes_entry.text()) if self.crossline_passes_entry.text() else 1
-                except (ValueError, AttributeError):
-                    num_passes = 1
-
                 # Calculate total survey time including travel between lines
                 total_survey_time = self._calculate_total_survey_time()
+                include_crossline = total_survey_time.get('num_crossline_passes', 0) > 0 and total_survey_time.get('crossline_total_distance_m', 0) > 0
 
                 # Calculate single line length and heading
                 num_main_lines = len(self.survey_lines_data) if self.survey_lines_data else 0
@@ -194,6 +188,25 @@ class PlottingMixin:
                     except Exception:
                         heading_lines = "Heading: Unable to calculate\n"
 
+                crossline_distance_block = ""
+                crossline_time_block = ""
+                if include_crossline:
+                    crossline_distance_block = (
+                        f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_m']:.1f} m\n"
+                        f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_km']:.3f} km\n"
+                        f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_nm']:.3f} nm\n"
+                        f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_m']:.1f} m\n"
+                        f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_km']:.3f} km\n"
+                        f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_nm']:.3f} nm\n"
+                        f"Crossline Passes: {total_survey_time['num_crossline_passes']}\n"
+                        f"Crossline Total Distance: {total_survey_time['crossline_total_distance_m']:.1f} m\n"
+                        f"Crossline Total Distance: {total_survey_time['crossline_total_distance_km']:.3f} km\n"
+                        f"Crossline Total Distance: {total_survey_time['crossline_total_distance_nm']:.3f} nm\n"
+                    )
+                    crossline_time_block = (
+                        f"Crossline Survey: {total_survey_time['crossline_minutes']:.1f} min\n"
+                        f"Travel to Crossline: {total_survey_time['travel_to_crossline_minutes']:.1f} min\n"
+                    )
                 summary = (
                     f"=== SURVEY DISTANCE BREAKDOWN ===\n"
                     f"{heading_lines}"
@@ -204,25 +217,15 @@ class PlottingMixin:
                     f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_m']:.1f} m\n"
                     f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_km']:.3f} km\n"
                     f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_nm']:.3f} nm\n"
-                    f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_m']:.1f} m\n"
-                    f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_km']:.3f} km\n"
-                    f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_nm']:.3f} nm\n"
-                    f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_m']:.1f} m\n"
-                    f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_km']:.3f} km\n"
-                    f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_nm']:.3f} nm\n"
-                    f"Crossline Passes: {total_survey_time['num_crossline_passes']}\n"
-                    f"Crossline Total Distance: {total_survey_time['crossline_total_distance_m']:.1f} m\n"
-                    f"Crossline Total Distance: {total_survey_time['crossline_total_distance_km']:.3f} km\n"
-                    f"Crossline Total Distance: {total_survey_time['crossline_total_distance_nm']:.3f} nm\n"
+                    f"{crossline_distance_block}"
                     f"\n=== TOTAL SURVEY DISTANCE ===\n"
                     f"Total Survey Distance: {total_survey_time['total_distance_m']:.1f} m\n"
                     f"Total Survey Distance: {total_survey_time['total_distance_km']:.3f} km\n"
                     f"Total Survey Distance: {total_survey_time['total_distance_nm']:.3f} nm\n"
                     f"\n=== SURVEY TIME BREAKDOWN ===\n"
                     f"Main Lines Survey: {total_survey_time['main_lines_minutes']:.1f} min\n"
-                    f"Crossline Survey: {total_survey_time['crossline_minutes']:.1f} min\n"
+                    f"{crossline_time_block}"
                     f"Travel Between Lines: {total_survey_time['travel_minutes']:.1f} min\n"
-                    f"Travel to Crossline: {total_survey_time['travel_to_crossline_minutes']:.1f} min\n"
                     f"\n=== TOTAL SURVEY TIME ===\n"
                     f"Total Survey Time: {total_survey_time['total_minutes']:.1f} min\n"
                     f"Total Survey Time: {total_survey_time['total_hours']:.2f} hr"
@@ -1077,6 +1080,38 @@ class PlottingMixin:
             # Plot NOAA ENC Charts overlay if enabled (plot last so it overlays everything)
             if hasattr(self, 'show_noaa_charts_var') and self.show_noaa_charts_var:
                 self._load_and_plot_noaa_charts(force_reload=True)
+
+            # Plot user-loaded shapefile visualization overlay.
+            shapefile_overlays = getattr(self, 'visualization_shapefile_geometries', [])
+            for overlay_geom in shapefile_overlays:
+                geom_type = overlay_geom.get("type")
+                coords = overlay_geom.get("coords", [])
+                if geom_type == "point":
+                    if len(coords) < 1:
+                        continue
+                    point_lon, point_lat = coords[0][0], coords[0][1]
+                    self.ax.plot(
+                        point_lon,
+                        point_lat,
+                        marker='o',
+                        color='black',
+                        markersize=7,
+                        linestyle='None',
+                        zorder=30,
+                    )
+                    continue
+                if len(coords) < 2:
+                    continue
+                lons = [pt[0] for pt in coords]
+                lats = [pt[1] for pt in coords]
+                self.ax.plot(
+                    lons,
+                    lats,
+                    color='black',
+                    linewidth=3.0,
+                    linestyle='-',
+                    zorder=30,
+                )
 
             # Draw legend after all overlays so it sits above every layer.
             handles, labels = self.ax.get_legend_handles_labels()
