@@ -336,6 +336,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self.add_shapefile_btn.clicked.connect(self._add_visualization_shapefile)
             self.add_shapefile_btn.setToolTip("Load a polygon/line shapefile for map visualization only.")
 
+        # Export type/About buttons (only create once)
+        if not hasattr(self, "export_type_btn"):
+            self.export_type_btn = QPushButton("Export Types")
+            self.export_type_btn.clicked.connect(self._show_export_type_dialog)
+
         # About button (only create once)
         if not hasattr(self, 'about_btn'):
             self.about_btn = QPushButton("About This Program")
@@ -405,6 +410,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.last_line_import_dir = os.path.expanduser("~")
         self.last_perf_import_dir = os.path.expanduser("~")
         self.last_shapefile_dir = os.path.expanduser("~")
+        self.export_type_options = self._default_export_type_options()
         self._load_last_used_dir()
         self._load_last_geotiff_dir()
         self._load_last_survey_params_dir()
@@ -414,6 +420,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_last_line_import_dir()
         self._load_last_perf_import_dir()
         self._load_last_shapefile_dir()
+        self._load_export_type_options()
 
         # After self._setup_layout(), connect the motion event for line planning, pitch line, pick center, and geotiff hover
         # Note: These are now handled by the main _on_mouse_motion method
@@ -546,6 +553,48 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         dialog.exec()
 
+    def _show_export_type_dialog(self):
+        """Show export type options dialog."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Export Type Options")
+        dialog.setMinimumWidth(360)
+        layout = QVBoxLayout(dialog)
+
+        options = getattr(self, "export_type_options", self._default_export_type_options())
+        checkbox_specs = [
+            ("esri_shapefile", "ESRI Shapefile"),
+            ("sis_asciiplan", "SIS ASCIIplan"),
+            ("gpx", "GPX"),
+            ("text_csv", "Text (.csv)"),
+            ("text_txt", "Text (.txt)"),
+            ("hypack_lnw", "Hypack (.lnw)"),
+            ("map_png", "Map (.png)"),
+            ("profiles_png", "Profiles (.png)"),
+        ]
+        checkboxes = {}
+        for key, label in checkbox_specs:
+            cb = QCheckBox(label)
+            cb.setChecked(bool(options.get(key, True)))
+            layout.addWidget(cb)
+            checkboxes[key] = cb
+
+        note_label = QLabel("Always exported: .geojson, *_params.json, and *_info.txt")
+        note_label.setWordWrap(True)
+        layout.addWidget(note_label)
+
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        if dialog.exec():
+            self.export_type_options = {
+                key: checkboxes[key].isChecked() for key, _ in checkbox_specs
+            }
+            self._save_export_type_options()
+
     def _set_activity_log_collapsed(self, collapsed):
         """Collapse/expand the activity log side panel."""
         self.activity_log_collapsed = bool(collapsed)
@@ -603,6 +652,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                         checkbox_button_layout.addWidget(self.add_shapefile_btn)
                 checkbox_button_layout.addStretch()
                 if hasattr(self, 'about_btn'):
+                    if hasattr(self, "export_type_btn"):
+                        checkbox_button_layout.addWidget(self.export_type_btn)
                     checkbox_button_layout.addWidget(self.about_btn)
                 profile_layout.addLayout(checkbox_button_layout)
                 profile_widget = QWidget()
@@ -1057,6 +1108,13 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.crossline_passes_entry = QLineEdit("2")
         ref_test_plan_info_layout.addWidget(self.crossline_passes_entry, ref_test_plan_row, 1)
         self.crossline_passes_entry.textChanged.connect(self._on_parameter_changed)
+        ref_test_plan_row += 1
+
+        ref_test_plan_info_layout.addWidget(QLabel("Select Profile:"), ref_test_plan_row, 0)
+        self.ref_profile_select_combo = QComboBox()
+        self.ref_profile_select_combo.addItem("Crossline")
+        self.ref_profile_select_combo.currentIndexChanged.connect(self._on_accuracy_profile_select_changed)
+        ref_test_plan_info_layout.addWidget(self.ref_profile_select_combo, ref_test_plan_row, 1)
         ref_test_plan_row += 1
 
         self.ref_show_info_btn = QPushButton("Show Accuracy Test Info")

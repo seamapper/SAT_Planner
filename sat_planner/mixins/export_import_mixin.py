@@ -22,6 +22,17 @@ except ImportError:
 class ExportImportMixin:
     """Mixin for save/load survey parameters and export survey files."""
 
+    def _export_type_enabled(self, key):
+        defaults = (
+            self._default_export_type_options()
+            if hasattr(self, "_default_export_type_options")
+            else {}
+        )
+        options = getattr(self, "export_type_options", {}) or {}
+        if key in options:
+            return bool(options[key])
+        return bool(defaults.get(key, True))
+
     def _save_survey_parameters(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot save parameters.")
@@ -159,7 +170,16 @@ class ExportImportMixin:
 
         try:
             profile_csv_path = None
-            if mapping is None:
+            profile_png_paths = []
+            export_shapefile = self._export_type_enabled("esri_shapefile")
+            export_sis = self._export_type_enabled("sis_asciiplan")
+            export_gpx = self._export_type_enabled("gpx")
+            export_text_csv = self._export_type_enabled("text_csv")
+            export_text_txt = self._export_type_enabled("text_txt")
+            export_hypack = self._export_type_enabled("hypack_lnw")
+            export_map_png = self._export_type_enabled("map_png")
+            export_profiles_png = self._export_type_enabled("profiles_png")
+            if export_shapefile and mapping is None:
                 raise ImportError("shapely.geometry.mapping is required for shapefile export")
 
             # --- Build common rows (line_num, line_name, point_label, lat, lon) for reference survey ---
@@ -177,42 +197,45 @@ class ExportImportMixin:
                 ref_rows.append((0, 'Crossline', 'CLE', self.cross_line_data[1][0], self.cross_line_data[1][1]))
 
             csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
-            export_utils.write_ddd_csv(csv_file_path, ref_rows, newline='')
             ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
-            export_utils.write_dmm_csv(ddm_file_path, ref_rows)
             dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
-            export_utils.write_dms_csv(dms_file_path, ref_rows)
             ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
-            export_utils.write_dmm_txt(ddm_txt_file_path, ref_rows)
             dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
-            export_utils.write_dms_txt(dms_txt_file_path, ref_rows)
             txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
-            export_utils.write_ddd_txt(txt_file_path, ref_rows)
+            if export_text_csv:
+                export_utils.write_ddd_csv(csv_file_path, ref_rows, newline='')
+                export_utils.write_dmm_csv(ddm_file_path, ref_rows)
+                export_utils.write_dms_csv(dms_file_path, ref_rows)
+            if export_text_txt:
+                export_utils.write_dmm_txt(ddm_txt_file_path, ref_rows)
+                export_utils.write_dms_txt(dms_txt_file_path, ref_rows)
+                export_utils.write_ddd_txt(txt_file_path, ref_rows)
 
             # --- Export to ESRI Shapefile (.shp) ---
-            schema = {
-                'geometry': 'LineString',
-                'properties': {'line_num': 'int', 'line_name': 'str'},
-            }
-            crs_epsg = 'EPSG:4326'  # WGS 84
-            features = []
-            # Add main survey lines (names match CSV / GPX: ReferenceLine1, …)
-            for i, line_coords in enumerate(self.survey_lines_data):
-                shapely_line = LineString([(p[1], p[0]) for p in line_coords])
-                features.append({
-                    'geometry': mapping(shapely_line),
-                    'properties': {'line_num': i + 1, 'line_name': f'ReferenceLine{i + 1}'},
-                })
-            # Add crossline
-            if self.cross_line_data:
-                shapely_cross_line = LineString([(p[1], p[0]) for p in self.cross_line_data])
-                features.append({
-                    'geometry': mapping(shapely_cross_line),
-                    'properties': {'line_num': 0, 'line_name': 'Crossline'},
-                })
             shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
-            with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
-                collection.writerecords(features)
+            if export_shapefile:
+                schema = {
+                    'geometry': 'LineString',
+                    'properties': {'line_num': 'int', 'line_name': 'str'},
+                }
+                crs_epsg = 'EPSG:4326'  # WGS 84
+                features = []
+                # Add main survey lines (names match CSV / GPX: ReferenceLine1, …)
+                for i, line_coords in enumerate(self.survey_lines_data):
+                    shapely_line = LineString([(p[1], p[0]) for p in line_coords])
+                    features.append({
+                        'geometry': mapping(shapely_line),
+                        'properties': {'line_num': i + 1, 'line_name': f'ReferenceLine{i + 1}'},
+                    })
+                # Add crossline
+                if self.cross_line_data:
+                    shapely_cross_line = LineString([(p[1], p[0]) for p in self.cross_line_data])
+                    features.append({
+                        'geometry': mapping(shapely_cross_line),
+                        'properties': {'line_num': 0, 'line_name': 'Crossline'},
+                    })
+                with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
+                    collection.writerecords(features)
 
             # --- Export to GeoJSON ---
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
@@ -263,34 +286,19 @@ class ExportImportMixin:
             with open(geojson_file_path, 'w') as f:
                 json.dump(geojson_collection, f, indent=2)
 
-            self.set_ref_info_text(
-                f"Survey exported successfully to:\n"
-                f"- {os.path.basename(csv_file_path)}\n"
-                f"- {os.path.basename(shapefile_path)} (and associated files)\n"
-                f"- {os.path.basename(geojson_file_path)}\n"
-                f"in directory: {export_dir}", append=False)
-
             # --- Export to Hypack LNW format (LIN/PTS/UTM), filename includes UTM zone ---
             lnw_file_path = None
-            lnw_lines = [(f"LINE{i+1:03d}", [line[0], line[1]]) for i, line in enumerate(self.survey_lines_data)]
-            if self.cross_line_data:
-                lnw_lines.append(("CROSS", [self.cross_line_data[0], self.cross_line_data[1]]))
-            if lnw_lines:
-                all_pts = [p for _name, pts in lnw_lines for p in pts]
-                zone, hem = export_utils.compute_utm_zone_from_points(all_pts)
-                utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
-                lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
-                if not export_utils.write_lnw(lnw_file_path, lnw_lines):
-                    lnw_file_path = None
-
-            ref_msg = (f"Survey exported successfully to:\n"
-                f"- {os.path.basename(csv_file_path)}\n"
-                f"- {os.path.basename(shapefile_path)} (and associated files)\n"
-                f"- {os.path.basename(geojson_file_path)}\n")
-            if lnw_file_path:
-                ref_msg += f"- {os.path.basename(lnw_file_path)}\n"
-            ref_msg += f"in directory: {export_dir}"
-            self.set_ref_info_text(ref_msg, append=False)
+            if export_hypack:
+                lnw_lines = [(f"LINE{i+1:03d}", [line[0], line[1]]) for i, line in enumerate(self.survey_lines_data)]
+                if self.cross_line_data:
+                    lnw_lines.append(("CROSS", [self.cross_line_data[0], self.cross_line_data[1]]))
+                if lnw_lines:
+                    all_pts = [p for _name, pts in lnw_lines for p in pts]
+                    zone, hem = export_utils.compute_utm_zone_from_points(all_pts)
+                    utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
+                    lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
+                    if not export_utils.write_lnw(lnw_file_path, lnw_lines):
+                        lnw_file_path = None
 
             # --- Export to Kongsberg SIS ASCII Plan format ---
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
@@ -299,7 +307,8 @@ class ExportImportMixin:
                 ref_ascii_lines.append(('Crossline', [self.cross_line_data[0], self.cross_line_data[1]]))
             for i, line in enumerate(self.survey_lines_data):
                 ref_ascii_lines.append((f'Reference{i + 1}', [line[0], line[1]]))
-            export_utils.write_asciiplan(sis_file_path, ref_ascii_lines)
+            if export_sis:
+                export_utils.write_asciiplan(sis_file_path, ref_ascii_lines)
             gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
             ref_gpx_lines = []
             if self.cross_line_data:
@@ -310,33 +319,25 @@ class ExportImportMixin:
                 else:
                     start, end = line[1], line[0]
                 ref_gpx_lines.append((f"ReferenceLine{i + 1}", [start, end]))
-            gpx_written = export_utils.write_gpx(gpx_file_path, ref_gpx_lines, creator="SAT Planner Accuracy")
-            acc_gpx_tests = []
-            if self.cross_line_data:
-                acc_gpx_tests.append(
-                    ("Crossline", "Crossline", [self.cross_line_data[0], self.cross_line_data[1]])
+            gpx_written = False
+            gpx_per_test_names = []
+            if export_gpx:
+                gpx_written = export_utils.write_gpx(gpx_file_path, ref_gpx_lines, creator="SAT Planner Accuracy")
+                acc_gpx_tests = []
+                if self.cross_line_data:
+                    acc_gpx_tests.append(
+                        ("Crossline", "Crossline", [self.cross_line_data[0], self.cross_line_data[1]])
+                    )
+                for i, line in enumerate(self.survey_lines_data):
+                    if i % 2 == 0:
+                        start, end = line[0], line[1]
+                    else:
+                        start, end = line[1], line[0]
+                    suf = f"Line{i + 1:02d}"
+                    acc_gpx_tests.append((suf, f"ReferenceLine{i + 1}", [start, end]))
+                gpx_per_test_names = export_utils.write_gpx_per_test_files(
+                    export_dir, export_name, acc_gpx_tests, creator="SAT Planner Accuracy"
                 )
-            for i, line in enumerate(self.survey_lines_data):
-                if i % 2 == 0:
-                    start, end = line[0], line[1]
-                else:
-                    start, end = line[1], line[0]
-                suf = f"Line{i + 1:02d}"
-                acc_gpx_tests.append((suf, f"ReferenceLine{i + 1}", [start, end]))
-            gpx_per_test_names = export_utils.write_gpx_per_test_files(
-                export_dir, export_name, acc_gpx_tests, creator="SAT Planner Accuracy"
-            )
-
-            # Update success message to include SIS
-            ref_msg2 = (f"Survey exported successfully to:\n"
-                f"- {os.path.basename(csv_file_path)}\n"
-                f"- {os.path.basename(shapefile_path)} (and associated files)\n"
-                f"- {os.path.basename(geojson_file_path)}\n")
-            if lnw_file_path:
-                ref_msg2 += f"- {os.path.basename(lnw_file_path)}\n"
-            ref_msg2 += f"- {os.path.basename(sis_file_path)}\n"
-            ref_msg2 += f"in directory: {export_dir}"
-            self.set_ref_info_text(ref_msg2, append=False)
 
             # --- Export Accuracy Survey Information ---
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
@@ -555,17 +556,47 @@ class ExportImportMixin:
 
             # --- Export Survey Plan as PNG ---
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
-            if hasattr(self, "_hide_map_hover_tooltip_for_export"):
-                self._hide_map_hover_tooltip_for_export()
-            self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+            if export_map_png:
+                if hasattr(self, "_hide_map_hover_tooltip_for_export"):
+                    self._hide_map_hover_tooltip_for_export()
+                self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
             
-            # --- Export Profile Plot as PNG (if it exists) ---
-            profile_png_path = os.path.join(export_dir, f"{export_name}_profile.png")
-            if hasattr(self, 'profile_fig') and self.profile_fig is not None:
-                self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+            # --- Export Profile Plots as PNG (crossline + each main line) ---
+            if export_profiles_png and hasattr(self, 'profile_fig') and self.profile_fig is not None and hasattr(self, "_draw_segment_profile"):
+                combo = getattr(self, "ref_profile_select_combo", None)
+                previous_profile_selection = combo.currentText().strip() if combo is not None and combo.count() > 0 else "Crossline"
+
+                # Crossline profile first (when crossline is enabled/present in the active plan)
+                if include_crossline and self.cross_line_data and len(self.cross_line_data) == 2:
+                    self._draw_segment_profile(self.cross_line_data, "Crossline Elevation Profile", "darkorchid")
+                    crossline_profile_png_path = os.path.join(export_dir, f"{export_name}_profile_crossline.png")
+                    self.profile_fig.savefig(crossline_profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+                    profile_png_paths.append(crossline_profile_png_path)
+
+                # Main line profiles
+                for i, line_data in enumerate(self.survey_lines_data or []):
+                    if not line_data or len(line_data) != 2:
+                        continue
+                    line_num = i + 1
+                    self._draw_segment_profile(line_data, f"Main Line {line_num} Elevation Profile", "blue")
+                    line_profile_png_path = os.path.join(
+                        export_dir,
+                        f"{export_name}_profile_main_line_{line_num:02d}.png"
+                    )
+                    self.profile_fig.savefig(line_profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+                    profile_png_paths.append(line_profile_png_path)
+
+                # Restore previously selected profile for user continuity
+                if combo is not None:
+                    combo.blockSignals(True)
+                    if combo.findText(previous_profile_selection) >= 0:
+                        combo.setCurrentText(previous_profile_selection)
+                    combo.blockSignals(False)
+                if hasattr(self, "_draw_current_profile"):
+                    self._draw_current_profile()
 
             # --- Export crossline elevation profile as CSV (Distance m, Elevation m, Slope deg) ---
-            if include_crossline and self.cross_line_data and len(self.cross_line_data) == 2:
+            if export_text_csv and include_crossline and self.cross_line_data and len(self.cross_line_data) == 2:
                 cl_a, cl_b = self.cross_line_data
                 prof = self._profile_arrays_along_segment_endpoints(cl_a[0], cl_a[1], cl_b[0], cl_b[1])
                 if prof[0] is not None:
@@ -671,27 +702,36 @@ class ExportImportMixin:
                 print(f"Warning: Could not export metadata: {e}")
             
             # Update success message to include stats file, text file, PNG files, and metadata
-            success_files = [
-                f"- {os.path.basename(csv_file_path)}",
-                f"- {os.path.basename(shapefile_path)} (and associated files)",
-                f"- {os.path.basename(geojson_file_path)}",
-            ]
+            success_files = [f"- {os.path.basename(geojson_file_path)}"]
+            if export_text_csv:
+                success_files.extend(
+                    [
+                        f"- {os.path.basename(csv_file_path)}",
+                        f"- {os.path.basename(ddm_file_path)}",
+                        f"- {os.path.basename(dms_file_path)}",
+                    ]
+                )
+            if export_text_txt:
+                success_files.extend(
+                    [
+                        f"- {os.path.basename(txt_file_path)}",
+                        f"- {os.path.basename(ddm_txt_file_path)}",
+                        f"- {os.path.basename(dms_txt_file_path)}",
+                    ]
+                )
+            if export_shapefile:
+                success_files.append(f"- {os.path.basename(shapefile_path)} (and associated files)")
             if lnw_file_path:
                 success_files.append(f"- {os.path.basename(lnw_file_path)}")
             if gpx_written:
                 success_files.append(f"- {os.path.basename(gpx_file_path)}")
             for bn in gpx_per_test_names:
                 success_files.append(f"- {bn}")
-            success_files.extend([
-                f"- {os.path.basename(sis_file_path)}",
-                f"- {os.path.basename(txt_file_path)}",
-                f"- {os.path.basename(ddm_file_path)}",
-                f"- {os.path.basename(dms_file_path)}",
-                f"- {os.path.basename(ddm_txt_file_path)}",
-                f"- {os.path.basename(dms_txt_file_path)}",
-                f"- {os.path.basename(stats_file_path)}",
-                f"- {os.path.basename(map_png_path)}"
-            ])
+            if export_sis:
+                success_files.append(f"- {os.path.basename(sis_file_path)}")
+            success_files.append(f"- {os.path.basename(stats_file_path)}")
+            if export_map_png:
+                success_files.append(f"- {os.path.basename(map_png_path)}")
             
             # Add metadata JSON if it was created
             try:
@@ -700,8 +740,8 @@ class ExportImportMixin:
             except:
                 pass
             
-            # Add profile PNG if it was created
-            if hasattr(self, 'profile_fig') and self.profile_fig is not None:
+            # Add profile PNGs if they were created
+            for profile_png_path in profile_png_paths:
                 success_files.append(f"- {os.path.basename(profile_png_path)}")
             if profile_csv_path and os.path.isfile(profile_csv_path):
                 success_files.append(f"- {os.path.basename(profile_csv_path)}")
@@ -718,7 +758,15 @@ class ExportImportMixin:
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot export.")
             return
-        if mapping is None:
+        export_shapefile = self._export_type_enabled("esri_shapefile")
+        export_sis = self._export_type_enabled("sis_asciiplan")
+        export_gpx = self._export_type_enabled("gpx")
+        export_text_csv = self._export_type_enabled("text_csv")
+        export_text_txt = self._export_type_enabled("text_txt")
+        export_hypack = self._export_type_enabled("hypack_lnw")
+        export_map_png = self._export_type_enabled("map_png")
+        export_profiles_png = self._export_type_enabled("profiles_png")
+        if export_shapefile and mapping is None:
             self._show_message("warning", "Export Error", "Shapely is required for shapefile export.")
             return
 
@@ -770,39 +818,42 @@ class ExportImportMixin:
                     perf_rows.append((line_num, lname, f"B{bn}E", seg[1][0], seg[1][1]))
 
             csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
-            export_utils.write_ddd_csv(csv_file_path, perf_rows, newline="")
             ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
-            export_utils.write_dmm_csv(ddm_file_path, perf_rows)
             dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
-            export_utils.write_dms_csv(dms_file_path, perf_rows)
             ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
-            export_utils.write_dmm_txt(ddm_txt_file_path, perf_rows)
             dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
-            export_utils.write_dms_txt(dms_txt_file_path, perf_rows)
             txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
-            export_utils.write_ddd_txt(txt_file_path, perf_rows)
+            if export_text_csv:
+                export_utils.write_ddd_csv(csv_file_path, perf_rows, newline="")
+                export_utils.write_dmm_csv(ddm_file_path, perf_rows)
+                export_utils.write_dms_csv(dms_file_path, perf_rows)
+            if export_text_txt:
+                export_utils.write_dmm_txt(ddm_txt_file_path, perf_rows)
+                export_utils.write_dms_txt(dms_txt_file_path, perf_rows)
+                export_utils.write_ddd_txt(txt_file_path, perf_rows)
 
-            schema = {"geometry": "LineString", "properties": {"line_num": "int", "line_name": "str"}}
-            crs_epsg = "EPSG:4326"
-            features = []
-            for i, line_coords in enumerate(lines):
-                shapely_line = LineString([(p[1], p[0]) for p in line_coords])
-                n = i + 1
-                features.append({
-                    "geometry": mapping(shapely_line),
-                    "properties": {"line_num": n, "line_name": f"PerformanceLine{n}"},
-                })
-            if has_bist:
-                for i, seg in enumerate(bist_segs):
-                    shapely_line = LineString([(p[1], p[0]) for p in seg])
-                    bn = i + 1
+            shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
+            if export_shapefile:
+                schema = {"geometry": "LineString", "properties": {"line_num": "int", "line_name": "str"}}
+                crs_epsg = "EPSG:4326"
+                features = []
+                for i, line_coords in enumerate(lines):
+                    shapely_line = LineString([(p[1], p[0]) for p in line_coords])
+                    n = i + 1
                     features.append({
                         "geometry": mapping(shapely_line),
-                        "properties": {"line_num": 10 + bn, "line_name": f"BISTLine{bn}"},
+                        "properties": {"line_num": n, "line_name": f"PerformanceLine{n}"},
                     })
-            shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
-            with fiona.open(shapefile_path, "w", driver="ESRI Shapefile", crs=crs_epsg, schema=schema) as collection:
-                collection.writerecords(features)
+                if has_bist:
+                    for i, seg in enumerate(bist_segs):
+                        shapely_line = LineString([(p[1], p[0]) for p in seg])
+                        bn = i + 1
+                        features.append({
+                            "geometry": mapping(shapely_line),
+                            "properties": {"line_num": 10 + bn, "line_name": f"BISTLine{bn}"},
+                        })
+                with fiona.open(shapefile_path, "w", driver="ESRI Shapefile", crs=crs_epsg, schema=schema) as collection:
+                    collection.writerecords(features)
 
             geojson_features = []
             geotiff_path = self.current_geotiff_path if hasattr(self, "current_geotiff_path") and self.current_geotiff_path else None
@@ -863,7 +914,7 @@ class ExportImportMixin:
                 for i, seg in enumerate(bist_segs):
                     lnw_lines.append((f"BIST{i + 1:03d}", [seg[0], seg[1]]))
             lnw_file_path = None
-            if lnw_lines:
+            if export_hypack and lnw_lines:
                 all_pts = [p for _name, pts in lnw_lines for p in pts]
                 zone, hem = export_utils.compute_utm_zone_from_points(all_pts)
                 utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
@@ -876,26 +927,30 @@ class ExportImportMixin:
             if has_bist:
                 for i, seg in enumerate(bist_segs):
                     perf_ascii_lines.append((f"BIST{i + 1}", [seg[0], seg[1]]))
-            export_utils.write_asciiplan(sis_file_path, perf_ascii_lines)
+            if export_sis:
+                export_utils.write_asciiplan(sis_file_path, perf_ascii_lines)
 
             gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
             perf_gpx_lines = [(f"Performance{i + 1}", [line[0], line[1]]) for i, line in enumerate(lines)]
             if has_bist:
                 for i, seg in enumerate(bist_segs):
                     perf_gpx_lines.append((f"BIST{i + 1}", [seg[0], seg[1]]))
-            gpx_written = export_utils.write_gpx(
-                gpx_file_path, perf_gpx_lines, creator="SAT Planner Performance"
-            )
-            perf_gpx_tests = [
-                (f"Performance{i + 1}", f"Performance{i + 1}", [line[0], line[1]])
-                for i, line in enumerate(lines)
-            ]
-            if has_bist:
-                for i, seg in enumerate(bist_segs):
-                    perf_gpx_tests.append((f"BIST{i + 1}", f"BIST{i + 1}", [seg[0], seg[1]]))
-            gpx_per_test_names = export_utils.write_gpx_per_test_files(
-                export_dir, export_name, perf_gpx_tests, creator="SAT Planner Performance"
-            )
+            gpx_written = False
+            gpx_per_test_names = []
+            if export_gpx:
+                gpx_written = export_utils.write_gpx(
+                    gpx_file_path, perf_gpx_lines, creator="SAT Planner Performance"
+                )
+                perf_gpx_tests = [
+                    (f"Performance{i + 1}", f"Performance{i + 1}", [line[0], line[1]])
+                    for i, line in enumerate(lines)
+                ]
+                if has_bist:
+                    for i, seg in enumerate(bist_segs):
+                        perf_gpx_tests.append((f"BIST{i + 1}", f"BIST{i + 1}", [seg[0], seg[1]]))
+                gpx_per_test_names = export_utils.write_gpx_per_test_files(
+                    export_dir, export_name, perf_gpx_tests, creator="SAT Planner Performance"
+                )
 
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
             try:
@@ -965,37 +1020,47 @@ class ExportImportMixin:
                 json.dump(pmeta, f, indent=2)
 
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
-            if hasattr(self, "_hide_map_hover_tooltip_for_export"):
-                self._hide_map_hover_tooltip_for_export()
-            self.figure.savefig(map_png_path, dpi=300, bbox_inches="tight", facecolor="white")
+            if export_map_png:
+                if hasattr(self, "_hide_map_hover_tooltip_for_export"):
+                    self._hide_map_hover_tooltip_for_export()
+                self.figure.savefig(map_png_path, dpi=300, bbox_inches="tight", facecolor="white")
 
             profile_png_path = os.path.join(export_dir, f"{export_name}_profile.png")
-            if hasattr(self, "profile_fig") and self.profile_fig is not None:
+            if export_profiles_png and hasattr(self, "profile_fig") and self.profile_fig is not None:
                 self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches="tight", facecolor="white")
 
-            msg_lines = [
-                f"- {os.path.basename(csv_file_path)}",
-                f"- {os.path.basename(shapefile_path)} (and sidecars)",
-                f"- {os.path.basename(geojson_file_path)}",
-            ]
+            msg_lines = [f"- {os.path.basename(geojson_file_path)}"]
+            if export_text_csv:
+                msg_lines.extend(
+                    [
+                        f"- {os.path.basename(csv_file_path)}",
+                        f"- {os.path.basename(ddm_file_path)}",
+                        f"- {os.path.basename(dms_file_path)}",
+                    ]
+                )
+            if export_text_txt:
+                msg_lines.extend(
+                    [
+                        f"- {os.path.basename(txt_file_path)}",
+                        f"- {os.path.basename(ddm_txt_file_path)}",
+                        f"- {os.path.basename(dms_txt_file_path)}",
+                    ]
+                )
+            if export_shapefile:
+                msg_lines.append(f"- {os.path.basename(shapefile_path)} (and sidecars)")
             if gpx_written:
                 msg_lines.append(f"- {os.path.basename(gpx_file_path)}")
             for bn in gpx_per_test_names:
                 msg_lines.append(f"- {bn}")
             if lnw_file_path:
                 msg_lines.append(f"- {os.path.basename(lnw_file_path)}")
-            msg_lines.extend(
-                [
-                    f"- {os.path.basename(sis_file_path)}",
-                    f"- {os.path.basename(txt_file_path)}",
-                    f"- {os.path.basename(ddm_file_path)}",
-                    f"- {os.path.basename(dms_file_path)}",
-                    f"- {os.path.basename(stats_file_path)}",
-                    f"- {os.path.basename(map_png_path)}",
-                    f"- {os.path.basename(json_metadata_path)}",
-                ]
-            )
-            if hasattr(self, "profile_fig") and self.profile_fig is not None:
+            if export_sis:
+                msg_lines.append(f"- {os.path.basename(sis_file_path)}")
+            msg_lines.append(f"- {os.path.basename(stats_file_path)}")
+            if export_map_png:
+                msg_lines.append(f"- {os.path.basename(map_png_path)}")
+            msg_lines.append(f"- {os.path.basename(json_metadata_path)}")
+            if export_profiles_png and hasattr(self, "profile_fig") and self.profile_fig is not None:
                 msg_lines.append(f"- {os.path.basename(profile_png_path)}")
             log_msg = "Performance survey exported successfully to:\n" + "\n".join(msg_lines) + f"\nin directory: {export_dir}"
             if hasattr(self, "set_performance_activity_text"):

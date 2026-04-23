@@ -33,6 +33,118 @@ class ProfilesMixin:
             return
         self._draw_current_profile()
 
+    def _on_accuracy_profile_select_changed(self, *_args):
+        if not hasattr(self, "param_notebook"):
+            return
+        if self.param_notebook.currentIndex() != 1:
+            return
+        self._draw_current_profile()
+
+    def _sync_accuracy_profile_select_options(self):
+        """Refresh Accuracy profile dropdown options from current generated lines."""
+        combo = getattr(self, "ref_profile_select_combo", None)
+        if combo is None:
+            return
+        previous_text = combo.currentText().strip() if combo.count() > 0 else "Crossline"
+        options = []
+        if hasattr(self, "cross_line_data") and self.cross_line_data and len(self.cross_line_data) == 2:
+            options.append("Crossline")
+        elif not options:
+            options.append("Crossline")
+        main_lines = getattr(self, "survey_lines_data", []) or []
+        for i in range(len(main_lines)):
+            options.append(f"Main Line {i + 1}")
+
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(options)
+        if previous_text in options:
+            combo.setCurrentText(previous_text)
+        else:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(False)
+
+    def _draw_accuracy_selected_profile(self):
+        """Draw accuracy profile for selected Crossline or Main Line option."""
+        self._sync_accuracy_profile_select_options()
+        combo = getattr(self, "ref_profile_select_combo", None)
+        selection = combo.currentText().strip() if combo is not None else "Crossline"
+        segment = None
+        title = "Crossline Elevation Profile"
+        color = "darkorchid"
+
+        if selection.startswith("Main Line"):
+            try:
+                idx = int(selection.replace("Main Line", "").strip()) - 1
+            except Exception:
+                idx = -1
+            lines = getattr(self, "survey_lines_data", []) or []
+            if 0 <= idx < len(lines) and len(lines[idx]) == 2:
+                segment = lines[idx]
+                title = f"Main Line {idx + 1} Elevation Profile"
+                color = "blue"
+        else:
+            cross = getattr(self, "cross_line_data", []) or []
+            if len(cross) == 2:
+                segment = cross
+
+        self._draw_segment_profile(segment, title, color)
+
+    def _draw_segment_profile(self, segment, title, color):
+        """Draw profile (elevation+slope) for a 2-point segment."""
+        self.profile_ax.clear()
+        for ax in self.profile_fig.get_axes():
+            if ax != self.profile_ax:
+                ax.remove()
+        self.profile_ax.set_title(title, fontsize=8)
+        self.profile_ax.set_xlabel("Distance (m)", fontsize=8)
+        self.profile_ax.set_ylabel("Elevation (m)", fontsize=8)
+        self.profile_ax.tick_params(axis='both', which='major', labelsize=7)
+        self._profile_dists = None
+        self._profile_elevations = None
+        self._profile_slopes = None
+
+        if not (
+            self.geotiff_data_array is not None and
+            self.geotiff_extent is not None and
+            segment and
+            len(segment) == 2
+        ):
+            self.profile_canvas.draw_idle()
+            return
+
+        (lat1, lon1), (lat2, lon2) = segment
+        dists, elevations, slopes = self._profile_arrays_along_segment_endpoints(lat1, lon1, lat2, lon2, n=100)
+        if dists is None or elevations is None:
+            self.profile_canvas.draw_idle()
+            return
+
+        self._profile_dists = dists
+        self._profile_elevations = elevations
+        self._profile_slopes = slopes
+        self.profile_ax.plot(dists, elevations, color=color, lw=1, label='Elevation')
+        slope_ax = None
+        if self._show_slope_on_profile():
+            slope_ax = self.profile_ax.twinx()
+            slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')
+            slope_ax.set_ylabel('Slope (deg)', fontsize=8)
+            slope_ax.tick_params(axis='y', labelsize=7)
+            slope_ax.grid(False)
+        self.profile_ax.set_xlim(dists[0], dists[-1] if len(dists) > 0 else 1)
+        if np.any(~np.isnan(elevations)):
+            self.profile_ax.set_ylim(np.nanmin(elevations), np.nanmax(elevations))
+        if slope_ax and np.any(~np.isnan(slopes)):
+            slope_ax.set_ylim(0, np.nanmax(slopes[~np.isnan(slopes)]) * 1.1)
+        handles, labels = self.profile_ax.get_legend_handles_labels()
+        if slope_ax:
+            slope_handles, slope_labels = slope_ax.get_legend_handles_labels()
+            handles.extend(slope_handles)
+            labels.extend(slope_labels)
+        if handles:
+            self.profile_ax.legend(handles, labels, fontsize=10, loc='upper right')
+        self.profile_fig.tight_layout(pad=1.0)
+        self.profile_canvas.draw_idle()
+
     def _get_profile_data_from_geotiff(self, lats, lons):
         """Get elevation and slope data from GeoTIFF for profile calculations.
         Always uses the original full dataset to ensure consistent results regardless of zoom level.
@@ -635,7 +747,7 @@ class ProfilesMixin:
             else:
                 self._draw_pitch_line_profile()
         elif current_tab == 1:
-            self._draw_crossline_profile()
+            self._draw_accuracy_selected_profile()
         elif current_tab == 2:
             self._draw_line_planning_profile()
         elif current_tab == 3:

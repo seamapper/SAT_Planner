@@ -1021,13 +1021,25 @@ class CalibrationMixin:
             self._update_cal_line_times()
 
     def _export_cal_survey_files(self):
-        try:
-            import fiona
-            from shapely.geometry import LineString
-            from shapely.geometry import mapping
-        except ImportError:
-            self._show_message("warning","Missing Libraries", "fiona and shapely are required for shapefile export.")
-            return
+        export_shapefile = self._export_type_enabled("esri_shapefile") if hasattr(self, "_export_type_enabled") else True
+        export_sis = self._export_type_enabled("sis_asciiplan") if hasattr(self, "_export_type_enabled") else True
+        export_gpx = self._export_type_enabled("gpx") if hasattr(self, "_export_type_enabled") else True
+        export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
+        export_text_txt = self._export_type_enabled("text_txt") if hasattr(self, "_export_type_enabled") else True
+        export_hypack = self._export_type_enabled("hypack_lnw") if hasattr(self, "_export_type_enabled") else True
+        export_map_png = self._export_type_enabled("map_png") if hasattr(self, "_export_type_enabled") else True
+        export_profiles_png = self._export_type_enabled("profiles_png") if hasattr(self, "_export_type_enabled") else True
+        fiona = None
+        LineString = None
+        mapping = None
+        if export_shapefile:
+            try:
+                import fiona
+                from shapely.geometry import LineString
+                from shapely.geometry import mapping
+            except ImportError:
+                self._show_message("warning","Missing Libraries", "fiona and shapely are required for shapefile export.")
+                return
         lines = []
         line_num = 1
         if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
@@ -1068,25 +1080,28 @@ class CalibrationMixin:
                 cal_rows.append((num, line_name, end_label, pts[1][0], pts[1][1]))
 
             csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
-            export_utils.write_ddd_csv(csv_file_path, cal_rows)
             ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
-            export_utils.write_dmm_csv(ddm_file_path, cal_rows)
             dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
-            export_utils.write_dms_csv(dms_file_path, cal_rows)
             ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
-            export_utils.write_dmm_txt(ddm_txt_file_path, cal_rows)
             dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
-            export_utils.write_dms_txt(dms_txt_file_path, cal_rows)
+            if export_text_csv:
+                export_utils.write_ddd_csv(csv_file_path, cal_rows)
+                export_utils.write_dmm_csv(ddm_file_path, cal_rows)
+                export_utils.write_dms_csv(dms_file_path, cal_rows)
+            if export_text_txt:
+                export_utils.write_dmm_txt(ddm_txt_file_path, cal_rows)
+                export_utils.write_dms_txt(dms_txt_file_path, cal_rows)
 
-            schema = {'geometry': 'LineString', 'properties': {'line_num': 'int', 'line_name': 'str'}}
-            crs_epsg = 'EPSG:4326'
-            features = []
-            for num, name, pts in lines:
-                shapely_line = LineString([(p[1], p[0]) for p in pts])
-                features.append({'geometry': mapping(shapely_line), 'properties': {'line_num': num, 'line_name': name}})
             shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
-            with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
-                collection.writerecords(features)
+            if export_shapefile:
+                schema = {'geometry': 'LineString', 'properties': {'line_num': 'int', 'line_name': 'str'}}
+                crs_epsg = 'EPSG:4326'
+                features = []
+                for num, name, pts in lines:
+                    shapely_line = LineString([(p[1], p[0]) for p in pts])
+                    features.append({'geometry': mapping(shapely_line), 'properties': {'line_num': num, 'line_name': name}})
+                with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
+                    collection.writerecords(features)
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
             _cal_geotiff = (
                 self.current_geotiff_path
@@ -1112,7 +1127,7 @@ class CalibrationMixin:
                 )
             lnw_file_path = None
             lnw_lines = [(name, list(pts)) for _num, name, pts in lines]
-            if lnw_lines:
+            if export_hypack and lnw_lines:
                 all_pts = [p for _name, pts in lnw_lines for p in pts]
                 zone, hem = export_utils.compute_utm_zone_from_points(all_pts)
                 utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
@@ -1121,15 +1136,20 @@ class CalibrationMixin:
                     lnw_file_path = None
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
             cal_ascii_lines = [(name, list(pts)) for _num, name, pts in lines]
-            export_utils.write_asciiplan(sis_file_path, cal_ascii_lines)
+            if export_sis:
+                export_utils.write_asciiplan(sis_file_path, cal_ascii_lines)
             gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
-            gpx_written = export_utils.write_gpx(gpx_file_path, cal_ascii_lines)
-            cal_gpx_tests = [(_name, _name, list(pts)) for _num, _name, pts in lines]
-            gpx_per_test_names = export_utils.write_gpx_per_test_files(
-                export_dir, export_name, cal_gpx_tests, creator="SAT Planner Calibration"
-            )
+            gpx_written = False
+            gpx_per_test_names = []
+            if export_gpx:
+                gpx_written = export_utils.write_gpx(gpx_file_path, cal_ascii_lines)
+                cal_gpx_tests = [(_name, _name, list(pts)) for _num, _name, pts in lines]
+                gpx_per_test_names = export_utils.write_gpx_per_test_files(
+                    export_dir, export_name, cal_gpx_tests, creator="SAT Planner Calibration"
+                )
             txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
-            export_utils.write_ddd_txt(txt_file_path, cal_rows)
+            if export_text_txt:
+                export_utils.write_ddd_txt(txt_file_path, cal_rows)
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
             stats = self._calculate_calibration_survey_statistics()
             if stats:
@@ -1178,9 +1198,10 @@ class CalibrationMixin:
                 print(f"Warning: Could not export metadata: {e}")
                 json_metadata_path = None
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
-            if hasattr(self, "_hide_map_hover_tooltip_for_export"):
-                self._hide_map_hover_tooltip_for_export()
-            self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+            if export_map_png:
+                if hasattr(self, "_hide_map_hover_tooltip_for_export"):
+                    self._hide_map_hover_tooltip_for_export()
+                self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
             pitch_profile_png_path = None
             pitch_profile_csv_path = None
             roll_profile_png_path = None
@@ -1189,11 +1210,12 @@ class CalibrationMixin:
                 if hasattr(self, "pitch_line_points") and len(self.pitch_line_points) == 2:
                     if hasattr(self, "_draw_pitch_line_profile"):
                         self._draw_pitch_line_profile()
-                    pitch_profile_png_path = os.path.join(export_dir, f"{export_name}_pitch_profile.png")
-                    self.profile_fig.savefig(pitch_profile_png_path, dpi=300, bbox_inches="tight", facecolor="white")
+                    if export_profiles_png:
+                        pitch_profile_png_path = os.path.join(export_dir, f"{export_name}_pitch_profile.png")
+                        self.profile_fig.savefig(pitch_profile_png_path, dpi=300, bbox_inches="tight", facecolor="white")
                     p0, p1 = self.pitch_line_points
-                    prof_p = self._profile_arrays_along_segment_endpoints(p0[0], p0[1], p1[0], p1[1])
-                    if prof_p[0] is not None:
+                    prof_p = self._profile_arrays_along_segment_endpoints(p0[0], p0[1], p1[0], p1[1]) if export_text_csv else (None, None, None)
+                    if export_text_csv and prof_p[0] is not None:
                         pitch_profile_csv_path = os.path.join(export_dir, f"{export_name}_pitch_profile.csv")
                         export_utils.write_profile_csv(
                             pitch_profile_csv_path, prof_p[0], prof_p[1], prof_p[2]
@@ -1201,31 +1223,42 @@ class CalibrationMixin:
                 if hasattr(self, "roll_line_points") and len(self.roll_line_points) == 2:
                     if hasattr(self, "_draw_roll_line_profile"):
                         self._draw_roll_line_profile()
-                    roll_profile_png_path = os.path.join(export_dir, f"{export_name}_roll_profile.png")
-                    self.profile_fig.savefig(roll_profile_png_path, dpi=300, bbox_inches="tight", facecolor="white")
+                    if export_profiles_png:
+                        roll_profile_png_path = os.path.join(export_dir, f"{export_name}_roll_profile.png")
+                        self.profile_fig.savefig(roll_profile_png_path, dpi=300, bbox_inches="tight", facecolor="white")
                     r0, r1 = self.roll_line_points
-                    prof_r = self._profile_arrays_along_segment_endpoints(r0[0], r0[1], r1[0], r1[1])
-                    if prof_r[0] is not None:
+                    prof_r = self._profile_arrays_along_segment_endpoints(r0[0], r0[1], r1[0], r1[1]) if export_text_csv else (None, None, None)
+                    if export_text_csv and prof_r[0] is not None:
                         roll_profile_csv_path = os.path.join(export_dir, f"{export_name}_roll_profile.csv")
                         export_utils.write_profile_csv(
                             roll_profile_csv_path, prof_r[0], prof_r[1], prof_r[2]
                         )
             if hasattr(self, "_draw_current_profile"):
                 self._draw_current_profile()
-            success_msg = f"Survey exported successfully to:\n- {os.path.basename(csv_file_path)}\n- {os.path.basename(shapefile_path)}\n- {os.path.basename(geojson_file_path)}\n"
+            success_msg = f"Survey exported successfully to:\n- {os.path.basename(geojson_file_path)}\n"
+            if export_text_csv:
+                success_msg += f"- {os.path.basename(csv_file_path)}\n"
+                success_msg += f"- {os.path.basename(ddm_file_path)}\n"
+                success_msg += f"- {os.path.basename(dms_file_path)}\n"
+            if export_text_txt:
+                success_msg += f"- {os.path.basename(txt_file_path)}\n"
+                success_msg += f"- {os.path.basename(ddm_txt_file_path)}\n"
+                success_msg += f"- {os.path.basename(dms_txt_file_path)}\n"
+            if export_shapefile:
+                success_msg += f"- {os.path.basename(shapefile_path)}\n"
             if lnw_file_path:
                 success_msg += f"- {os.path.basename(lnw_file_path)}\n"
-            success_msg += f"- {os.path.basename(sis_file_path)}\n"
+            if export_sis:
+                success_msg += f"- {os.path.basename(sis_file_path)}\n"
             if gpx_written:
                 success_msg += f"- {os.path.basename(gpx_file_path)}\n"
             for bn in gpx_per_test_names:
                 success_msg += f"- {bn}\n"
-            success_msg += f"- {os.path.basename(ddm_txt_file_path)}\n"
-            success_msg += f"- {os.path.basename(dms_txt_file_path)}\n"
             success_msg += f"- {os.path.basename(stats_file_path)}\n"
             if json_metadata_path:
                 success_msg += f"- {os.path.basename(json_metadata_path)}\n"
-            success_msg += f"- {os.path.basename(map_png_path)}\n"
+            if export_map_png:
+                success_msg += f"- {os.path.basename(map_png_path)}\n"
             if pitch_profile_png_path:
                 success_msg += f"- {os.path.basename(pitch_profile_png_path)}\n"
             if pitch_profile_csv_path and os.path.isfile(pitch_profile_csv_path):

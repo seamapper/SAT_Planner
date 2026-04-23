@@ -3,7 +3,8 @@ Config: load/save last-used directories to/from JSON config file.
 _load_last_used_dir, _save_last_used_dir, _load_last_geotiff_dir, _save_last_geotiff_dir,
 _load_last_survey_params_dir, _save_last_survey_params_dir, _load_last_export_dir, _save_last_export_dir,
 _load_last_ref_import_dir, _save_last_ref_import_dir, _load_last_line_import_dir, _save_last_line_import_dir,
-_load_last_perf_import_dir, _save_last_perf_import_dir, _load_last_shapefile_dir, _save_last_shapefile_dir.
+_load_last_perf_import_dir, _save_last_perf_import_dir, _load_last_shapefile_dir, _save_last_shapefile_dir,
+_load_export_type_options, _save_export_type_options.
 """
 import json
 import os
@@ -11,6 +12,18 @@ import os
 
 class ConfigMixin:
     """Mixin for loading/saving last-used directories from config file."""
+
+    def _default_export_type_options(self):
+        return {
+            "esri_shapefile": True,
+            "sis_asciiplan": True,
+            "gpx": True,
+            "text_csv": True,
+            "text_txt": True,
+            "hypack_lnw": True,
+            "map_png": True,
+            "profiles_png": True,
+        }
 
     def _load_last_used_dir(self):
         try:
@@ -184,6 +197,37 @@ class ConfigMixin:
                     config = json.load(f)
             config['last_shapefile_dir'] = self.last_shapefile_dir
             with open(self.CONFIG_FILENAME, 'w') as f:
+                json.dump(config, f)
+        except Exception:
+            pass
+
+    def _load_export_type_options(self):
+        try:
+            defaults = self._default_export_type_options()
+            self.export_type_options = dict(defaults)
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+                saved = config.get("export_type_options", {})
+                if isinstance(saved, dict):
+                    for key in defaults:
+                        if key in saved:
+                            self.export_type_options[key] = bool(saved[key])
+        except Exception:
+            self.export_type_options = dict(self._default_export_type_options())
+
+    def _save_export_type_options(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            defaults = self._default_export_type_options()
+            current = getattr(self, "export_type_options", defaults) or defaults
+            config["export_type_options"] = {
+                key: bool(current.get(key, defaults[key])) for key in defaults
+            }
+            with open(self.CONFIG_FILENAME, "w") as f:
                 json.dump(config, f)
         except Exception:
             pass
