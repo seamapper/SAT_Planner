@@ -339,220 +339,33 @@ class ExportImportMixin:
                     export_dir, export_name, acc_gpx_tests, creator="SAT Planner Accuracy"
                 )
 
-            # --- Export Accuracy Survey Information ---
+            # --- Export Accuracy Survey Information (same content as Accuracy Survey Info dialog) ---
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
+            info_text = None
+            if hasattr(self, "_build_reference_planning_info_text"):
+                info_text = self._build_reference_planning_info_text(
+                    export_name=export_name,
+                    export_date=datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                )
+            if not info_text:
+                info_text = "ACCURACY SURVEY INFORMATION\nUnable to generate survey info text.\n"
+
+            def _normalize_degree_symbols_for_export(text):
+                normalized_lines = []
+                for line in str(text).splitlines():
+                    if line.endswith("°"):
+                        line = line[:-1]
+                    line = line.replace("°", " ")
+                    normalized_lines.append(line)
+                return "\n".join(normalized_lines) + "\n"
+
+            with open(stats_file_path, 'w', encoding='utf-8') as f:
+                f.write(_normalize_degree_symbols_for_export(info_text))
             total_survey_time = self._calculate_total_survey_time()
-            include_crossline = total_survey_time.get('num_crossline_passes', 0) > 0 and total_survey_time.get('crossline_total_distance_m', 0) > 0
-            
-            with open(stats_file_path, 'w') as f:
-                def _fmt_minutes_and_hours(minutes_val):
-                    return f"{minutes_val:.1f} min ({minutes_val / 60.0:.2f} hr)"
-
-                f.write("ACCURACY SURVEY INFORMATION\n")
-                f.write("=" * 50 + "\n\n")
-                f.write(f"Survey Plan: {export_name}\n")
-                f.write(f"Export Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
-                
-                f.write("SURVEY INPUT PARAMETERS\n")
-                f.write("-" * 30 + "\n")
-                label_overrides = {
-                    "dist_between_lines": "Distance Between Lines",
-                    "dist_between_lines_multiplier": "Distance Between Lines Multiplier",
-                }
-                for key, value in values.items():
-                    label = label_overrides.get(key, key.replace('_', ' ').title())
-                    f.write(f"{label}: {value}\n")
-                f.write("\n")
-                
-                f.write("SURVEY DISTANCE BREAKDOWN\n")
-                f.write("-" * 30 + "\n")
-                # Calculate single line length and heading
-                num_main_lines = len(self.survey_lines_data) if self.survey_lines_data else 0
-                if num_main_lines > 0:
-                    # Calculate heading for the first main line
-                    try:
-                        geod = pyproj.Geod(ellps="WGS84")
-                        first_line = self.survey_lines_data[0]
-                        lat1, lon1 = first_line[0]
-                        lat2, lon2 = first_line[1]
-                        fwd_az, back_az, _ = geod.inv(lon1, lat1, lon2, lat2)
-                        
-                        heading = fwd_az % 360
-                        reciprocal_heading = back_az % 360
-                        
-                        f.write(f"Heading: {heading:.1f}°\n")
-                        f.write(f"Reciprocal Heading: {reciprocal_heading:.1f}°\n")
-                    except Exception:
-                        f.write("Heading: Unable to calculate\n")
-                    
-                    single_line_length_m = total_survey_time['main_lines_distance_m'] / num_main_lines
-                    single_line_length_km = single_line_length_m / 1000
-                    single_line_length_nm = single_line_length_m / 1852
-                    f.write(f"Length of Main Line: {single_line_length_m:.1f} m ({single_line_length_km:.3f} km, {single_line_length_nm:.3f} nm)\n")
-                f.write(f"Main Lines Total Distance: {total_survey_time['main_lines_distance_m']:.1f} m\n")
-                f.write(f"Main Lines Total Distance: {total_survey_time['main_lines_distance_km']:.3f} km\n")
-                f.write(f"Main Lines Total Distance: {total_survey_time['main_lines_distance_nm']:.3f} nm\n")
-                f.write(f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_m']:.1f} m\n")
-                f.write(f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_km']:.3f} km\n")
-                f.write(f"Travel Between Lines: {total_survey_time['travel_between_lines_distance_nm']:.3f} nm\n")
-                if include_crossline:
-                    f.write(f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_m']:.1f} m\n")
-                    f.write(f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_km']:.3f} km\n")
-                    f.write(f"Travel to Crossline: {total_survey_time['travel_to_crossline_distance_nm']:.3f} nm\n")
-                    f.write(f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_m']:.1f} m\n")
-                    f.write(f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_km']:.3f} km\n")
-                    f.write(f"Crossline (per pass): {total_survey_time['crossline_single_pass_distance_nm']:.3f} nm\n")
-                    f.write(f"Crossline Passes: {total_survey_time['num_crossline_passes']}\n")
-                
-                # Add crossline heading information
-                if include_crossline and self.cross_line_data and len(self.cross_line_data) >= 2:
-                    try:
-                        if pyproj is not None:
-                            geod = pyproj.Geod(ellps="WGS84")
-                            lat1, lon1 = self.cross_line_data[0]
-                            lat2, lon2 = self.cross_line_data[1]
-                            fwd_az, back_az, _ = geod.inv(lon1, lat1, lon2, lat2)
-                            
-                            crossline_heading = fwd_az % 360
-                            crossline_reciprocal_heading = back_az % 360
-                            
-                            f.write(f"Crossline Heading: {crossline_heading:.1f}°\n")
-                            f.write(f"Crossline Reciprocal Heading: {crossline_reciprocal_heading:.1f}°\n")
-                        else:
-                            f.write("Crossline Heading: pyproj not available\n")
-                    except Exception:
-                        f.write("Crossline Heading: Unable to calculate\n")
-                
-                if include_crossline:
-                    f.write(f"Crossline Total Distance: {total_survey_time['crossline_total_distance_m']:.1f} m\n")
-                    f.write(f"Crossline Total Distance: {total_survey_time['crossline_total_distance_km']:.3f} km\n")
-                    f.write(f"Crossline Total Distance: {total_survey_time['crossline_total_distance_nm']:.3f} nm\n")
-                f.write("\n")
-                
-                f.write("TOTAL SURVEY DISTANCE\n")
-                f.write("-" * 25 + "\n")
-                f.write(f"Total Survey Distance: {total_survey_time['total_distance_m']:.1f} m\n")
-                f.write(f"Total Survey Distance: {total_survey_time['total_distance_km']:.3f} km\n")
-                f.write(f"Total Survey Distance: {total_survey_time['total_distance_nm']:.3f} nm\n\n")
-                
-                f.write("SURVEY TIME BREAKDOWN\n")
-                f.write("-" * 25 + "\n")
-                f.write(f"Main Lines Survey: {_fmt_minutes_and_hours(total_survey_time['main_lines_minutes'])}\n")
-                if include_crossline:
-                    f.write(f"Crossline Survey: {_fmt_minutes_and_hours(total_survey_time['crossline_minutes'])}\n")
-                f.write(f"Travel Between Lines: {_fmt_minutes_and_hours(total_survey_time['travel_minutes'])}\n")
-                if include_crossline:
-                    f.write(f"Travel to Crossline: {_fmt_minutes_and_hours(total_survey_time['travel_to_crossline_minutes'])}\n")
-                if 'total_turn_time_min' in total_survey_time:
-                    num_turns = (total_survey_time.get('num_turns_between_main_lines', 0) + 
-                               total_survey_time.get('num_turns_to_crossline', 0) + 
-                               total_survey_time.get('num_turns_between_crossline_passes', 0))
-                    turn_time_per_turn = total_survey_time.get('turn_time_per_turn_min', 5.0)
-                    f.write(
-                        f"Total Turn Time: {_fmt_minutes_and_hours(total_survey_time['total_turn_time_min'])} "
-                        f"({num_turns} turns × {turn_time_per_turn:.1f} min)\n\n"
-                    )
-                else:
-                    f.write("\n")
-                
-                # Calculate total survey time and transit time
-                crossline_survey_time_only = total_survey_time['crossline_minutes']
-                if 'num_turns_between_crossline_passes' in total_survey_time and total_survey_time['num_turns_between_crossline_passes'] > 0:
-                    crossline_survey_time_only -= total_survey_time.get('turn_time_per_turn_min', 5.0) * total_survey_time['num_turns_between_crossline_passes']
-                total_survey_time_only = total_survey_time['main_lines_minutes'] + crossline_survey_time_only
-                
-                travel_between_lines_time_only = total_survey_time['travel_minutes']
-                if 'num_turns_between_main_lines' in total_survey_time and total_survey_time['num_turns_between_main_lines'] > 0:
-                    travel_between_lines_time_only -= total_survey_time.get('turn_time_per_turn_min', 5.0) * total_survey_time['num_turns_between_main_lines']
-                
-                travel_to_crossline_time_only = total_survey_time['travel_to_crossline_minutes']
-                if 'num_turns_to_crossline' in total_survey_time and total_survey_time['num_turns_to_crossline'] > 0:
-                    travel_to_crossline_time_only -= total_survey_time.get('turn_time_per_turn_min', 5.0) * total_survey_time['num_turns_to_crossline']
-                
-                total_transit_time_only = travel_between_lines_time_only + travel_to_crossline_time_only
-                
-                f.write("TOTAL SURVEY TIME\n")
-                f.write("-" * 20 + "\n")
-                f.write(f"Total Survey Time: {_fmt_minutes_and_hours(total_survey_time_only)}\n")
-                f.write(f"Total Transit Time: {_fmt_minutes_and_hours(total_transit_time_only)}\n")
-                if 'total_turn_time_min' in total_survey_time:
-                    f.write(f"Total Turn Time: {_fmt_minutes_and_hours(total_survey_time['total_turn_time_min'])}\n")
-                f.write(f"Total Time: {_fmt_minutes_and_hours(total_survey_time['total_minutes'])}\n\n")
-                
-                f.write("SURVEY LINE DETAILS\n")
-                f.write("-" * 20 + "\n")
-                f.write(f"Number of Main Survey Lines: {len(self.survey_lines_data)}\n")
-                if include_crossline and self.cross_line_data and len(self.cross_line_data) >= 2:
-                    f.write("Crossline: Present\n")
-                else:
-                    f.write("Crossline: Not present\n")
-                f.write(f"Survey Speed: {values.get('survey_speed', '8.0')} knots\n")
-                if 'turn_time_per_turn_min' in total_survey_time:
-                    f.write(f"Turn Time (per turn): {_fmt_minutes_and_hours(total_survey_time['turn_time_per_turn_min'])}\n")
-                f.write(f"Crossline Passes: {total_survey_time['num_crossline_passes']}\n\n")
-                
-                f.write("SURVEY PATTERN\n")
-                f.write("-" * 15 + "\n")
-                f.write("Main lines are surveyed in a zigzag pattern:\n")
-                f.write("- Even-numbered lines (2, 4, 6...): Survey from start to end\n")
-                f.write("- Odd-numbered lines (1, 3, 5...): Survey from end to start (flipped)\n")
-                f.write("- This minimizes travel distance between lines\n")
-                if include_crossline:
-                    f.write("- After completing all main lines, travel to crossline start\n")
-                    f.write("- Complete crossline survey with specified number of passes\n")
-                f.write("\n")
-                
-                # Accuracy Waypoints (DMM)
-                dmm_heading = "Accuracy Waypoints (DMM)"
-                f.write(f"\n{dmm_heading}\n")
-                f.write("-" * len(dmm_heading) + "\n")
-                if self.survey_lines_data:
-                    for i, line in enumerate(self.survey_lines_data):
-                        if i % 2 == 0:
-                            start, end = line[0], line[1]
-                        else:
-                            start, end = line[1], line[0]
-                        start_label = f'L{i+1}S'
-                        end_label = f'L{i+1}E'
-                        start_lat_ddm = decimal_degrees_to_ddm(start[0], is_latitude=True)
-                        start_lon_ddm = decimal_degrees_to_ddm(start[1], is_latitude=False)
-                        end_lat_ddm = decimal_degrees_to_ddm(end[0], is_latitude=True)
-                        end_lon_ddm = decimal_degrees_to_ddm(end[1], is_latitude=False)
-                        f.write(f"{start_label}: {start_lat_ddm}, {start_lon_ddm}\n")
-                        f.write(f"{end_label}: {end_lat_ddm}, {end_lon_ddm}\n")
-                if include_crossline and self.cross_line_data and len(self.cross_line_data) >= 2:
-                    cls_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][0], is_latitude=True)
-                    cls_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[0][1], is_latitude=False)
-                    cle_lat_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][0], is_latitude=True)
-                    cle_lon_ddm = decimal_degrees_to_ddm(self.cross_line_data[1][1], is_latitude=False)
-                    f.write(f"CLS: {cls_lat_ddm}, {cls_lon_ddm}\n")
-                    f.write(f"CLE: {cle_lat_ddm}, {cle_lon_ddm}\n")
-
-                # Accuracy Waypoints (DDD)
-                ddd_heading = "Accuracy Waypoints (DDD)"
-                f.write(f"\n{ddd_heading}\n")
-                f.write("-" * len(ddd_heading) + "\n")
-                if self.survey_lines_data:
-                    for i, line in enumerate(self.survey_lines_data):
-                        if i % 2 == 0:
-                            start, end = line[0], line[1]
-                        else:
-                            start, end = line[1], line[0]
-                        start_label = f'L{i+1}S'
-                        end_label = f'L{i+1}E'
-                        f.write(f"{start_label}: {start[0]:.6f}, {start[1]:.6f}\n")
-                        f.write(f"{end_label}: {end[0]:.6f}, {end[1]:.6f}\n")
-                if include_crossline and self.cross_line_data and len(self.cross_line_data) >= 2:
-                    f.write(f"CLS: {self.cross_line_data[0][0]:.6f}, {self.cross_line_data[0][1]:.6f}\n")
-                    f.write(f"CLE: {self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f}\n")
-                f.write("\n")
-                
-                f.write("NOTES\n")
-                f.write("-" * 5 + "\n")
-                f.write("- All distances calculated using geodetic (spherical) geometry\n")
-                f.write("- Times calculated based on specified survey speed\n")
-                f.write("- Crossline lead-in/out distance extends beyond main survey area\n")
-                f.write("- Survey pattern optimized for efficiency\n")
+            include_crossline = (
+                total_survey_time.get('num_crossline_passes', 0) > 0
+                and total_survey_time.get('crossline_total_distance_m', 0) > 0
+            )
 
             # --- Export Survey Plan as PNG ---
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")

@@ -333,7 +333,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self.visualization_shapefile_geometries = []
             self.visualization_shapefile_paths = []
             self.add_shapefile_btn = QPushButton("Add Shapefile")
-            self.add_shapefile_btn.clicked.connect(self._add_visualization_shapefile)
+            self.add_shapefile_btn.clicked.connect(self._on_visualization_shapefile_button_clicked)
             self.add_shapefile_btn.setToolTip("Load a polygon/line shapefile for map visualization only.")
 
         # Export type/About buttons (only create once)
@@ -421,6 +421,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_last_perf_import_dir()
         self._load_last_shapefile_dir()
         self._load_export_type_options()
+        if hasattr(self, "_refresh_visualization_shapefile_button_state"):
+            self._refresh_visualization_shapefile_button_state()
 
         # After self._setup_layout(), connect the motion event for line planning, pitch line, pick center, and geotiff hover
         # Note: These are now handled by the main _on_mouse_motion method
@@ -1733,42 +1735,19 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         calculated_time_distance_layout.addWidget(self.performance_ping_time_entry, calculated_row, 1)
         calculated_row += 1
 
-        calculated_time_distance_layout.addWidget(QLabel("Total Test Time (sec)"), calculated_row, 0)
-        self.performance_total_test_time_sec_entry = QLabel("-")
-        calculated_time_distance_layout.addWidget(self.performance_total_test_time_sec_entry, calculated_row, 1)
+        calculated_time_distance_layout.addWidget(QLabel("Total Test Time:"), calculated_row, 0)
+        self.performance_total_test_time_entry = QLabel("-")
+        calculated_time_distance_layout.addWidget(self.performance_total_test_time_entry, calculated_row, 1)
         calculated_row += 1
 
-        calculated_time_distance_layout.addWidget(QLabel("Total Test Time (min)"), calculated_row, 0)
-        self.performance_total_test_time_min_entry = QLabel("-")
-        calculated_time_distance_layout.addWidget(self.performance_total_test_time_min_entry, calculated_row, 1)
-        calculated_row += 1
-
-        calculated_time_distance_layout.addWidget(QLabel("Line Length (m)"), calculated_row, 0)
+        calculated_time_distance_layout.addWidget(QLabel("Line Length:"), calculated_row, 0)
         self.performance_line_length_m_entry = QLabel("-")
         calculated_time_distance_layout.addWidget(self.performance_line_length_m_entry, calculated_row, 1)
-        calculated_row += 1
-
-        calculated_time_distance_layout.addWidget(QLabel("Line Length (km)"), calculated_row, 0)
-        self.performance_line_length_km_entry = QLabel("-")
-        calculated_time_distance_layout.addWidget(self.performance_line_length_km_entry, calculated_row, 1)
         calculated_row += 1
 
         self.performance_plot_test_lines_btn = QPushButton("Plot Performance Lines")
         self.performance_plot_test_lines_btn.clicked.connect(self._plot_performance_test_lines)
         calculated_time_distance_layout.addWidget(self.performance_plot_test_lines_btn, calculated_row, 0, 1, 2)
-        calculated_row += 1
-
-        performance_plot_control_row = QWidget()
-        performance_plot_control_layout = QHBoxLayout(performance_plot_control_row)
-        performance_plot_control_layout.setContentsMargins(0, 0, 0, 0)
-        performance_plot_control_layout.setSpacing(6)
-        self.performance_zoom_to_lines_btn = QPushButton("Zoom to Performance Lines")
-        self.performance_zoom_to_lines_btn.clicked.connect(self._zoom_to_performance_lines)
-        performance_plot_control_layout.addWidget(self.performance_zoom_to_lines_btn, 1)
-        self.performance_remove_lines_btn = QPushButton("Remove Performance Lines")
-        self.performance_remove_lines_btn.clicked.connect(self._clear_performance_lines)
-        performance_plot_control_layout.addWidget(self.performance_remove_lines_btn, 1)
-        calculated_time_distance_layout.addWidget(performance_plot_control_row, calculated_row, 0, 1, 2)
         calculated_row += 1
 
         self.performance_show_test_info_btn = QPushButton("Show Performance Test Info")
@@ -1777,6 +1756,20 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         calculated_row += 1
 
         swath_perf_layout.addWidget(calculated_time_distance_groupbox, swath_perf_row, 0, 1, 2)
+        swath_perf_row += 1
+
+        performance_plot_control_groupbox = QGroupBox("Performance Plot Control")
+        performance_plot_control_layout = QGridLayout(performance_plot_control_groupbox)
+        performance_plot_control_layout.setSpacing(3)
+        performance_plot_control_layout.setContentsMargins(9, 9, 9, 9)
+        performance_plot_control_layout.setColumnStretch(0, 1)
+        self.performance_zoom_to_lines_btn = QPushButton("Zoom to Performance Lines")
+        self.performance_zoom_to_lines_btn.clicked.connect(self._zoom_to_performance_lines)
+        performance_plot_control_layout.addWidget(self.performance_zoom_to_lines_btn, 0, 0, 1, 1)
+        self.performance_remove_lines_btn = QPushButton("Remove Performance Lines")
+        self.performance_remove_lines_btn.clicked.connect(self._clear_performance_lines)
+        performance_plot_control_layout.addWidget(self.performance_remove_lines_btn, 1, 0, 1, 1)
+        swath_perf_layout.addWidget(performance_plot_control_groupbox, swath_perf_row, 0, 1, 2)
         swath_perf_row += 1
 
         perf_import_export_groupbox = QGroupBox("Performance Import/Export")

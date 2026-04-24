@@ -1566,25 +1566,26 @@ class ReferenceMixin:
             print(f"Error calculating reference survey statistics: {e}")
             return None
 
-    def _show_reference_planning_info(self):
-        """Display comprehensive reference planning survey statistics in a custom dialog with copy functionality."""
+    def _build_reference_planning_info_text(self, export_name=None, export_date=None):
+        """Build the Accuracy Survey Info text used by dialog and exports."""
         stats = self._calculate_reference_survey_statistics()
         if not stats:
-            self._show_message("warning","Statistics Error", "Unable to calculate reference planning statistics. Please ensure survey lines are generated.")
-            return
+            return None
 
         def _fmt_minutes_and_hours(minutes_val):
             return f"{minutes_val:.1f} min ({minutes_val / 60.0:.2f} hr)"
 
-        # Format the statistics for display
         include_crossline = stats.get('num_crossline_passes', 0) > 0 and stats.get('crossline_single_pass_distance_m', 0) > 0
         stats_text = "ACCURACY SURVEY INFORMATION\n"
         stats_text += "=" * 50 + "\n\n"
-        export_name = self.export_name_entry.text().strip() if hasattr(self, 'export_name_entry') else ""
+        if export_name is None:
+            export_name = self.export_name_entry.text().strip() if hasattr(self, 'export_name_entry') else ""
         if not export_name:
             export_name = "Unnamed"
+        if export_date is None:
+            export_date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         stats_text += f"Survey Plan: {export_name}\n"
-        stats_text += f"Export Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        stats_text += f"Export Date: {export_date}\n\n"
 
         # Survey parameters
         try:
@@ -1810,6 +1811,15 @@ class ReferenceMixin:
         if include_crossline and self.cross_line_data and len(self.cross_line_data) >= 2:
             stats_text += f"CLS: {self.cross_line_data[0][0]:.6f}, {self.cross_line_data[0][1]:.6f}\n"
             stats_text += f"CLE: {self.cross_line_data[1][0]:.6f}, {self.cross_line_data[1][1]:.6f}\n"
+
+        return stats_text
+
+    def _show_reference_planning_info(self):
+        """Display comprehensive reference planning survey statistics in a custom dialog with copy functionality."""
+        stats_text = self._build_reference_planning_info_text()
+        if not stats_text:
+            self._show_message("warning","Statistics Error", "Unable to calculate reference planning statistics. Please ensure survey lines are generated.")
+            return
 
         # Create custom dialog window with copy functionality
         show_statistics_dialog(self, "Accuracy Survey Info", stats_text)

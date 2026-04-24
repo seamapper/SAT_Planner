@@ -27,6 +27,17 @@ except ImportError:
 class PerformanceMixin:
     """Mixin for Performance tab calculation and field helpers."""
 
+    def _performance_current_line_length_m(self):
+        """Return numeric line length in meters from the display field."""
+        raw = self._performance_get_text("performance_line_length_m_entry")
+        if not raw or raw == "-":
+            return None
+        try:
+            # Supports either plain meters or "X m (Y km, Z nm)"
+            return float(raw.split("m", 1)[0].strip())
+        except Exception:
+            return None
+
     def _performance_get_text(self, attr_name):
         widget = getattr(self, attr_name, None)
         if widget is None:
@@ -110,7 +121,7 @@ class PerformanceMixin:
 
     def _update_performance_total_test_time(self):
         """Total time = (# pings × ping time) + BIST (minutes as seconds)."""
-        if not hasattr(self, "performance_total_test_time_min_entry"):
+        if not hasattr(self, "performance_total_test_time_entry"):
             return
         ping_time_sec = self._performance_ping_time_sec()
         if ping_time_sec is None:
@@ -122,11 +133,9 @@ class PerformanceMixin:
                 {"ping_time_sec": None},
             )
             # endregion
-            self._performance_clear_value("performance_total_test_time_min_entry")
-            self._performance_clear_value("performance_total_test_time_sec_entry")
+            self._performance_clear_value("performance_total_test_time_entry")
             if hasattr(self, "performance_line_length_m_entry"):
                 self._performance_clear_value("performance_line_length_m_entry")
-                self._performance_clear_value("performance_line_length_km_entry")
             return
         try:
             num_pings = float(self.performance_num_pings_entry.text().strip())
@@ -139,11 +148,9 @@ class PerformanceMixin:
                 {"raw_num_pings": self.performance_num_pings_entry.text().strip()},
             )
             # endregion
-            self._performance_clear_value("performance_total_test_time_min_entry")
-            self._performance_clear_value("performance_total_test_time_sec_entry")
+            self._performance_clear_value("performance_total_test_time_entry")
             if hasattr(self, "performance_line_length_m_entry"):
                 self._performance_clear_value("performance_line_length_m_entry")
-                self._performance_clear_value("performance_line_length_km_entry")
             return
         if num_pings < 0 or not np.isfinite(num_pings):
             # region agent log
@@ -154,11 +161,9 @@ class PerformanceMixin:
                 {"num_pings": num_pings},
             )
             # endregion
-            self._performance_clear_value("performance_total_test_time_min_entry")
-            self._performance_clear_value("performance_total_test_time_sec_entry")
+            self._performance_clear_value("performance_total_test_time_entry")
             if hasattr(self, "performance_line_length_m_entry"):
                 self._performance_clear_value("performance_line_length_m_entry")
-                self._performance_clear_value("performance_line_length_km_entry")
             return
 
         bist_raw = self.performance_bist_time_entry.text().strip()
@@ -176,11 +181,9 @@ class PerformanceMixin:
                     {"raw_bist_min": bist_raw},
                 )
                 # endregion
-                self._performance_clear_value("performance_total_test_time_min_entry")
-                self._performance_clear_value("performance_total_test_time_sec_entry")
+                self._performance_clear_value("performance_total_test_time_entry")
                 if hasattr(self, "performance_line_length_m_entry"):
                     self._performance_clear_value("performance_line_length_m_entry")
-                    self._performance_clear_value("performance_line_length_km_entry")
                 return
         if bist_min < 0 or not np.isfinite(bist_min):
             # region agent log
@@ -191,11 +194,9 @@ class PerformanceMixin:
                 {"bist_min": bist_min},
             )
             # endregion
-            self._performance_clear_value("performance_total_test_time_min_entry")
-            self._performance_clear_value("performance_total_test_time_sec_entry")
+            self._performance_clear_value("performance_total_test_time_entry")
             if hasattr(self, "performance_line_length_m_entry"):
                 self._performance_clear_value("performance_line_length_m_entry")
-                self._performance_clear_value("performance_line_length_km_entry")
             return
 
         collect_sec = num_pings * ping_time_sec
@@ -209,16 +210,14 @@ class PerformanceMixin:
                 {"collect_sec": collect_sec, "bist_min": bist_min, "total_sec": total_sec},
             )
             # endregion
-            self._performance_clear_value("performance_total_test_time_min_entry")
-            self._performance_clear_value("performance_total_test_time_sec_entry")
+            self._performance_clear_value("performance_total_test_time_entry")
             if hasattr(self, "performance_line_length_m_entry"):
                 self._performance_clear_value("performance_line_length_m_entry")
-                self._performance_clear_value("performance_line_length_km_entry")
             return
 
         total_min = total_sec / 60.0
-        self._performance_set_value("performance_total_test_time_min_entry", f"{total_min:.2f}")
-        self._performance_set_value("performance_total_test_time_sec_entry", f"{total_sec:.1f}")
+        total_hr = total_min / 60.0
+        self._performance_set_value("performance_total_test_time_entry", f"{total_min:.2f} min ({total_hr:.2f} hr)")
         # region agent log
         self._debug_performance_log(
             "H3",
@@ -237,17 +236,14 @@ class PerformanceMixin:
         ping_time_sec = self._performance_ping_time_sec()
         if ping_time_sec is None:
             self._performance_clear_value("performance_line_length_m_entry")
-            self._performance_clear_value("performance_line_length_km_entry")
             return
         try:
             num_pings = float(self.performance_num_pings_entry.text().strip())
         except Exception:
             self._performance_clear_value("performance_line_length_m_entry")
-            self._performance_clear_value("performance_line_length_km_entry")
             return
         if num_pings < 0 or not np.isfinite(num_pings):
             self._performance_clear_value("performance_line_length_m_entry")
-            self._performance_clear_value("performance_line_length_km_entry")
             return
         total_sec_raw = f"{num_pings * ping_time_sec}"
         try:
@@ -262,7 +258,6 @@ class PerformanceMixin:
             )
             # endregion
             self._performance_clear_value("performance_line_length_m_entry")
-            self._performance_clear_value("performance_line_length_km_entry")
             return
         try:
             speed_kts = float(self.performance_test_speed_entry.text().strip())
@@ -276,7 +271,6 @@ class PerformanceMixin:
             )
             # endregion
             self._performance_clear_value("performance_line_length_m_entry")
-            self._performance_clear_value("performance_line_length_km_entry")
             return
         if total_sec < 0 or speed_kts < 0 or not np.isfinite(total_sec) or not np.isfinite(speed_kts):
             # region agent log
@@ -288,14 +282,16 @@ class PerformanceMixin:
             )
             # endregion
             self._performance_clear_value("performance_line_length_m_entry")
-            self._performance_clear_value("performance_line_length_km_entry")
             return
 
         speed_mps = speed_kts * 0.514444
         line_length_m = speed_mps * total_sec
         line_length_km = line_length_m / 1000.0
-        self._performance_set_value("performance_line_length_m_entry", f"{line_length_m:.1f}")
-        self._performance_set_value("performance_line_length_km_entry", f"{line_length_km:.3f}")
+        line_length_nm = line_length_m / 1852.0
+        self._performance_set_value(
+            "performance_line_length_m_entry",
+            f"{line_length_m:.1f} m ({line_length_km:.3f} km, {line_length_nm:.3f} nm)",
+        )
         # region agent log
         self._debug_performance_log(
             "H5",
@@ -430,7 +426,7 @@ class PerformanceMixin:
         try:
             center_lat = float(self.performance_central_lat_entry.text().strip())
             center_lon = float(self.performance_central_lon_entry.text().strip())
-            line_length_m = float(self._performance_get_text("performance_line_length_m_entry"))
+            line_length_m = self._performance_current_line_length_m()
             swell_raw = self.performance_swell_direction_entry.text().strip()
             swell_direction = float(swell_raw) if swell_raw else 0.0
             bist_min = float(self.performance_bist_time_entry.text().strip()) if self.performance_bist_time_entry.text().strip() else 0.0
@@ -444,7 +440,7 @@ class PerformanceMixin:
                 )
             return
 
-        if not np.isfinite(line_length_m) or line_length_m <= 0:
+        if line_length_m is None or not np.isfinite(line_length_m) or line_length_m <= 0:
             if not quiet:
                 self._show_message("warning", "Invalid Line Length", "Line Length (m) must be greater than zero.")
             return

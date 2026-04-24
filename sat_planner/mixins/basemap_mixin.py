@@ -19,6 +19,34 @@ from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, transform, 
 class BasemapMixin:
     """Mixin for basemap imagery and NOAA ENC Charts overlay (web-served tiles/export)."""
 
+    def _refresh_visualization_shapefile_button_state(self):
+        """Update shapefile button label/tooltip based on loaded overlay state."""
+        btn = getattr(self, "add_shapefile_btn", None)
+        if btn is None:
+            return
+        has_loaded = bool(getattr(self, "visualization_shapefile_paths", []) or [])
+        if has_loaded:
+            btn.setText("Remove Shapefile")
+            btn.setToolTip("Remove loaded visualization shapefile overlay(s).")
+        else:
+            btn.setText("Add Shapefile")
+            btn.setToolTip("Load a polygon/line/point shapefile for map visualization only.")
+
+    def _on_visualization_shapefile_button_clicked(self):
+        """Toggle between adding and removing visualization shapefile overlays."""
+        has_loaded = bool(getattr(self, "visualization_shapefile_paths", []) or [])
+        if has_loaded:
+            self._remove_visualization_shapefiles()
+        else:
+            self._add_visualization_shapefile()
+
+    def _remove_visualization_shapefiles(self):
+        """Remove all visualization shapefile overlays from the map."""
+        self.visualization_shapefile_geometries = []
+        self.visualization_shapefile_paths = []
+        self._refresh_visualization_shapefile_button_state()
+        self._plot_survey_plan(preserve_view_limits=True)
+
     def _toggle_imagery_basemap(self):
         """Toggle imagery basemap on/off."""
         if hasattr(self, 'imagery_basemap_checkbox'):
@@ -166,6 +194,7 @@ class BasemapMixin:
             self._show_message("error", "Shapefile Error", f"Could not load shapefile:\n{exc}")
             return
 
+        self._refresh_visualization_shapefile_button_state()
         self._plot_survey_plan(preserve_view_limits=True)
 
     def _append_visualization_shapefile_data(self, shapefile_path):
@@ -183,6 +212,7 @@ class BasemapMixin:
             self.visualization_shapefile_paths = []
         if normalized_path not in self.visualization_shapefile_paths:
             self.visualization_shapefile_paths.append(normalized_path)
+        self._refresh_visualization_shapefile_button_state()
 
     def _load_visualization_shapefile_paths(self, shapefile_paths, replace_existing=False, redraw=True):
         """Load one or more shapefiles by path for visualization overlays."""
@@ -195,6 +225,7 @@ class BasemapMixin:
         if replace_existing:
             self.visualization_shapefile_geometries = []
             self.visualization_shapefile_paths = []
+            self._refresh_visualization_shapefile_button_state()
 
         if isinstance(shapefile_paths, str):
             path_list = [shapefile_paths]
@@ -216,7 +247,10 @@ class BasemapMixin:
                 failed_paths.append((normalized_path, str(exc)))
 
         if redraw:
+            self._refresh_visualization_shapefile_button_state()
             self._plot_survey_plan(preserve_view_limits=True)
+        else:
+            self._refresh_visualization_shapefile_button_state()
 
         return {
             "loaded_paths": loaded_paths,

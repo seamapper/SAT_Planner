@@ -409,24 +409,35 @@ class LinePlanningMixin:
         else:
             export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
         try:
+            export_shapefile = self._export_type_enabled("esri_shapefile") if hasattr(self, "_export_type_enabled") else True
+            export_sis = self._export_type_enabled("sis_asciiplan") if hasattr(self, "_export_type_enabled") else True
+            export_gpx = self._export_type_enabled("gpx") if hasattr(self, "_export_type_enabled") else True
+            export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
+            export_text_txt = self._export_type_enabled("text_txt") if hasattr(self, "_export_type_enabled") else True
+            export_hypack = self._export_type_enabled("hypack_lnw") if hasattr(self, "_export_type_enabled") else True
+            export_map_png = self._export_type_enabled("map_png") if hasattr(self, "_export_type_enabled") else True
+            export_profiles_png = self._export_type_enabled("profiles_png") if hasattr(self, "_export_type_enabled") else True
+
             # --- Build common rows and write DDD/DMM/DMS CSV and TXT via export_utils ---
             line_planning_rows = [(1, export_name, i + 1, lat, lon) for i, (lat, lon) in enumerate(self.line_planning_points)]
 
             csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
-            export_utils.write_ddd_csv(csv_file_path, line_planning_rows)
             txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
-            export_utils.write_ddd_txt(txt_file_path, line_planning_rows)
             ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
-            export_utils.write_dmm_csv(ddm_file_path, line_planning_rows)
             dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
-            export_utils.write_dms_csv(dms_file_path, line_planning_rows)
             ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
-            export_utils.write_dmm_txt(ddm_txt_file_path, line_planning_rows)
             dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
-            export_utils.write_dms_txt(dms_txt_file_path, line_planning_rows)
+            if export_text_csv:
+                export_utils.write_ddd_csv(csv_file_path, line_planning_rows)
+                export_utils.write_dmm_csv(ddm_file_path, line_planning_rows)
+                export_utils.write_dms_csv(dms_file_path, line_planning_rows)
+            if export_text_txt:
+                export_utils.write_ddd_txt(txt_file_path, line_planning_rows)
+                export_utils.write_dmm_txt(ddm_txt_file_path, line_planning_rows)
+                export_utils.write_dms_txt(dms_txt_file_path, line_planning_rows)
 
             shapefile_path = None
-            if LineString and fiona and _shapely_mapping:
+            if export_shapefile and LineString and fiona and _shapely_mapping:
                 schema = {'geometry': 'LineString', 'properties': {'name': 'str'}}
                 crs_epsg = 'EPSG:4326'
                 shapely_line = LineString([(lon, lat) for lat, lon in self.line_planning_points])
@@ -445,38 +456,43 @@ class LinePlanningMixin:
                     json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None)}, "features": [geojson_feature]}, f, indent=2)
             lnw_file_path = None
             lnw_lines = [(export_name, list(self.line_planning_points))]
-            if len(self.line_planning_points) >= 2:
+            if export_hypack and len(self.line_planning_points) >= 2:
                 zone, hem = export_utils.compute_utm_zone_from_points(self.line_planning_points)
                 utm_suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
                 lnw_file_path = os.path.join(export_dir, f"{export_name}{utm_suffix}.lnw")
                 if not export_utils.write_lnw(lnw_file_path, lnw_lines):
                     lnw_file_path = None
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
-            export_utils.write_asciiplan(sis_file_path, [(export_name, list(self.line_planning_points))])
+            if export_sis:
+                export_utils.write_asciiplan(sis_file_path, [(export_name, list(self.line_planning_points))])
             gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
-            gpx_written = export_utils.write_gpx(
-                gpx_file_path,
-                [(export_name, list(self.line_planning_points))],
-                creator="SAT Planner Line",
-            )
+            gpx_written = False
             base_stem = export_utils.sanitize_export_basename(export_name)
             gpx_lineplan_path = os.path.join(export_dir, f"{base_stem}_LinePlan.gpx")
-            gpx_lineplan_written = export_utils.write_gpx(
-                gpx_lineplan_path,
-                [("LinePlan", list(self.line_planning_points))],
-                creator="SAT Planner Line",
-            )
+            gpx_lineplan_written = False
+            if export_gpx:
+                gpx_written = export_utils.write_gpx(
+                    gpx_file_path,
+                    [(export_name, list(self.line_planning_points))],
+                    creator="SAT Planner Line",
+                )
+                gpx_lineplan_written = export_utils.write_gpx(
+                    gpx_lineplan_path,
+                    [("LinePlan", list(self.line_planning_points))],
+                    creator="SAT Planner Line",
+                )
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
-            if hasattr(self, "_hide_map_hover_tooltip_for_export"):
-                self._hide_map_hover_tooltip_for_export()
-            self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+            if export_map_png:
+                if hasattr(self, "_hide_map_hover_tooltip_for_export"):
+                    self._hide_map_hover_tooltip_for_export()
+                self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
             profile_png_path = None
             profile_csv_path = None
-            if hasattr(self, 'profile_fig') and self.profile_fig is not None:
+            if export_profiles_png and hasattr(self, 'profile_fig') and self.profile_fig is not None:
                 profile_png_path = os.path.join(export_dir, f"{export_name}_profile.png")
                 self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
-            prof_export = self._line_plan_profile_arrays()
-            if prof_export is not None:
+            prof_export = self._line_plan_profile_arrays() if export_text_csv else None
+            if export_text_csv and prof_export is not None:
                 d_exp, e_exp, s_exp, wp_d_exp = prof_export
                 wp_labels_exp = self._line_plan_profile_waypoint_labels(d_exp, wp_d_exp)
                 profile_csv_path = os.path.join(export_dir, f"{export_name}_profile.csv")
@@ -518,23 +534,59 @@ class LinePlanningMixin:
             else:
                 with open(stats_file_path, 'w') as f:
                     f.write("Line planning info.\nNo statistics available for this export.\n")
-            success_msg = f"Line exported successfully to:\n- {os.path.basename(csv_file_path)}\n- {os.path.basename(txt_file_path)}\n"
+            params_json_path = os.path.join(export_dir, f"{export_name}_params.json")
+            try:
+                try:
+                    line_speed = (
+                        float(self.line_survey_speed_entry.text())
+                        if hasattr(self, "line_survey_speed_entry") and self.line_survey_speed_entry.text()
+                        else 8.0
+                    )
+                except (ValueError, TypeError):
+                    line_speed = 8.0
+                params_payload = {
+                    "survey_speed": line_speed,
+                    "geotiff_path": (
+                        self.current_geotiff_path
+                        if hasattr(self, "current_geotiff_path") and self.current_geotiff_path
+                        else None
+                    ),
+                    "visualization_shapefile_paths": list(
+                        getattr(self, "visualization_shapefile_paths", []) or []
+                    ),
+                }
+                with open(params_json_path, "w", encoding="utf-8") as f:
+                    json.dump(params_payload, f, indent=2)
+            except Exception:
+                params_json_path = None
+            success_msg = f"Line exported successfully to:\n- {os.path.basename(geojson_file_path)}\n"
+            if export_text_csv:
+                success_msg += f"- {os.path.basename(csv_file_path)}\n"
+                success_msg += f"- {os.path.basename(ddm_file_path)}\n"
+                success_msg += f"- {os.path.basename(dms_file_path)}\n"
+            if export_text_txt:
+                success_msg += f"- {os.path.basename(txt_file_path)}\n"
+                success_msg += f"- {os.path.basename(ddm_txt_file_path)}\n"
+                success_msg += f"- {os.path.basename(dms_txt_file_path)}\n"
             if shapefile_path:
                 success_msg += f"- {os.path.basename(shapefile_path)} (and associated files)\n"
-            success_msg += f"- {os.path.basename(geojson_file_path)}\n"
             if lnw_file_path:
                 success_msg += f"- {os.path.basename(lnw_file_path)}\n"
-            success_msg += f"- {os.path.basename(sis_file_path)}\n"
+            if export_sis:
+                success_msg += f"- {os.path.basename(sis_file_path)}\n"
             if gpx_written:
                 success_msg += f"- {os.path.basename(gpx_file_path)}\n"
             if gpx_lineplan_written:
                 success_msg += f"- {os.path.basename(gpx_lineplan_path)}\n"
-            success_msg += f"- {os.path.basename(dms_txt_file_path)}\n- {os.path.basename(map_png_path)}\n"
+            if export_map_png:
+                success_msg += f"- {os.path.basename(map_png_path)}\n"
             if profile_png_path:
                 success_msg += f"- {os.path.basename(profile_png_path)}\n"
             if profile_csv_path:
                 success_msg += f"- {os.path.basename(profile_csv_path)}\n"
             success_msg += f"- {os.path.basename(stats_file_path)}\n"
+            if params_json_path:
+                success_msg += f"- {os.path.basename(params_json_path)}\n"
             success_msg += f"in directory: {export_dir}"
             self.set_line_info_text(success_msg, append=False)
         except Exception as e:
