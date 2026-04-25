@@ -842,26 +842,29 @@ class GeoTIFFMixin:
 
     def _apply_slope_overlay_min_changed(self):
         """Apply slope overlay min updates after debounce delay."""
-        if not (hasattr(self, 'show_slope_overlay_var') and self.show_slope_overlay_var):
-            return  # Don't update if slope overlay is not enabled
-
-        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
-            return
-
         try:
             if hasattr(self, 'slope_overlay_min_entry') and self.slope_overlay_min_entry:
                 min_val = float(self.slope_overlay_min_entry.text())
                 self.slope_overlay_min_var = min_val
-                # Preserve current plot area
-                xlim = self.ax.get_xlim()
-                ylim = self.ax.get_ylim()
-                self._plot_survey_plan(preserve_view_limits=True)
-                if xlim and ylim:
-                    self.ax.set_xlim(xlim)
-                    self.ax.set_ylim(ylim)
-                self.canvas.draw_idle()
         except (ValueError, AttributeError):
             pass  # Silently handle invalid input
+
+        # Only trigger redraw if slope overlay is currently visible.
+        if not (hasattr(self, 'show_slope_overlay_var') and self.show_slope_overlay_var):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
 
     def _on_slope_overlay_max_changed(self):
         """Handle slope overlay max entry change with a short typing debounce."""
@@ -873,26 +876,19 @@ class GeoTIFFMixin:
 
     def _apply_slope_overlay_max_changed(self):
         """Apply slope overlay max updates after debounce delay."""
-        if not (hasattr(self, 'show_slope_overlay_var') and self.show_slope_overlay_var):
-            return  # Don't update if slope overlay is not enabled
-
-        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
-            return
-
         try:
             if hasattr(self, 'slope_overlay_max_entry') and self.slope_overlay_max_entry:
                 max_val = float(self.slope_overlay_max_entry.text())
                 self.slope_overlay_max_var = max_val
-                # Preserve current plot area
-                xlim = self.ax.get_xlim()
-                ylim = self.ax.get_ylim()
-                self._plot_survey_plan(preserve_view_limits=True)
-                if xlim and ylim:
-                    self.ax.set_xlim(xlim)
-                    self.ax.set_ylim(ylim)
-                self.canvas.draw_idle()
         except (ValueError, AttributeError):
             pass  # Silently handle invalid input
+
+        # Only trigger redraw if slope overlay is currently visible.
+        if not (hasattr(self, 'show_slope_overlay_var') and self.show_slope_overlay_var):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+
         try:
             xlim = self.ax.get_xlim()
             ylim = self.ax.get_ylim()

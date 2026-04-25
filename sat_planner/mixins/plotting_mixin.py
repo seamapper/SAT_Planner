@@ -716,8 +716,8 @@ class PlottingMixin:
                         if hasattr(self, 'slope_overlay_max_var'):
                             max_slope = float(self.slope_overlay_max_var)
                         if min_slope >= max_slope:
-                            min_slope = 10.0
-                            max_slope = 20.0
+                            # Keep user-entered bounds by normalizing order
+                            min_slope, max_slope = min(max_slope, min_slope), max(max_slope, min_slope)
                     except (ValueError, AttributeError):
                         min_slope = 10.0
                         max_slope = 20.0
