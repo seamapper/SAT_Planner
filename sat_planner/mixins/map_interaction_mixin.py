@@ -14,6 +14,37 @@ from sat_planner.utils_geo import decimal_degrees_to_ddm
 class MapInteractionMixin:
     """Mixin for map interaction: click, scroll, pan, zoom-to, pick center."""
 
+    def _main_map_click_lonlat(self, event):
+        """Return (lon, lat) in the current main map axes, or (None, None).
+
+        ``_plot_survey_plan`` does ``figure.clear()`` and replaces ``self.ax``. Matplotlib can
+        still deliver ``button_press_event`` with ``event.inaxes`` pointing at the old axes (or
+        ``None``) while ``motion_notify_event`` tracks the new axes — so relying on ``inaxes`` /
+        ``xdata`` alone drops clicks even though the cyan preview (motion on ``self.ax``) works.
+        """
+        ax = getattr(self, "ax", None)
+        if ax is None or event.x is None or event.y is None:
+            return None, None
+        try:
+            if not ax.contains(event)[0]:
+                return None, None
+            lon, lat = ax.transData.inverted().transform((event.x, event.y))
+            return float(lon), float(lat)
+        except Exception:
+            return None, None
+
+    @staticmethod
+    def _approx_map_distance_m(lat0, lon0, lat1, lon1):
+        """Chord length in meters using the same local degree→meter scaling as the oriented box."""
+        center_lat = (lat0 + lat1) * 0.5
+        m_per_deg_lat = 111320.0
+        m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat))
+        if abs(m_per_deg_lon) < 1e-6:
+            return 0.0
+        dx = (lon1 - lon0) * m_per_deg_lon
+        dy = (lat1 - lat0) * m_per_deg_lat
+        return float(np.hypot(dx, dy))
+
     def _toggle_pick_center_mode(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot pick center.")
@@ -54,6 +85,54 @@ class MapInteractionMixin:
     def _on_plot_click(self, event):
         # Ignore middle button (button 2) - let it be handled by pan handlers
         if event.button == 2:
+            return
+        # Backscatter oriented box drawing must win over Line tab handlers when user explicitly enabled draw mode.
+        if getattr(self, "backscatter_box_draw_mode", False):
+            clicked_lon, clicked_lat = self._main_map_click_lonlat(event)
+            if clicked_lon is None or clicked_lat is None:
+                return
+            stage = int(getattr(self, "backscatter_box_stage", 0))
+            if stage == 0:
+                self.backscatter_box_centerline = ((clicked_lat, clicked_lon), None)
+                self.backscatter_box_stage = 1
+            elif stage == 1:
+                first = getattr(self, "backscatter_box_centerline", (None, None))[0]
+                if first is None:
+                    return
+                a_lat, a_lon = first
+                axis_len_m = self._approx_map_distance_m(a_lat, a_lon, clicked_lat, clicked_lon)
+                if not np.isfinite(axis_len_m) or axis_len_m <= 0.05:
+                    self._show_message(
+                        "warning",
+                        "Backscatter Box",
+                        "Centerline length is too small (or identical points). Click farther away for the second point.",
+                    )
+                    return
+                self.backscatter_box_centerline = (first, (clicked_lat, clicked_lon))
+                self.backscatter_box_stage = 2
+            else:
+                centerline = getattr(self, "backscatter_box_centerline", None)
+                if not centerline or centerline[0] is None or centerline[1] is None:
+                    return
+                (a_lat, a_lon), (b_lat, b_lon) = centerline
+                if hasattr(self, "_backscatter_half_width_from_point") and hasattr(self, "_backscatter_oriented_box_vertices"):
+                    half_width_m = self._backscatter_half_width_from_point(
+                        a_lat, a_lon, b_lat, b_lon, clicked_lat, clicked_lon
+                    )
+                    if half_width_m <= 0:
+                        self._show_message("warning", "Backscatter Box", "Width must be greater than zero.")
+                        return
+                    vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, b_lat, b_lon, half_width_m)
+                    if hasattr(self, "_finalize_backscatter_box"):
+                        self._finalize_backscatter_box(vertices, centerline, half_width_m)
+                self.backscatter_box_stage = 0
+                self.backscatter_box_draw_mode = False
+                self.backscatter_box_centerline = None
+                if hasattr(self, "backscatter_draw_box_btn"):
+                    self.backscatter_draw_box_btn.blockSignals(True)
+                    self.backscatter_draw_box_btn.setChecked(False)
+                    self.backscatter_draw_box_btn.blockSignals(False)
+                self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             return
         if getattr(self, '_handle_line_planning_plot_click', lambda e: False)(event):
             return
@@ -246,7 +325,7 @@ class MapInteractionMixin:
 
         current_tab = self.param_notebook.currentIndex() if hasattr(self, 'param_notebook') else -1
         is_accuracy_tab = current_tab == 1
-        is_performance_tab = current_tab == 3
+        is_performance_tab = current_tab == 4
 
         if is_accuracy_tab:
             # Temporarily block signals to prevent auto-regenerate from triggering zoom
@@ -926,6 +1005,33 @@ class MapInteractionMixin:
                 self.mouse_hover_info_text.set_visible(False)
                 self.mouse_hover_info_text = None
                 self.canvas.draw_idle()
+            return
+
+        if getattr(self, "backscatter_box_draw_mode", False):
+            self._cancel_eez_hover_lookup()
+            stage = int(getattr(self, "backscatter_box_stage", 0))
+            centerline = getattr(self, "backscatter_box_centerline", None)
+            if stage == 1 and centerline and centerline[0] is not None:
+                (a_lat, a_lon) = centerline[0]
+                if hasattr(self, "_backscatter_oriented_box_vertices") and hasattr(self, "_update_backscatter_box_patch"):
+                    vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, mouse_lat, mouse_lon, 0.0)
+                    if vertices is not None:
+                        self._update_backscatter_box_patch(vertices)
+                        self.canvas.draw_idle()
+            elif stage == 2 and centerline and centerline[0] is not None and centerline[1] is not None:
+                (a_lat, a_lon), (b_lat, b_lon) = centerline
+                if (
+                    hasattr(self, "_backscatter_half_width_from_point")
+                    and hasattr(self, "_backscatter_oriented_box_vertices")
+                    and hasattr(self, "_update_backscatter_box_patch")
+                ):
+                    half_width_m = self._backscatter_half_width_from_point(
+                        a_lat, a_lon, b_lat, b_lon, mouse_lat, mouse_lon
+                    )
+                    vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, b_lat, b_lon, half_width_m)
+                    if vertices is not None:
+                        self._update_backscatter_box_patch(vertices)
+                        self.canvas.draw_idle()
             return
 
         if hasattr(self, 'line_planning_mode') and self.line_planning_mode and len(self.line_planning_points) >= 1:

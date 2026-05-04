@@ -203,8 +203,11 @@ class ProfilesMixin:
                 dst_left, dst_bottom, dst_right, dst_top = array_bounds(dst_height, dst_width, dst_transform)
                 extent = [dst_left, dst_right, dst_bottom, dst_top]
 
-            data[data < -11000] = np.nan
-            data[data >= 0] = np.nan
+            if hasattr(self, "_apply_geotiff_nan_filter"):
+                self._apply_geotiff_nan_filter(data)
+            else:
+                data[data < -11000] = np.nan
+                data[data >= 0] = np.nan
 
             left, right, bottom, top = extent
             nrows, ncols = data.shape
@@ -751,6 +754,13 @@ class ProfilesMixin:
         elif current_tab == 2:
             self._draw_line_planning_profile()
         elif current_tab == 3:
+            self.profile_ax.clear()
+            self.profile_ax.set_title("Backscatter", fontsize=8)
+            self.profile_ax.set_xlabel("Distance (m)", fontsize=8)
+            self.profile_ax.set_ylabel("Elevation (m)", fontsize=8)
+            self.profile_fig.tight_layout(pad=1.0)
+            self.profile_canvas.draw()
+        elif current_tab == 4:
             self._draw_performance_profile()
         else:
             self.profile_ax.clear()

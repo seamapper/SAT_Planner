@@ -451,9 +451,9 @@ class LinePlanningMixin:
                     export_speed = float(self.line_survey_speed_entry.text()) if hasattr(self, 'line_survey_speed_entry') and self.line_survey_speed_entry.text() else 8.0
                 except (ValueError, TypeError):
                     export_speed = 8.0
-                geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "survey_speed": export_speed, "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
+                geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "survey_speed": export_speed, "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
                 with open(geojson_file_path, 'w') as f:
-                    json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None)}, "features": [geojson_feature]}, f, indent=2)
+                    json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0))}, "features": [geojson_feature]}, f, indent=2)
             lnw_file_path = None
             lnw_lines = [(export_name, list(self.line_planning_points))]
             if export_hypack and len(self.line_planning_points) >= 2:
@@ -551,6 +551,7 @@ class LinePlanningMixin:
                         if hasattr(self, "current_geotiff_path") and self.current_geotiff_path
                         else None
                     ),
+                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
                     "visualization_shapefile_paths": list(
                         getattr(self, "visualization_shapefile_paths", []) or []
                     ),
@@ -722,9 +723,11 @@ class LinePlanningMixin:
                     geojson_data = json.load(f)
                 features = geojson_data.get('features', []) if geojson_data.get('type') == 'FeatureCollection' else [geojson_data] if geojson_data.get('type') == 'Feature' else []
                 imported_geotiff_path = None
+                imported_nan_cutoff = None
                 if geojson_data.get('type') == 'FeatureCollection':
                     collection_props = geojson_data.get('properties') or {}
                     imported_geotiff_path = collection_props.get('geotiff_path')
+                    imported_nan_cutoff = collection_props.get('geotiff_nan_value')
                 imported_survey_speed = None
                 for feature in features:
                     if feature.get('type') != 'Feature':
@@ -736,6 +739,8 @@ class LinePlanningMixin:
                         props = feature.get('properties') or {}
                         if imported_geotiff_path is None:
                             imported_geotiff_path = props.get('geotiff_path')
+                        if imported_nan_cutoff is None:
+                            imported_nan_cutoff = props.get('geotiff_nan_value')
                         for _key in ('survey_speed', 'speed_knots', 'surveySpeed', 'speedKnots'):
                             val = props.get(_key)
                             if val is not None:
@@ -749,6 +754,8 @@ class LinePlanningMixin:
                             self.line_planning_points.append((coord[1], coord[0]))
                 if imported_survey_speed is not None and hasattr(self, 'line_survey_speed_entry'):
                     self.line_survey_speed_entry.setText(str(imported_survey_speed))
+                if imported_nan_cutoff is not None and hasattr(self, '_set_geotiff_nan_cutoff'):
+                    self._set_geotiff_nan_cutoff(imported_nan_cutoff, update_entry=True)
                 if imported_geotiff_path and hasattr(self, '_load_geotiff_from_path'):
                     if os.path.exists(imported_geotiff_path):
                         self._load_geotiff_from_path(imported_geotiff_path)

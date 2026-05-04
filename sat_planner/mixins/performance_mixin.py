@@ -1079,6 +1079,8 @@ class PerformanceMixin:
                 en = params.get("export_name")
                 if en and hasattr(self, "performance_export_name_entry"):
                     self.performance_export_name_entry.setText(str(en))
+                if params.get("geotiff_nan_value") is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
+                    self._set_geotiff_nan_cutoff(params.get("geotiff_nan_value"), update_entry=True)
                 gtp = params.get("geotiff_path")
                 if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                     self._load_geotiff_from_path(gtp)
@@ -1251,6 +1253,9 @@ class PerformanceMixin:
                 if swath is not None:
                     self.performance_test_lines_data = swath
                     self.performance_bist_segments_data = bist if bist else []
+                    nan_cutoff = (geojson_data.get("properties") or {}).get("geotiff_nan_value")
+                    if nan_cutoff is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
+                        self._set_geotiff_nan_cutoff(nan_cutoff, update_entry=True)
                     gtp = (geojson_data.get("properties") or {}).get("geotiff_path")
                     if not gtp:
                         for feat in geojson_data.get("features") or []:

@@ -7,12 +7,16 @@ from PyQt6.QtWidgets import (
     QApplication,
     QDialog,
     QFileDialog,
+    QHBoxLayout,
     QLabel,
     QProgressBar,
     QPushButton,
     QVBoxLayout,
+    QWidget,
 )
 from PyQt6.QtCore import Qt, QTimer
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 from sat_planner.constants import (
     GEOSPATIAL_LIBS_AVAILABLE,
@@ -30,6 +34,72 @@ from sat_planner.constants import (
 
 class GeoTIFFMixin:
     """Mixin providing GeoTIFF load/remove, display mode, dynamic resolution, and contours."""
+
+    def _get_geotiff_nan_cutoff(self):
+        """Return current lower-bound cutoff for setting GeoTIFF values to NaN."""
+        try:
+            return float(getattr(self, "geotiff_nan_value", -11000.0))
+        except (TypeError, ValueError):
+            return -11000.0
+
+    def _detect_geotiff_nan_cutoff_from_dataset(self):
+        """Choose default NaN cutoff from loaded dataset nodata when available."""
+        ds = getattr(self, "geotiff_dataset_original", None)
+        if ds is not None:
+            nodata_val = getattr(ds, "nodata", None)
+            try:
+                if nodata_val is not None and np.isfinite(float(nodata_val)):
+                    return float(nodata_val)
+            except (TypeError, ValueError):
+                pass
+        return -11000.0
+
+    def _set_geotiff_nan_cutoff(self, value, update_entry=True):
+        """Persist NaN cutoff and optionally synchronize the UI entry."""
+        try:
+            cutoff = float(value)
+        except (TypeError, ValueError):
+            return False
+        self.geotiff_nan_value = cutoff
+        if update_entry and hasattr(self, "geotiff_nan_entry"):
+            self.geotiff_nan_entry.blockSignals(True)
+            self.geotiff_nan_entry.setText(f"{cutoff:g}")
+            self.geotiff_nan_entry.blockSignals(False)
+        return True
+
+    def _apply_geotiff_nan_filter(self, data_array):
+        """Apply configured NaN sentinel filtering in place and return the array."""
+        if data_array is None:
+            return data_array
+        cutoff = self._get_geotiff_nan_cutoff()
+        # Treat only the configured sentinel value as NaN (not a threshold).
+        data_array[np.isclose(data_array, cutoff, rtol=0.0, atol=1e-9)] = np.nan
+        return data_array
+
+    def _on_geotiff_nan_value_changed(self):
+        """Debounce NaN threshold edits before applying to the loaded raster."""
+        if not hasattr(self, "_geotiff_nan_update_timer"):
+            self._geotiff_nan_update_timer = QTimer()
+            self._geotiff_nan_update_timer.setSingleShot(True)
+            self._geotiff_nan_update_timer.timeout.connect(self._apply_geotiff_nan_value_changed)
+        self._geotiff_nan_update_timer.stop()
+        self._geotiff_nan_update_timer.start(450)
+
+    def _apply_geotiff_nan_value_changed(self):
+        """Apply user-entered NaN threshold and refresh loaded GeoTIFF if needed."""
+        if not hasattr(self, "geotiff_nan_entry"):
+            return
+        raw = self.geotiff_nan_entry.text().strip()
+        if not raw:
+            return
+        try:
+            cutoff = float(raw)
+        except ValueError:
+            return
+        if not self._set_geotiff_nan_cutoff(cutoff, update_entry=True):
+            return
+        if self.geotiff_dataset_original is not None:
+            self._reload_geotiff_at_current_zoom()
 
     def _cancel_geotiff_loading(self):
         """Cancel the current GeoTIFF loading operation."""
@@ -166,9 +236,8 @@ class GeoTIFFMixin:
                 # Already in WGS84
                 region_extent = [left, right, bottom, top]
 
-            # Filter Z-values (match SAT_Update: < -11000 or >= 0 → NaN)
-            data[data < -11000] = np.nan
-            data[data >= 0] = np.nan
+            # Filter Z-values (user-configurable low cutoff and non-negative values)
+            self._apply_geotiff_nan_filter(data)
 
             # Validate the extent to prevent flipping
             if region_extent[1] <= region_extent[0] or region_extent[3] <= region_extent[2]:
@@ -179,6 +248,9 @@ class GeoTIFFMixin:
             self.geotiff_data_array = data.astype(float)
             self.geotiff_extent = region_extent
             self.geotiff_current_resolution = downsample_factor
+
+            if hasattr(self, "_rewarp_backscatter_align_to_bathy"):
+                self._rewarp_backscatter_align_to_bathy()
 
             return True
 
@@ -543,12 +615,11 @@ class GeoTIFFMixin:
                 self.wgs84_to_geotiff_transformer = None
                 self.geotiff_to_wgs84_transformer = None
 
-            # Filter Z-values: values < -11000 or >= 0 are set to NaN (match SAT_Update)
+            # Filter Z-values: user-configurable low cutoff and non-negative values
             progress_label.setText("Processing elevation data...")
             QApplication.processEvents()
-
-            self.geotiff_data_array[self.geotiff_data_array < -11000] = np.nan
-            self.geotiff_data_array[self.geotiff_data_array >= 0] = np.nan
+            self._set_geotiff_nan_cutoff(self._detect_geotiff_nan_cutoff_from_dataset(), update_entry=True)
+            self._apply_geotiff_nan_filter(self.geotiff_data_array)
 
             # Store the full resolution data for dynamic loading
             self.geotiff_full_resolution = self.geotiff_data_array.copy()
@@ -608,6 +679,9 @@ class GeoTIFFMixin:
                     self.set_ref_info_text(success_msg)
                 elif hasattr(self, 'set_line_info_text'):
                     self.set_line_info_text(success_msg)
+
+            if hasattr(self, "_rewarp_backscatter_align_to_bathy"):
+                self._rewarp_backscatter_align_to_bathy()
 
             # Update the plot and zoom after loading
             self._plot_survey_plan()
@@ -901,6 +975,220 @@ class GeoTIFFMixin:
         except Exception:
             pass  # Silently handle errors
 
+    def _on_backscatter_slope_areas_checkbox_changed(self):
+        """Show/hide Backscatter bathymetry slope band overlay (magenta)."""
+        if hasattr(self, 'backscatter_show_slope_areas_checkbox'):
+            is_checked = self.backscatter_show_slope_areas_checkbox.isChecked()
+        else:
+            is_checked = False
+
+        if is_checked:
+            if not GEOSPATIAL_LIBS_AVAILABLE:
+                self._show_message(
+                    "warning",
+                    "Disabled Feature",
+                    "Geospatial libraries are not loaded. Cannot show slope areas.",
+                )
+                self.backscatter_slope_areas_show_var = False
+                if hasattr(self, 'backscatter_show_slope_areas_checkbox'):
+                    self.backscatter_show_slope_areas_checkbox.blockSignals(True)
+                    self.backscatter_show_slope_areas_checkbox.setChecked(False)
+                    self.backscatter_show_slope_areas_checkbox.blockSignals(False)
+                return
+            if self.geotiff_data_array is None:
+                self._show_message("warning", "No GeoTIFF", "Load a GeoTIFF first to show slope areas.")
+                self.backscatter_slope_areas_show_var = False
+                if hasattr(self, 'backscatter_show_slope_areas_checkbox'):
+                    self.backscatter_show_slope_areas_checkbox.blockSignals(True)
+                    self.backscatter_show_slope_areas_checkbox.setChecked(False)
+                    self.backscatter_show_slope_areas_checkbox.blockSignals(False)
+                return
+
+        self.backscatter_slope_areas_show_var = is_checked
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_backscatter_slope_min_max_changed(self, *_args):
+        """Update Backscatter slope band from spin boxes and refresh overlay if visible."""
+        if hasattr(self, 'backscatter_slope_min_spin'):
+            self.backscatter_slope_min_deg = float(self.backscatter_slope_min_spin.value())
+        if hasattr(self, 'backscatter_slope_max_spin'):
+            self.backscatter_slope_max_deg = float(self.backscatter_slope_max_spin.value())
+        if not getattr(self, 'backscatter_slope_areas_show_var', False):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_backscatter_min_area_checkbox_changed(self, *_args):
+        """Enable/disable minimum contiguous area filter for the magenta Backscatter overlay."""
+        if hasattr(self, "backscatter_min_area_checkbox"):
+            self.backscatter_min_area_enabled_var = self.backscatter_min_area_checkbox.isChecked()
+        if hasattr(self, "backscatter_min_area_m2_entry"):
+            raw = self.backscatter_min_area_m2_entry.text().strip()
+            if raw:
+                try:
+                    v = float(raw)
+                    if v >= 0:
+                        self.backscatter_min_area_m2 = v
+                except ValueError:
+                    pass
+        if not getattr(self, "backscatter_slope_areas_show_var", False):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_backscatter_min_area_m2_text_changed(self, *_args):
+        """Debounce minimum area (m²) typing before applying and redrawing."""
+        if not hasattr(self, "_backscatter_min_area_m2_debounce_timer"):
+            self._backscatter_min_area_m2_debounce_timer = QTimer()
+            self._backscatter_min_area_m2_debounce_timer.setSingleShot(True)
+            self._backscatter_min_area_m2_debounce_timer.timeout.connect(self._apply_backscatter_min_area_m2_text)
+        self._backscatter_min_area_m2_debounce_timer.stop()
+        self._backscatter_min_area_m2_debounce_timer.start(450)
+
+    def _apply_backscatter_min_area_m2_text(self):
+        """Parse minimum area from the line edit after debounce; replot when Show Areas + Min Area are on."""
+        if not hasattr(self, "backscatter_min_area_m2_entry"):
+            return
+        raw = self.backscatter_min_area_m2_entry.text().strip()
+        if not raw:
+            return
+        try:
+            v = float(raw)
+        except ValueError:
+            return
+        if v < 0:
+            return
+        self.backscatter_min_area_m2 = v
+        if not getattr(self, "backscatter_slope_areas_show_var", False):
+            return
+        if not getattr(self, "backscatter_min_area_enabled_var", False):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_backscatter_extent_m_text_changed(self, *_args):
+        """Debounce min width/height (m) typing before applying and redrawing."""
+        if not hasattr(self, "_backscatter_extent_m_debounce_timer"):
+            self._backscatter_extent_m_debounce_timer = QTimer()
+            self._backscatter_extent_m_debounce_timer.setSingleShot(True)
+            self._backscatter_extent_m_debounce_timer.timeout.connect(self._apply_backscatter_extent_m_text)
+        self._backscatter_extent_m_debounce_timer.stop()
+        self._backscatter_extent_m_debounce_timer.start(450)
+
+    def _apply_backscatter_extent_m_text(self):
+        """Parse W/H from line edits after debounce; replot when Show Areas + extent filter are on."""
+        if hasattr(self, "backscatter_min_width_m_entry"):
+            tw = self.backscatter_min_width_m_entry.text().strip()
+            if tw:
+                try:
+                    wv = float(tw)
+                    if wv >= 0:
+                        self.backscatter_min_width_m = wv
+                except ValueError:
+                    pass
+        if hasattr(self, "backscatter_min_height_m_entry"):
+            th = self.backscatter_min_height_m_entry.text().strip()
+            if th:
+                try:
+                    hv = float(th)
+                    if hv >= 0:
+                        self.backscatter_min_height_m = hv
+                except ValueError:
+                    pass
+        if not getattr(self, "backscatter_slope_areas_show_var", False):
+            return
+        if not getattr(self, "backscatter_extent_filter_enabled_var", False):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_backscatter_extent_checkbox_changed(self, *_args):
+        """Enable/disable minimum bounding width/height filter (meters) for the magenta overlay.
+        W/H fields stay editable while the filter is off so thresholds can be set first."""
+        if hasattr(self, "backscatter_extent_checkbox"):
+            self.backscatter_extent_filter_enabled_var = self.backscatter_extent_checkbox.isChecked()
+        if hasattr(self, "backscatter_min_width_m_entry"):
+            tw = self.backscatter_min_width_m_entry.text().strip()
+            if tw:
+                try:
+                    wv = float(tw)
+                    if wv >= 0:
+                        self.backscatter_min_width_m = wv
+                except ValueError:
+                    pass
+        if hasattr(self, "backscatter_min_height_m_entry"):
+            th = self.backscatter_min_height_m_entry.text().strip()
+            if th:
+                try:
+                    hv = float(th)
+                    if hv >= 0:
+                        self.backscatter_min_height_m = hv
+                except ValueError:
+                    pass
+        if not getattr(self, "backscatter_slope_areas_show_var", False):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
     def _toggle_slope_visualization(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning", "Disabled Feature",
@@ -955,6 +1243,500 @@ class GeoTIFFMixin:
             self.set_cal_info_text("GeoTIFF removed.")
         elif hasattr(self, 'set_ref_info_text'):
             self.set_ref_info_text("GeoTIFF removed.")
+
+    def _reproject_backscatter_band_to_bathy_grid(self, src_ds, band_index=1):
+        """Reproject one band of an open rasterio dataset onto the current bathymetry WGS84 grid."""
+        nrows, ncols = self.geotiff_data_array.shape
+        left, right, bottom, top = self.geotiff_extent
+        dst_transform = transform.from_bounds(left, bottom, right, top, ncols, nrows)
+        dst = np.full((nrows, ncols), np.nan, dtype=np.float32)
+        reproject(
+            source=rasterio.band(src_ds, int(band_index)),
+            destination=dst,
+            src_transform=src_ds.transform,
+            src_crs=src_ds.crs,
+            dst_transform=dst_transform,
+            dst_crs="EPSG:4326",
+            resampling=Resampling.bilinear,
+        )
+        dst[np.isnan(self.geotiff_data_array)] = np.nan
+        return dst
+
+    def _set_backscatter_band_controls_visibility(self, is_rgb):
+        """Show/hide RGB band picker controls based on loaded backscatter type."""
+        if hasattr(self, "backscatter_band_combo"):
+            self.backscatter_band_combo.setVisible(bool(is_rgb))
+            self.backscatter_band_combo.setEnabled(bool(is_rgb))
+            if is_rgb:
+                self.backscatter_band_combo.blockSignals(True)
+                self.backscatter_band_combo.setCurrentIndex(max(0, min(2, int(getattr(self, "backscatter_selected_band", 1)) - 1)))
+                self.backscatter_band_combo.blockSignals(False)
+
+    def _on_backscatter_band_changed(self, *_args):
+        """Switch displayed backscatter band for RGB rasters."""
+        if not getattr(self, "backscatter_is_rgb", False):
+            return
+        if not hasattr(self, "backscatter_band_combo"):
+            return
+        idx = int(self.backscatter_band_combo.currentIndex())
+        self.backscatter_selected_band = idx + 1
+        bands = getattr(self, "backscatter_raster_bands", []) or []
+        if 0 <= idx < len(bands):
+            self.backscatter_raster_array = bands[idx]
+        if self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _rewarp_backscatter_align_to_bathy(self):
+        """Recompute backscatter_raster_array from backscatter_geotiff_path to match current bathymetry grid."""
+        path = getattr(self, "backscatter_geotiff_path", None)
+        if not path or not os.path.isfile(path):
+            self.backscatter_raster_array = None
+            self.backscatter_raster_bands = []
+            self.backscatter_is_rgb = False
+            self._set_backscatter_band_controls_visibility(False)
+            return
+        if self.geotiff_data_array is None or self.geotiff_extent is None:
+            self.backscatter_raster_array = None
+            self.backscatter_raster_bands = []
+            self.backscatter_is_rgb = False
+            self._set_backscatter_band_controls_visibility(False)
+            return
+        try:
+            with rasterio.open(path) as src:
+                if int(getattr(src, "count", 1)) >= 3:
+                    self.backscatter_is_rgb = True
+                    self.backscatter_raster_bands = [
+                        self._reproject_backscatter_band_to_bathy_grid(src, 1),
+                        self._reproject_backscatter_band_to_bathy_grid(src, 2),
+                        self._reproject_backscatter_band_to_bathy_grid(src, 3),
+                    ]
+                    self.backscatter_selected_band = max(1, min(3, int(getattr(self, "backscatter_selected_band", 1))))
+                    self.backscatter_raster_array = self.backscatter_raster_bands[self.backscatter_selected_band - 1]
+                    self._set_backscatter_band_controls_visibility(True)
+                else:
+                    self.backscatter_is_rgb = False
+                    self.backscatter_raster_bands = []
+                    self.backscatter_selected_band = 1
+                    self.backscatter_raster_array = self._reproject_backscatter_band_to_bathy_grid(src, 1)
+                    self._set_backscatter_band_controls_visibility(False)
+        except Exception as e:
+            self.backscatter_raster_array = None
+            self.backscatter_raster_bands = []
+            self.backscatter_is_rgb = False
+            self._set_backscatter_band_controls_visibility(False)
+            self._show_message(
+                "warning",
+                "Backscatter GeoTIFF",
+                f"Could not align backscatter grid to bathymetry: {e}",
+            )
+
+    def _load_backscatter_geotiff(self):
+        """Prompt for a backscatter GeoTIFF and load it aligned to the bathymetry grid."""
+        if not GEOSPATIAL_LIBS_AVAILABLE:
+            self._show_message(
+                "warning",
+                "Disabled Feature",
+                "Geospatial libraries are not loaded. Cannot load backscatter GeoTIFF.",
+            )
+            return
+        if self.geotiff_data_array is None or self.geotiff_extent is None:
+            self._show_message(
+                "warning",
+                "No bathymetry grid",
+                "Load the bathymetry GeoTIFF first. Backscatter is resampled to match its current grid size and extent.",
+            )
+            return
+        start_dir = getattr(self, "last_backscatter_dir", os.path.expanduser("~"))
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Backscatter GeoTIFF",
+            start_dir,
+            "GeoTIFF (*.tif *.tiff *.gtiff);;All files (*.*)",
+        )
+        if not path:
+            return
+        self.last_backscatter_dir = os.path.dirname(path)
+        if hasattr(self, "_save_last_backscatter_dir"):
+            self._save_last_backscatter_dir()
+        self._load_backscatter_geotiff_from_path(path)
+
+    def _load_backscatter_geotiff_from_path(self, path):
+        """Open path, warp band 1 to the current bathymetry grid, store path and array."""
+        if not GEOSPATIAL_LIBS_AVAILABLE:
+            return
+        if self.geotiff_data_array is None or self.geotiff_extent is None:
+            self._show_message("warning", "No bathymetry grid", "Load the bathymetry GeoTIFF first.")
+            return
+        try:
+            self.last_backscatter_dir = os.path.dirname(path)
+            if hasattr(self, "_save_last_backscatter_dir"):
+                self._save_last_backscatter_dir()
+        except Exception:
+            pass
+        try:
+            with rasterio.open(path) as src:
+                self.backscatter_geotiff_path = path
+                if int(getattr(src, "count", 1)) >= 3:
+                    self.backscatter_is_rgb = True
+                    self.backscatter_raster_bands = [
+                        self._reproject_backscatter_band_to_bathy_grid(src, 1),
+                        self._reproject_backscatter_band_to_bathy_grid(src, 2),
+                        self._reproject_backscatter_band_to_bathy_grid(src, 3),
+                    ]
+                    self.backscatter_selected_band = 1  # default Red
+                    self.backscatter_raster_array = self.backscatter_raster_bands[0]
+                    self._set_backscatter_band_controls_visibility(True)
+                else:
+                    self.backscatter_is_rgb = False
+                    self.backscatter_raster_bands = []
+                    self.backscatter_selected_band = 1
+                    self.backscatter_raster_array = self._reproject_backscatter_band_to_bathy_grid(src, 1)
+                    self._set_backscatter_band_controls_visibility(False)
+        except Exception as e:
+            self.backscatter_geotiff_path = None
+            self.backscatter_raster_array = None
+            self.backscatter_raster_bands = []
+            self.backscatter_is_rgb = False
+            self._set_backscatter_band_controls_visibility(False)
+            self._show_message("error", "Backscatter GeoTIFF", f"Could not load file: {e}")
+            return
+
+        nrows, ncols = self.geotiff_data_array.shape
+        msg = (
+            f"Loaded backscatter GeoTIFF ({os.path.basename(path)}), "
+            f"resampled to bathymetry grid {nrows} × {ncols}."
+        )
+        if hasattr(self, "set_cal_info_text"):
+            self.set_cal_info_text(msg)
+        elif hasattr(self, "set_ref_info_text"):
+            self.set_ref_info_text(msg)
+        elif hasattr(self, "set_line_info_text"):
+            self.set_line_info_text(msg)
+
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_show_backscatter_checkbox_changed(self, *_args):
+        """Toggle visibility of the backscatter raster overlay."""
+        if hasattr(self, "show_backscatter_checkbox"):
+            self.show_backscatter_var = self.show_backscatter_checkbox.isChecked()
+        if self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_backscatter_percent_clip_changed(self, *_args):
+        """Debounce backscatter percent-clip control edits and refresh overlay."""
+        if not hasattr(self, "_backscatter_percent_clip_debounce_timer"):
+            self._backscatter_percent_clip_debounce_timer = QTimer()
+            self._backscatter_percent_clip_debounce_timer.setSingleShot(True)
+            self._backscatter_percent_clip_debounce_timer.timeout.connect(self._apply_backscatter_percent_clip_changed)
+        self._backscatter_percent_clip_debounce_timer.stop()
+        self._backscatter_percent_clip_debounce_timer.start(350)
+
+    def _apply_backscatter_percent_clip_changed(self):
+        """Apply percent-clip settings and redraw map when possible."""
+        if hasattr(self, "backscatter_percent_clip_checkbox"):
+            self.backscatter_percent_clip_enabled = self.backscatter_percent_clip_checkbox.isChecked()
+        if hasattr(self, "backscatter_percent_clip_min_entry"):
+            raw_min = self.backscatter_percent_clip_min_entry.text().strip()
+            if raw_min:
+                try:
+                    v = float(raw_min)
+                    if v >= 0.0:
+                        self.backscatter_percent_clip_min = v
+                except ValueError:
+                    pass
+        if hasattr(self, "backscatter_percent_clip_max_entry"):
+            raw_max = self.backscatter_percent_clip_max_entry.text().strip()
+            if raw_max:
+                try:
+                    v = float(raw_max)
+                    if v >= 0.0:
+                        self.backscatter_percent_clip_max = v
+                except ValueError:
+                    pass
+
+        if self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_backscatter_draw_box_toggled(self, checked):
+        """Enable/disable map box drawing mode for backscatter statistics."""
+        self.backscatter_box_draw_mode = bool(checked)
+        if self.backscatter_box_draw_mode:
+            self.backscatter_box_stage = 0
+            self.backscatter_box_centerline = None
+            self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            had_partial = int(getattr(self, "backscatter_box_stage", 0)) > 0
+            self.backscatter_box_stage = 0
+            self.backscatter_box_centerline = None
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+            if had_partial:
+                try:
+                    self._plot_survey_plan(preserve_view_limits=True)
+                except Exception:
+                    self.canvas.draw_idle()
+
+    def _on_backscatter_show_stats_clicked(self):
+        """Open backscatter statistics dialog for the currently saved box."""
+        if not getattr(self, "backscatter_box_stats", None):
+            self._show_message("info", "Backscatter Statistics", "Draw a box first to compute statistics.")
+            return
+        self._show_backscatter_stats_dialog()
+
+    def _on_backscatter_clear_box_clicked(self):
+        """Remove backscatter stats box overlay and clear cached statistics."""
+        self.backscatter_box_draw_mode = False
+        self.backscatter_box_stage = 0
+        self.backscatter_box_centerline = None
+        self.backscatter_box_vertices = None
+        self.backscatter_box_half_width_m = None
+        self.backscatter_box_stats = None
+        if hasattr(self, "backscatter_draw_box_btn"):
+            self.backscatter_draw_box_btn.blockSignals(True)
+            self.backscatter_draw_box_btn.setChecked(False)
+            self.backscatter_draw_box_btn.blockSignals(False)
+        if hasattr(self, "backscatter_box_patch") and self.backscatter_box_patch is not None:
+            try:
+                self.backscatter_box_patch.remove()
+            except Exception:
+                pass
+            self.backscatter_box_patch = None
+        if hasattr(self, "backscatter_stats_dialog") and self.backscatter_stats_dialog is not None:
+            try:
+                self.backscatter_stats_dialog.close()
+            except Exception:
+                pass
+            self.backscatter_stats_dialog = None
+            self.backscatter_stats_canvas = None
+            self.backscatter_stats_ax = None
+            self.backscatter_stats_text_label = None
+        self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+        try:
+            self._plot_survey_plan(preserve_view_limits=True)
+        except Exception:
+            self.canvas.draw_idle()
+
+    def _update_backscatter_box_patch(self, vertices):
+        """Create/update temporary cyan oriented rectangle while drawing."""
+        if not vertices or len(vertices) != 4:
+            return
+        if hasattr(self, "backscatter_box_patch") and self.backscatter_box_patch is not None:
+            try:
+                self.backscatter_box_patch.set_xy(vertices)
+            except Exception:
+                self.backscatter_box_patch = None
+        if self.backscatter_box_patch is None:
+            try:
+                from matplotlib.patches import Polygon
+                self.backscatter_box_patch = Polygon(
+                    vertices,
+                    closed=True,
+                    fill=False,
+                    edgecolor="cyan",
+                    linewidth=2.0,
+                    linestyle="-",
+                    zorder=40,
+                )
+                self.ax.add_patch(self.backscatter_box_patch)
+            except Exception:
+                self.backscatter_box_patch = None
+
+    def _backscatter_oriented_box_vertices(self, a_lat, a_lon, b_lat, b_lon, half_width_m):
+        """Return 4 oriented rectangle vertices around centerline AB with symmetric half-width."""
+        center_lat = (a_lat + b_lat) / 2.0
+        m_per_deg_lat = 111320.0
+        m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat))
+        if m_per_deg_lon == 0:
+            return None
+        ax, ay = a_lon * m_per_deg_lon, a_lat * m_per_deg_lat
+        bx, by = b_lon * m_per_deg_lon, b_lat * m_per_deg_lat
+        vx, vy = bx - ax, by - ay
+        norm = np.hypot(vx, vy)
+        if norm <= 0:
+            return None
+        px, py = -vy / norm, vx / norm
+        ox, oy = px * half_width_m, py * half_width_m
+        p1l = ((ax + ox) / m_per_deg_lon, (ay + oy) / m_per_deg_lat)
+        p2l = ((bx + ox) / m_per_deg_lon, (by + oy) / m_per_deg_lat)
+        p2r = ((bx - ox) / m_per_deg_lon, (by - oy) / m_per_deg_lat)
+        p1r = ((ax - ox) / m_per_deg_lon, (ay - oy) / m_per_deg_lat)
+        return [p1l, p2l, p2r, p1r]
+
+    def _backscatter_half_width_from_point(self, a_lat, a_lon, b_lat, b_lon, p_lat, p_lon):
+        """Perpendicular distance (meters) from point P to centerline AB."""
+        center_lat = (a_lat + b_lat + p_lat) / 3.0
+        m_per_deg_lat = 111320.0
+        m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat))
+        if m_per_deg_lon == 0:
+            return 0.0
+        ax, ay = a_lon * m_per_deg_lon, a_lat * m_per_deg_lat
+        bx, by = b_lon * m_per_deg_lon, b_lat * m_per_deg_lat
+        px, py = p_lon * m_per_deg_lon, p_lat * m_per_deg_lat
+        vx, vy = bx - ax, by - ay
+        wx, wy = px - ax, py - ay
+        norm = np.hypot(vx, vy)
+        if norm <= 0:
+            return 0.0
+        return abs(vx * wy - vy * wx) / norm
+
+    def _finalize_backscatter_box(self, vertices, centerline, half_width_m):
+        """Finalize oriented box polygon, compute stats, redraw, and open stats dialog."""
+        if not vertices or len(vertices) != 4:
+            self._show_message("warning", "Backscatter Box", "Could not create oriented box.")
+            return
+        self.backscatter_box_vertices = vertices
+        self.backscatter_box_centerline = centerline
+        self.backscatter_box_half_width_m = float(max(0.0, half_width_m))
+        self.backscatter_box_stats = self._compute_backscatter_box_stats()
+        self._plot_survey_plan(preserve_view_limits=True)
+        self._show_backscatter_stats_dialog()
+
+    def _compute_backscatter_box_stats(self):
+        """Compute histogram input and dimensions for current backscatter box."""
+        if self.backscatter_box_vertices is None:
+            return None
+        bs = getattr(self, "backscatter_raster_array", None)
+        extent = getattr(self, "geotiff_extent", None)
+        if bs is None or extent is None:
+            return None
+        vertices = np.array(self.backscatter_box_vertices, dtype=float)
+        if vertices.shape != (4, 2):
+            return None
+        lon_min = float(np.min(vertices[:, 0]))
+        lon_max = float(np.max(vertices[:, 0]))
+        lat_min = float(np.min(vertices[:, 1]))
+        lat_max = float(np.max(vertices[:, 1]))
+        left, right, bottom, top = extent
+        nrows, ncols = bs.shape
+        if right == left or top == bottom:
+            return None
+        c0 = int(np.clip((lon_min - left) / (right - left) * (ncols - 1), 0, ncols - 1))
+        c1 = int(np.clip((lon_max - left) / (right - left) * (ncols - 1), 0, ncols - 1))
+        r0 = int(np.clip((top - lat_max) / (top - bottom) * (nrows - 1), 0, nrows - 1))
+        r1 = int(np.clip((top - lat_min) / (top - bottom) * (nrows - 1), 0, nrows - 1))
+        rr0, rr1 = sorted([r0, r1])
+        cc0, cc1 = sorted([c0, c1])
+        subset = bs[rr0:rr1 + 1, cc0:cc1 + 1]
+        lon_vals = np.linspace(left, right, ncols)
+        lat_vals = np.linspace(top, bottom, nrows)
+        sub_lons = lon_vals[cc0:cc1 + 1]
+        sub_lats = lat_vals[rr0:rr1 + 1]
+        lon_mesh, lat_mesh = np.meshgrid(sub_lons, sub_lats)
+        points = np.column_stack((lon_mesh.ravel(), lat_mesh.ravel()))
+        from matplotlib.path import Path
+        poly_path = Path(vertices)
+        inside = poly_path.contains_points(points).reshape(subset.shape)
+        valid = subset[np.isfinite(subset) & inside]
+        geod = pyproj.Geod(ellps="WGS84")
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        if centerline and len(centerline) == 2:
+            (a_lat, a_lon), (b_lat, b_lon) = centerline
+            _, _, height_m = geod.inv(a_lon, a_lat, b_lon, b_lat)
+        else:
+            height_m = 0.0
+        width_m = 2.0 * float(getattr(self, "backscatter_box_half_width_m", 0.0) or 0.0)
+        return {
+            "values": valid,
+            "width_m": float(abs(width_m)),
+            "height_m": float(abs(height_m)),
+        }
+
+    def _show_backscatter_stats_dialog(self):
+        """Create/show Backscatter Statistics dialog with histogram and box dimensions."""
+        stats = getattr(self, "backscatter_box_stats", None)
+        if not stats:
+            return
+        if self.backscatter_stats_dialog is None:
+            self.backscatter_stats_dialog = QDialog(self)
+            self.backscatter_stats_dialog.setWindowTitle("Backscatter Statistics")
+            self.backscatter_stats_dialog.resize(700, 620)
+            layout = QVBoxLayout(self.backscatter_stats_dialog)
+            top_row = QWidget()
+            top_layout = QVBoxLayout(top_row)
+            top_layout.setContentsMargins(0, 0, 0, 0)
+            fig = Figure(figsize=(6.4, 4.2))
+            self.backscatter_stats_ax = fig.add_subplot(111)
+            fig.subplots_adjust(bottom=0.18)
+            self.backscatter_stats_canvas = FigureCanvas(fig)
+            top_layout.addWidget(self.backscatter_stats_canvas)
+            layout.addWidget(top_row)
+            self.backscatter_stats_text_label = QLabel("")
+            self.backscatter_stats_text_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            self.backscatter_stats_text_label.setWordWrap(True)
+            layout.addWidget(self.backscatter_stats_text_label)
+
+        vals = stats.get("values", np.array([]))
+        self.backscatter_stats_ax.clear()
+        if vals.size > 0:
+            self.backscatter_stats_ax.hist(vals, bins=40, color="steelblue", edgecolor="black", alpha=0.85)
+            self.backscatter_stats_ax.set_title("Backscatter Value Distribution")
+            self.backscatter_stats_ax.set_xlabel("Backscatter Value")
+            self.backscatter_stats_ax.set_ylabel("Count")
+        else:
+            self.backscatter_stats_ax.text(
+                0.5,
+                0.5,
+                "No valid backscatter values in selected box.",
+                transform=self.backscatter_stats_ax.transAxes,
+                ha="center",
+                va="center",
+            )
+            self.backscatter_stats_ax.set_title("Backscatter Value Distribution")
+        self.backscatter_stats_ax.figure.subplots_adjust(bottom=0.18)
+        self.backscatter_stats_canvas.draw_idle()
+
+        width_m = float(stats.get("width_m", 0.0))
+        height_m = float(stats.get("height_m", 0.0))
+        width_km = width_m / 1000.0
+        height_km = height_m / 1000.0
+        width_nm = width_m / 1852.0
+        height_nm = height_m / 1852.0
+        text = (
+            f"Width: {width_m:.2f} m | {width_km:.4f} km | {width_nm:.4f} nm\n"
+            f"Height: {height_m:.2f} m | {height_km:.4f} km | {height_nm:.4f} nm"
+        )
+        self.backscatter_stats_text_label.setText(text)
+        self.backscatter_stats_dialog.show()
+        self.backscatter_stats_dialog.raise_()
+        self.backscatter_stats_dialog.activateWindow()
 
     def _zoom_to_geotiff(self):
         """Zooms the plot to the initial GeoTIFF bounds (same as when first loaded)."""

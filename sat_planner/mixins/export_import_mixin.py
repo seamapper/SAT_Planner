@@ -72,6 +72,7 @@ class ExportImportMixin:
                 'survey_speed': float(self.survey_speed_entry.text()),
                 'export_name': self.export_name_entry.text().strip(),
                 'geotiff_path': (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
+                'geotiff_nan_value': float(getattr(self, 'geotiff_nan_value', -11000.0)),
                 'visualization_shapefile_paths': list(getattr(self, 'visualization_shapefile_paths', []) or []),
                 'offset_direction': self.offset_direction_var,
                 'line_length_multiplier': self.line_length_multiplier,
@@ -122,6 +123,9 @@ class ExportImportMixin:
 
             self.dist_between_lines_multiplier = float(params['dist_between_lines_multiplier'])
             self._update_multiplier_label_dist(self.dist_between_lines_multiplier)
+
+            if 'geotiff_nan_value' in params and hasattr(self, '_set_geotiff_nan_cutoff'):
+                self._set_geotiff_nan_cutoff(params.get('geotiff_nan_value'), update_entry=True)
 
             # Regenerate the plot with loaded parameters
             self._generate_and_plot()
@@ -280,7 +284,9 @@ class ExportImportMixin:
                 })
             geojson_collection = {
                 "type": "FeatureCollection",
-                "properties": {},
+                "properties": {
+                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                },
                 "features": geojson_features
             }
             with open(geojson_file_path, 'w') as f:
@@ -475,6 +481,7 @@ class ExportImportMixin:
                     if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path
                     else None
                 )
+                params['geotiff_nan_value'] = float(getattr(self, 'geotiff_nan_value', -11000.0))
                 params['central_point_depth_m'] = (
                     float(self._depth_at_picked_point)
                     if hasattr(self, '_depth_at_picked_point') and self._depth_at_picked_point is not None
@@ -715,7 +722,11 @@ class ExportImportMixin:
                     )
             geojson_collection = {
                 "type": "FeatureCollection",
-                "properties": {"geotiff_path": geotiff_path, "plan_type": "performance"},
+                "properties": {
+                    "geotiff_path": geotiff_path,
+                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                    "plan_type": "performance",
+                },
                 "features": geojson_features,
             }
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
@@ -801,6 +812,7 @@ class ExportImportMixin:
                 "export_name": export_name,
                 "plan_type": "performance",
                 "geotiff_path": geotiff_path,
+                "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
                 "visualization_shapefile_paths": list(getattr(self, 'visualization_shapefile_paths', []) or []),
                 "test_speed_kts": speed_kts,
             }

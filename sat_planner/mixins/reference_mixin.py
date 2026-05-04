@@ -678,6 +678,8 @@ class ReferenceMixin:
                 if params.get('dist_between_lines_multiplier') is not None and hasattr(self, '_update_multiplier_label_dist'):
                     self.dist_between_lines_multiplier = float(params['dist_between_lines_multiplier'])
                     self._update_multiplier_label_dist(self.dist_between_lines_multiplier)
+                if params.get('geotiff_nan_value') is not None and hasattr(self, '_set_geotiff_nan_cutoff'):
+                    self._set_geotiff_nan_cutoff(params.get('geotiff_nan_value'), update_entry=True)
                 try:
                     depth_val = params.get('central_point_depth_m')
                     if depth_val is not None:
@@ -851,6 +853,7 @@ class ReferenceMixin:
             file_processed = False
             imported_geojson_survey_speed = None
             imported_geojson_geotiff_path = None
+            imported_geojson_nan_cutoff = None
             imported_params_geotiff_path = None
 
             # DDD / DMS / DMM / LNW: use calibration parsers + reference assignment dialog
@@ -988,7 +991,9 @@ class ReferenceMixin:
                     features = geojson_data.get('features', [])
                     if not isinstance(features, list):
                         features = []
-                    imported_geojson_geotiff_path = (geojson_data.get('properties') or {}).get('geotiff_path')
+                    collection_props = geojson_data.get('properties') or {}
+                    imported_geojson_geotiff_path = collection_props.get('geotiff_path')
+                    imported_geojson_nan_cutoff = collection_props.get('geotiff_nan_value')
                 elif geojson_data.get('type') == 'Feature':
                     features = [geojson_data]
                 else:
@@ -1007,6 +1012,8 @@ class ReferenceMixin:
                         properties = {}
                     if imported_geojson_geotiff_path is None:
                         imported_geojson_geotiff_path = properties.get('geotiff_path')
+                    if imported_geojson_nan_cutoff is None:
+                        imported_geojson_nan_cutoff = properties.get('geotiff_nan_value')
                     line_num = properties.get('line_num', 0)
                     features_with_num.append((line_num, feature))
 
@@ -1104,6 +1111,8 @@ class ReferenceMixin:
 
                     if params.get('crossline_passes') is not None:
                         self.crossline_passes_entry.setText(str(params['crossline_passes']))
+                    if params.get('geotiff_nan_value') is not None and hasattr(self, '_set_geotiff_nan_cutoff'):
+                        self._set_geotiff_nan_cutoff(params.get('geotiff_nan_value'), update_entry=True)
 
                     if params.get('export_name'):
                         self.export_name_entry.clear()
@@ -1209,6 +1218,12 @@ class ReferenceMixin:
 
             if (not params or not isinstance(params, dict) or params.get('survey_speed') is None) and imported_geojson_survey_speed is not None:
                 self.survey_speed_entry.setText(str(imported_geojson_survey_speed))
+            if (
+                (not params or not isinstance(params, dict) or params.get('geotiff_nan_value') is None)
+                and imported_geojson_nan_cutoff is not None
+                and hasattr(self, '_set_geotiff_nan_cutoff')
+            ):
+                self._set_geotiff_nan_cutoff(imported_geojson_nan_cutoff, update_entry=True)
             geotiff_path_to_load = imported_params_geotiff_path or imported_geojson_geotiff_path
             if geotiff_path_to_load and hasattr(self, '_load_geotiff_from_path'):
                 if os.path.exists(geotiff_path_to_load):

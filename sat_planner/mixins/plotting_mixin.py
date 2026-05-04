@@ -4,6 +4,7 @@ Survey plan plotting: generate plan, plot survey lines/GeoTIFF/contours, clear p
 import traceback
 import numpy as np
 from matplotlib.colors import LightSource
+from matplotlib.patches import Polygon
 from matplotlib.ticker import FuncFormatter
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, CRSError
@@ -394,6 +395,84 @@ class PlottingMixin:
 
         return new_xlim, new_ylim
 
+    def _backscatter_label_mask_8connected(self, mask):
+        """8-connected labeling of True pixels in mask. Returns (labels, n_labels)."""
+        mask = np.asarray(mask, dtype=bool)
+        h, w = mask.shape
+        labels = np.zeros((h, w), dtype=np.int32)
+        current_label = 0
+        for si in range(h):
+            for sj in range(w):
+                if not mask[si, sj] or labels[si, sj] != 0:
+                    continue
+                current_label += 1
+                stack = [(si, sj)]
+                while stack:
+                    i, j = stack.pop()
+                    if i < 0 or i >= h or j < 0 or j >= w:
+                        continue
+                    if not mask[i, j] or labels[i, j] != 0:
+                        continue
+                    labels[i, j] = current_label
+                    for di in (-1, 0, 1):
+                        for dj in (-1, 0, 1):
+                            if di == 0 and dj == 0:
+                                continue
+                            ni, nj = i + di, j + dj
+                            if (
+                                0 <= ni < h
+                                and 0 <= nj < w
+                                and mask[ni, nj]
+                                and labels[ni, nj] == 0
+                            ):
+                                stack.append((ni, nj))
+        return labels, current_label
+
+    def _backscatter_filter_slope_mask_min_area_m2(self, mask, pixel_area_m2, min_area_m2):
+        """
+        Keep only 8-connected components whose area (pixel count * pixel_area_m2) >= min_area_m2.
+        Pure NumPy; no scipy dependency. min_area_m2 <= 0 leaves mask unchanged.
+        """
+        mask = np.asarray(mask, dtype=bool)
+        if min_area_m2 <= 0 or not np.any(mask):
+            return mask
+        labels, nlab = self._backscatter_label_mask_8connected(mask)
+        if nlab == 0:
+            return mask
+        counts = np.bincount(labels.ravel(), minlength=nlab + 1)
+        keep = np.zeros(nlab + 1, dtype=bool)
+        for lbl in range(1, nlab + 1):
+            if counts[lbl] * pixel_area_m2 >= min_area_m2:
+                keep[lbl] = True
+        return keep[labels]
+
+    def _backscatter_filter_slope_mask_min_extent_m(self, mask, dx_m, dy_m, min_width_m, min_height_m):
+        """
+        Keep only 8-connected components whose axis-aligned bbox spans meet minima (meters).
+        Width = (max_col - min_col + 1) * |dx_m| (lon / x), height = (max_row - min_row + 1) * |dy_m| (lat / y).
+        If min_width_m or min_height_m is <= 0, that axis imposes no constraint.
+        """
+        mask = np.asarray(mask, dtype=bool)
+        if not np.any(mask) or (min_width_m <= 0 and min_height_m <= 0):
+            return mask
+        labels, nlab = self._backscatter_label_mask_8connected(mask)
+        if nlab == 0:
+            return mask
+        keep = np.zeros(nlab + 1, dtype=bool)
+        adx = abs(float(dx_m))
+        ady = abs(float(dy_m))
+        for lbl in range(1, nlab + 1):
+            rows, cols = np.where(labels == lbl)
+            if rows.size == 0:
+                continue
+            width_m = (int(cols.max()) - int(cols.min()) + 1) * adx
+            height_m = (int(rows.max()) - int(rows.min()) + 1) * ady
+            ok_w = min_width_m <= 0 or width_m >= min_width_m
+            ok_h = min_height_m <= 0 or height_m >= min_height_m
+            if ok_w and ok_h:
+                keep[lbl] = True
+        return keep[labels]
+
     def _plot_survey_plan(self, preserve_view_limits=True):
         try:
             # Remove all axes except the main one to prevent accumulation of colorbar axes
@@ -415,6 +494,8 @@ class PlottingMixin:
             self.contour_plot = None
             self.basemap_image_plot = None
             self.slope_overlay_image_plot = None
+            self.backscatter_slope_areas_overlay_plot = None
+            self.backscatter_raster_plot = None
 
             # Calculate consistent plot limits before plotting
             self.current_xlim, self.current_ylim = self._calculate_consistent_plot_limits()
@@ -625,6 +706,55 @@ class PlottingMixin:
                         tick_labels[-1] = f"> {max_slope_for_cmap:.0f}"
                     self.slope_colorbar.set_ticklabels(tick_labels)
 
+            # Backscatter GeoTIFF overlay (grey: low = dark, high = bright), aligned to bathymetry grid
+            if (
+                getattr(self, "show_backscatter_var", False)
+                and getattr(self, "backscatter_raster_array", None) is not None
+                and self.geotiff_data_array is not None
+                and self.geotiff_extent is not None
+            ):
+                try:
+                    bs = self.backscatter_raster_array
+                    if bs.shape == self.geotiff_data_array.shape and np.any(np.isfinite(bs)):
+                        plot_data = np.ma.array(bs, mask=np.isnan(bs))
+                        valid = np.isfinite(bs)
+                        if np.any(valid):
+                            if getattr(self, "backscatter_percent_clip_enabled", True):
+                                min_pct = float(getattr(self, "backscatter_percent_clip_min", 0.5))
+                                max_pct = float(getattr(self, "backscatter_percent_clip_max", 0.5))
+                                min_pct = max(0.0, min(49.9, min_pct))
+                                max_pct = max(0.0, min(49.9, max_pct))
+                                low_q = min_pct
+                                high_q = 100.0 - max_pct
+                                if high_q <= low_q:
+                                    low_q = 0.5
+                                    high_q = 99.5
+                                vmin = float(np.nanpercentile(bs[valid], low_q))
+                                vmax = float(np.nanpercentile(bs[valid], high_q))
+                            else:
+                                vmin = float(np.nanmin(bs[valid]))
+                                vmax = float(np.nanmax(bs[valid]))
+                            if vmin >= vmax:
+                                vmin = float(np.nanmin(bs))
+                                vmax = float(np.nanmax(bs))
+                            if vmin >= vmax:
+                                vmax = vmin + 1e-6
+                        else:
+                            vmin, vmax = 0.0, 1.0
+                        self.backscatter_raster_plot = self.ax.imshow(
+                            plot_data,
+                            extent=tuple(self.geotiff_extent),
+                            origin="upper",
+                            cmap="gray",
+                            vmin=vmin,
+                            vmax=vmax,
+                            alpha=0.9,
+                            zorder=0,
+                            interpolation="bilinear",
+                        )
+                except Exception as e:
+                    print(f"Warning: could not plot backscatter overlay: {e}")
+
             # Plot contours if enabled
             if (self.geotiff_data_array is not None and self.geotiff_extent is not None and
                 hasattr(self, 'show_contours_var') and self.show_contours_var):
@@ -782,6 +912,87 @@ class PlottingMixin:
                     except Exception:
                         pass
                     self.slope_overlay_image_plot = None
+
+            # Backscatter analysis: magenta overlay for slope between Min and Max (degrees)
+            if (self.geotiff_data_array is not None and self.geotiff_extent is not None and
+                    getattr(self, 'backscatter_slope_areas_show_var', False)):
+                try:
+                    min_slope = float(getattr(self, 'backscatter_slope_min_deg', 0.0))
+                    max_slope = float(getattr(self, 'backscatter_slope_max_deg', 2.0))
+                    if min_slope > max_slope:
+                        min_slope, max_slope = max_slope, min_slope
+
+                    if hasattr(self, 'backscatter_slope_areas_overlay_plot') and self.backscatter_slope_areas_overlay_plot is not None:
+                        try:
+                            self.backscatter_slope_areas_overlay_plot.remove()
+                        except Exception:
+                            pass
+                        self.backscatter_slope_areas_overlay_plot = None
+
+                    center_lat_geotiff = (self.geotiff_extent[2] + self.geotiff_extent[3]) / 2
+                    m_per_deg_lat = 111320.0
+                    m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat_geotiff))
+
+                    res_lat_deg = (self.geotiff_extent[3] - self.geotiff_extent[2]) / self.geotiff_data_array.shape[0]
+                    res_lon_deg = (self.geotiff_extent[1] - self.geotiff_extent[0]) / self.geotiff_data_array.shape[1]
+
+                    dx_m = res_lon_deg * m_per_deg_lon
+                    dy_m = res_lat_deg * m_per_deg_lat
+
+                    temp_data = np.nan_to_num(self.geotiff_data_array, nan=0.0)
+                    dz_dy_grid, dz_dx_grid = np.gradient(temp_data, dy_m, dx_m)
+
+                    slope_rad = np.arctan(np.sqrt(dz_dx_grid ** 2 + dz_dy_grid ** 2))
+                    slope_degrees = np.degrees(slope_rad)
+                    slope_degrees[np.isnan(self.geotiff_data_array)] = np.nan
+
+                    mask = (slope_degrees >= min_slope) & (slope_degrees <= max_slope)
+                    pixel_area_m2 = abs(dx_m * dy_m)
+                    if (
+                        getattr(self, "backscatter_min_area_enabled_var", False)
+                        and float(getattr(self, "backscatter_min_area_m2", 0.0)) > 0
+                        and pixel_area_m2 > 0
+                    ):
+                        mask = self._backscatter_filter_slope_mask_min_area_m2(
+                            mask,
+                            pixel_area_m2,
+                            float(self.backscatter_min_area_m2),
+                        )
+                    if getattr(self, "backscatter_extent_filter_enabled_var", False):
+                        mw = float(getattr(self, "backscatter_min_width_m", 0.0))
+                        mh = float(getattr(self, "backscatter_min_height_m", 0.0))
+                        if mw > 0 or mh > 0:
+                            mask = self._backscatter_filter_slope_mask_min_extent_m(
+                                mask, dx_m, dy_m, mw, mh
+                            )
+                    overlay = np.zeros((slope_degrees.shape[0], slope_degrees.shape[1], 4), dtype=np.float32)
+                    overlay[mask, 0] = 1.0   # R
+                    overlay[mask, 1] = 0.0   # G
+                    overlay[mask, 2] = 1.0   # B — magenta
+                    overlay[mask, 3] = 0.45  # alpha
+                    overlay[~mask, 3] = 0.0
+
+                    self.backscatter_slope_areas_overlay_plot = self.ax.imshow(
+                        overlay,
+                        extent=tuple(self.geotiff_extent),
+                        origin='upper',
+                        zorder=11.5,
+                        interpolation='bilinear',
+                    )
+                except Exception:
+                    if hasattr(self, 'backscatter_slope_areas_overlay_plot') and self.backscatter_slope_areas_overlay_plot is not None:
+                        try:
+                            self.backscatter_slope_areas_overlay_plot.remove()
+                        except Exception:
+                            pass
+                        self.backscatter_slope_areas_overlay_plot = None
+            else:
+                if hasattr(self, 'backscatter_slope_areas_overlay_plot') and self.backscatter_slope_areas_overlay_plot is not None:
+                    try:
+                        self.backscatter_slope_areas_overlay_plot.remove()
+                    except Exception:
+                        pass
+                    self.backscatter_slope_areas_overlay_plot = None
 
             # Plot main survey lines
             for i, line in enumerate(self.survey_lines_data):
@@ -1113,6 +1324,20 @@ class PlottingMixin:
                     zorder=30,
                 )
 
+            # Plot saved Backscatter statistics box (cyan outline) if present.
+            box_vertices = getattr(self, "backscatter_box_vertices", None)
+            if box_vertices is not None and len(box_vertices) == 4:
+                self.backscatter_box_patch = Polygon(
+                    box_vertices,
+                    closed=True,
+                    fill=False,
+                    edgecolor="cyan",
+                    linewidth=2.0,
+                    linestyle="-",
+                    zorder=40,
+                )
+                self.ax.add_patch(self.backscatter_box_patch)
+
             # Draw legend after all overlays so it sits above every layer.
             handles, labels = self.ax.get_legend_handles_labels()
             if handles and any(label and not label.startswith('_') for label in labels):
@@ -1179,6 +1404,8 @@ class PlottingMixin:
             self.geotiff_image_plot = None
             self.geotiff_hillshade_plot = None
             self.slope_overlay_image_plot = None
+            self.backscatter_slope_areas_overlay_plot = None
+            self.backscatter_raster_plot = None
             self.contour_plot = None
             # Robustly remove colorbars
             self._remove_colorbar('slope_colorbar')
@@ -1195,6 +1422,39 @@ class PlottingMixin:
             # Reset transformers
             self.geotiff_to_wgs84_transformer = None
             self.wgs84_to_geotiff_transformer = None
+
+            self.backscatter_geotiff_path = None
+            self.backscatter_raster_array = None
+            self.backscatter_raster_bands = []
+            self.backscatter_is_rgb = False
+            self.backscatter_selected_band = 1
+            self.show_backscatter_var = False
+            self.backscatter_box_draw_mode = False
+            self.backscatter_box_stage = 0
+            self.backscatter_box_centerline = None
+            self.backscatter_box_vertices = None
+            self.backscatter_box_half_width_m = None
+            self.backscatter_box_patch = None
+            self.backscatter_box_stats = None
+            if hasattr(self, "show_backscatter_checkbox"):
+                self.show_backscatter_checkbox.blockSignals(True)
+                self.show_backscatter_checkbox.setChecked(False)
+                self.show_backscatter_checkbox.blockSignals(False)
+            if hasattr(self, "_set_backscatter_band_controls_visibility"):
+                self._set_backscatter_band_controls_visibility(False)
+            if hasattr(self, "backscatter_draw_box_btn"):
+                self.backscatter_draw_box_btn.blockSignals(True)
+                self.backscatter_draw_box_btn.setChecked(False)
+                self.backscatter_draw_box_btn.blockSignals(False)
+            if hasattr(self, "backscatter_stats_dialog") and self.backscatter_stats_dialog is not None:
+                try:
+                    self.backscatter_stats_dialog.close()
+                except Exception:
+                    pass
+                self.backscatter_stats_dialog = None
+                self.backscatter_stats_canvas = None
+                self.backscatter_stats_ax = None
+                self.backscatter_stats_text_label = None
 
             # Disable Remove GeoTIFF, Pick Center, and Zoom to GeoTIFF buttons
             if hasattr(self, 'remove_geotiff_btn'):

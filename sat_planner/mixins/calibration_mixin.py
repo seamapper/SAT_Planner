@@ -1119,7 +1119,10 @@ class CalibrationMixin:
                 json.dump(
                     {
                         "type": "FeatureCollection",
-                        "properties": {"geotiff_path": _cal_geotiff},
+                        "properties": {
+                            "geotiff_path": _cal_geotiff,
+                            "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                        },
                         "features": geojson_features,
                     },
                     f,
@@ -1190,6 +1193,7 @@ class CalibrationMixin:
                     if hasattr(self, "current_geotiff_path") and self.current_geotiff_path
                     else None
                 )
+                params['geotiff_nan_value'] = float(getattr(self, "geotiff_nan_value", -11000.0))
                 params['visualization_shapefile_paths'] = list(getattr(self, 'visualization_shapefile_paths', []) or [])
                 json_metadata_path = os.path.join(export_dir, f"{export_name}_params.json")
                 with open(json_metadata_path, 'w', encoding='utf-8') as f:
@@ -1372,6 +1376,7 @@ class CalibrationMixin:
             file_basename = os.path.basename(file_path)
             file_processed = False
             imported_geojson_geotiff_path = None
+            imported_geojson_nan_cutoff = None
 
             # Handle *.lnw format (Hypack LNW)
             if file_ext == '.lnw':
@@ -1584,6 +1589,7 @@ class CalibrationMixin:
                     features = geojson_data.get('features', [])
                     fc_props = geojson_data.get('properties') or {}
                     imported_geojson_geotiff_path = fc_props.get('geotiff_path')
+                    imported_geojson_nan_cutoff = fc_props.get('geotiff_nan_value')
                 elif geojson_data.get('type') == 'Feature':
                     features = [geojson_data]
                 else:
@@ -1602,6 +1608,8 @@ class CalibrationMixin:
                     properties = feature.get('properties', {}) or {}
                     if imported_geojson_geotiff_path is None:
                         imported_geojson_geotiff_path = properties.get('geotiff_path')
+                    if imported_geojson_nan_cutoff is None:
+                        imported_geojson_nan_cutoff = properties.get('geotiff_nan_value')
                     line_name = str(properties.get('line_name', '')).strip().lower()
                     if line_name.startswith('pitch'):
                         self.pitch_line_points = [point1, point2]
@@ -1674,8 +1682,12 @@ class CalibrationMixin:
                         self.cal_survey_speed_entry.setText(str(params['survey_speed']))
                     if params.get('turn_time') is not None and hasattr(self, 'cal_turn_time_entry'):
                         self.cal_turn_time_entry.setText(str(params['turn_time']))
+                    if params.get('geotiff_nan_value') is not None and hasattr(self, '_set_geotiff_nan_cutoff'):
+                        self._set_geotiff_nan_cutoff(params.get('geotiff_nan_value'), update_entry=True)
                 except Exception:
                     pass
+            elif imported_geojson_nan_cutoff is not None and hasattr(self, '_set_geotiff_nan_cutoff'):
+                self._set_geotiff_nan_cutoff(imported_geojson_nan_cutoff, update_entry=True)
             if imported_geojson_geotiff_path and hasattr(self, '_load_geotiff_from_path'):
                 if os.path.exists(imported_geojson_geotiff_path):
                     self._load_geotiff_from_path(imported_geojson_geotiff_path)

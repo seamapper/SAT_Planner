@@ -1,6 +1,7 @@
 """
 Config: load/save last-used directories to/from JSON config file.
 _load_last_used_dir, _save_last_used_dir, _load_last_geotiff_dir, _save_last_geotiff_dir,
+_load_last_backscatter_dir, _save_last_backscatter_dir,
 _load_last_survey_params_dir, _save_last_survey_params_dir, _load_last_export_dir, _save_last_export_dir,
 _load_last_ref_import_dir, _save_last_ref_import_dir, _load_last_line_import_dir, _save_last_line_import_dir,
 _load_last_perf_import_dir, _save_last_perf_import_dir, _load_last_shapefile_dir, _save_last_shapefile_dir,
@@ -64,6 +65,28 @@ class ConfigMixin:
                 with open(self.CONFIG_FILENAME, 'r') as f:
                     config = json.load(f)
             config['last_geotiff_dir'] = self.last_geotiff_dir
+            with open(self.CONFIG_FILENAME, 'w') as f:
+                json.dump(config, f)
+        except Exception:
+            pass
+
+    def _load_last_backscatter_dir(self):
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, 'r') as f:
+                    config = json.load(f)
+                if 'last_backscatter_dir' in config and os.path.isdir(config['last_backscatter_dir']):
+                    self.last_backscatter_dir = config['last_backscatter_dir']
+        except Exception:
+            pass
+
+    def _save_last_backscatter_dir(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, 'r') as f:
+                    config = json.load(f)
+            config['last_backscatter_dir'] = self.last_backscatter_dir
             with open(self.CONFIG_FILENAME, 'w') as f:
                 json.dump(config, f)
         except Exception:
