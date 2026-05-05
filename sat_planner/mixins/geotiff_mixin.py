@@ -44,6 +44,12 @@ from sat_planner.utils_ui import show_statistics_dialog
 class GeoTIFFMixin:
     """Mixin providing GeoTIFF load/remove, display mode, dynamic resolution, and contours."""
 
+    def _dynamic_resolution_reference_extent(self):
+        """Return the full GeoTIFF extent to use for zoom/resolution calculations."""
+        if hasattr(self, "geotiff_original_extent") and self.geotiff_original_extent is not None:
+            return self.geotiff_original_extent
+        return getattr(self, "geotiff_extent", None)
+
     def _get_geotiff_nan_cutoff(self):
         """Return current lower-bound cutoff for setting GeoTIFF values to NaN."""
         try:
@@ -234,6 +240,8 @@ class GeoTIFFMixin:
         import_dir = os.path.dirname(file_path)
         if import_dir and os.path.isdir(import_dir):
             self.last_backscatter_import_dir = import_dir
+            if hasattr(self, "_save_last_backscatter_import_dir"):
+                self._save_last_backscatter_import_dir()
 
         points = []
         ext = os.path.splitext(file_path)[1].lower()
@@ -276,12 +284,25 @@ class GeoTIFFMixin:
                 self._show_message("warning", "Import Warning", "Imported backscatter line must contain at least 2 points.")
                 return
 
-            params_path = os.path.join(import_dir, f"{os.path.splitext(os.path.basename(file_path))[0]}_params.json")
+            # Backscatter exports write "<export_name>_params.json", but imported geometry might be
+            # "<export_name>_DDD.csv" / "_DMM.csv" / etc. Strip common suffixes so we can still find metadata.
+            import_base_name = os.path.splitext(os.path.basename(file_path))[0]
+            base_name_candidates = [import_base_name]
+            for suffix in ("_DDD", "_DMM", "_DMS", "_DD", "_DM"):
+                if import_base_name.endswith(suffix):
+                    base_name_candidates.append(import_base_name[: -len(suffix)])
+
             params = {}
-            if os.path.exists(params_path):
+            for candidate in base_name_candidates:
+                params_path = os.path.join(import_dir, f"{candidate}_params.json")
+                if not os.path.exists(params_path):
+                    continue
                 try:
                     with open(params_path, "r", encoding="utf-8") as pf:
-                        params = json.load(pf)
+                        loaded = json.load(pf)
+                    if isinstance(loaded, dict):
+                        params = loaded
+                    break
                 except Exception:
                     params = {}
 
@@ -475,12 +496,16 @@ class GeoTIFFMixin:
         if hasattr(self, "backscatter_export_name_entry"):
             export_name = self.backscatter_export_name_entry.text().strip() or export_name
             self.backscatter_export_name_entry.setText(export_name)
-        export_dir = QFileDialog.getExistingDirectory(self, "Select Export Directory", self.last_export_dir)
+        export_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Export Directory",
+            getattr(self, "last_backscatter_export_dir", None) or self.last_export_dir,
+        )
         if not export_dir:
             return
-        self.last_export_dir = export_dir
-        if hasattr(self, "_save_last_export_dir"):
-            self._save_last_export_dir()
+        self.last_backscatter_export_dir = export_dir
+        if hasattr(self, "_save_last_backscatter_export_dir"):
+            self._save_last_backscatter_export_dir()
 
         try:
             line_points = list(getattr(self, "_calculate_backscatter_line_statistics", lambda: {})().get("line_waypoints", []))
@@ -881,10 +906,11 @@ class GeoTIFFMixin:
         self.ax.set_xlim(xlim)
         self.ax.set_ylim(ylim)
 
-        if self.geotiff_extent is not None and self.geotiff_dataset_original is not None:
+        ref_extent = self._dynamic_resolution_reference_extent()
+        if ref_extent is not None and self.geotiff_dataset_original is not None:
             if getattr(self, "dynamic_resolution_enabled", True):
-                full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
-                full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+                full_width = ref_extent[1] - ref_extent[0]
+                full_height = ref_extent[3] - ref_extent[2]
                 current_width = xlim[1] - xlim[0]
                 current_height = ylim[1] - ylim[0]
                 width_ratio = current_width / full_width if full_width > 0 else 1.0
@@ -2249,8 +2275,41 @@ class GeoTIFFMixin:
 
     def _on_backscatter_show_stats_clicked(self):
         """Open backscatter statistics dialog for the currently saved box."""
-        if not getattr(self, "backscatter_box_stats", None):
-            self._show_message("info", "Backscatter Statistics", "Draw a box first to compute statistics.")
+        stats = getattr(self, "backscatter_box_stats", None)
+        has_saved_geometry = bool(
+            (
+                getattr(self, "backscatter_box_vertices", None)
+                and len(getattr(self, "backscatter_box_vertices", []) or []) == 4
+            )
+            or (
+                getattr(self, "backscatter_box_centerline", None)
+                and len(getattr(self, "backscatter_box_centerline", []) or []) == 2
+            )
+        )
+        if not stats:
+            if not has_saved_geometry:
+                self._show_message("info", "Backscatter Statistics", "Draw a box first to compute statistics.")
+                return
+
+            # Imported plans can have saved geometry without cached stats; compute on demand.
+            if getattr(self, "geotiff_extent", None) is None:
+                self._show_message(
+                    "info",
+                    "Backscatter Statistics",
+                    "Load bathymetry first so area statistics can be computed.",
+                )
+                return
+            try:
+                self.backscatter_box_stats = self._compute_backscatter_box_stats()
+            except Exception:
+                self.backscatter_box_stats = None
+            stats = getattr(self, "backscatter_box_stats", None)
+        if not stats:
+            self._show_message(
+                "info",
+                "Backscatter Statistics",
+                "Could not compute statistics for the current area. Try reloading the GeoTIFF(s) and reopening stats.",
+            )
             return
         self._show_backscatter_stats_dialog()
 
@@ -2435,9 +2494,8 @@ class GeoTIFFMixin:
         """Compute histogram input and dimensions for current backscatter box."""
         if self.backscatter_box_vertices is None:
             return None
-        bs = getattr(self, "backscatter_raster_array", None)
         extent = getattr(self, "geotiff_extent", None)
-        if bs is None or extent is None:
+        if extent is None:
             return None
         vertices = np.array(self.backscatter_box_vertices, dtype=float)
         if vertices.shape != (4, 2):
@@ -2447,26 +2505,8 @@ class GeoTIFFMixin:
         lat_min = float(np.min(vertices[:, 1]))
         lat_max = float(np.max(vertices[:, 1]))
         left, right, bottom, top = extent
-        nrows, ncols = bs.shape
         if right == left or top == bottom:
             return None
-        c0 = int(np.clip((lon_min - left) / (right - left) * (ncols - 1), 0, ncols - 1))
-        c1 = int(np.clip((lon_max - left) / (right - left) * (ncols - 1), 0, ncols - 1))
-        r0 = int(np.clip((top - lat_max) / (top - bottom) * (nrows - 1), 0, nrows - 1))
-        r1 = int(np.clip((top - lat_min) / (top - bottom) * (nrows - 1), 0, nrows - 1))
-        rr0, rr1 = sorted([r0, r1])
-        cc0, cc1 = sorted([c0, c1])
-        subset = bs[rr0:rr1 + 1, cc0:cc1 + 1]
-        lon_vals = np.linspace(left, right, ncols)
-        lat_vals = np.linspace(top, bottom, nrows)
-        sub_lons = lon_vals[cc0:cc1 + 1]
-        sub_lats = lat_vals[rr0:rr1 + 1]
-        lon_mesh, lat_mesh = np.meshgrid(sub_lons, sub_lats)
-        points = np.column_stack((lon_mesh.ravel(), lat_mesh.ravel()))
-        from matplotlib.path import Path
-        poly_path = Path(vertices)
-        inside = poly_path.contains_points(points).reshape(subset.shape)
-        valid = subset[np.isfinite(subset) & inside]
         geod = pyproj.Geod(ellps="WGS84")
         centerline = getattr(self, "backscatter_box_centerline", None)
         if centerline and len(centerline) == 2:
@@ -2476,15 +2516,21 @@ class GeoTIFFMixin:
             height_m = 0.0
         width_m = 2.0 * float(getattr(self, "backscatter_box_half_width_m", 0.0) or 0.0)
         rectified = self._compute_backscatter_box_rectified_image()
+        rectified_img = rectified.get("image")
+        if rectified_img is not None and np.size(rectified_img) > 0:
+            valid = np.array(rectified_img[np.isfinite(rectified_img)], dtype=float)
+        else:
+            valid = np.array([], dtype=float)
         bathy_rect = self._compute_rectified_slope_aspect_from_bathy()
+        bathy_rectified = self._compute_rectified_box_image_from_source("bathy").get("image")
         return {
             "values": valid,
             "width_m": float(abs(width_m)),
             "height_m": float(abs(height_m)),
-            "rectified_image": rectified.get("image"),
+            "rectified_image": rectified_img,
             "rectified_long_m": float(rectified.get("long_m", 0.0)),
             "rectified_short_m": float(rectified.get("short_m", 0.0)),
-            "bathy_rectified": self._compute_rectified_box_image_from_array(getattr(self, "geotiff_data_array", None)).get("image"),
+            "bathy_rectified": bathy_rectified,
             "slope_rectified": bathy_rect.get("slope"),
         }
 
@@ -2516,16 +2562,92 @@ class GeoTIFFMixin:
             vmax = vmin + 1e-6
         return vmin, vmax
 
-    def _compute_rectified_box_image_from_array(self, data_array):
-        """Return a de-rotated image aligned with selected box long axis (x) and short axis (y)."""
-        bs = data_array
-        extent = getattr(self, "geotiff_extent", None)
+    def _sample_dataset_band_on_wgs84_grid(self, src_ds, band_index, sample_lon, sample_lat, apply_bathy_nan=False):
+        """Sample a rasterio dataset band at WGS84 lon/lat points and return image-shaped array."""
+        out = np.full(sample_lon.shape, np.nan, dtype=float)
+        lon_flat = np.asarray(sample_lon, dtype=float).ravel()
+        lat_flat = np.asarray(sample_lat, dtype=float).ravel()
+        if lon_flat.size == 0:
+            return out
+
+        if src_ds.crs is not None and str(src_ds.crs) != "EPSG:4326":
+            transformer = pyproj.Transformer.from_crs("EPSG:4326", src_ds.crs, always_xy=True)
+            xs, ys = transformer.transform(lon_flat, lat_flat)
+        else:
+            xs, ys = lon_flat, lat_flat
+
+        rows, cols = rowcol(src_ds.transform, xs, ys)
+        rows = np.asarray(rows, dtype=int)
+        cols = np.asarray(cols, dtype=int)
+        valid = (
+            np.isfinite(xs)
+            & np.isfinite(ys)
+            & (rows >= 0)
+            & (rows < int(src_ds.height))
+            & (cols >= 0)
+            & (cols < int(src_ds.width))
+        )
+        if not np.any(valid):
+            return out
+
+        valid_rows = rows[valid]
+        valid_cols = cols[valid]
+        rmin = int(np.min(valid_rows))
+        rmax = int(np.max(valid_rows))
+        cmin = int(np.min(valid_cols))
+        cmax = int(np.max(valid_cols))
+        window = Window.from_slices((rmin, rmax + 1), (cmin, cmax + 1))
+        data = src_ds.read(int(band_index), window=window).astype(float)
+
+        local_rows = valid_rows - rmin
+        local_cols = valid_cols - cmin
+        sampled = data[local_rows, local_cols]
+        out_flat = out.ravel()
+        out_flat[np.where(valid)[0]] = sampled
+
+        if src_ds.nodata is not None:
+            out[np.isclose(out, float(src_ds.nodata), rtol=0.0, atol=1e-9)] = np.nan
+        if apply_bathy_nan:
+            self._apply_geotiff_nan_filter(out)
+        return out
+
+    def _get_source_pixel_size_m(self, source_key, center_lat):
+        """Estimate source pixel size in meters for full-resolution stats sampling."""
+        if source_key == "bathy":
+            ds = getattr(self, "geotiff_dataset_original", None)
+            if ds is None:
+                return 5.0
+            tr = ds.transform
+            res_x = abs(float(tr.a))
+            res_y = abs(float(tr.e))
+            if ds.crs is not None and str(ds.crs) != "EPSG:4326":
+                return max(0.25, min(res_x, res_y))
+            meters_per_deg_lon = max(1.0, 111320.0 * np.cos(np.radians(center_lat)))
+            meters_per_deg_lat = 111320.0
+            return max(0.25, min(res_x * meters_per_deg_lon, res_y * meters_per_deg_lat))
+
+        path = getattr(self, "backscatter_geotiff_path", None)
+        if not path or not os.path.isfile(path):
+            return 5.0
+        try:
+            with rasterio.open(path) as ds:
+                tr = ds.transform
+                res_x = abs(float(tr.a))
+                res_y = abs(float(tr.e))
+                if ds.crs is not None and str(ds.crs) != "EPSG:4326":
+                    return max(0.25, min(res_x, res_y))
+                meters_per_deg_lon = max(1.0, 111320.0 * np.cos(np.radians(center_lat)))
+                meters_per_deg_lat = 111320.0
+                return max(0.25, min(res_x * meters_per_deg_lon, res_y * meters_per_deg_lat))
+        except Exception:
+            return 5.0
+
+    def _compute_rectified_box_image_from_source(self, source_key):
+        """Return de-rotated image using full-resolution source raster(s), independent of display grid."""
         centerline = getattr(self, "backscatter_box_centerline", None)
         half_width = float(getattr(self, "backscatter_box_half_width_m", 0.0) or 0.0)
         if (
-            bs is None
-            or extent is None
-            or centerline is None
+            centerline is None
             or len(centerline) != 2
             or centerline[0] is None
             or centerline[1] is None
@@ -2576,16 +2698,9 @@ class GeoTIFFMixin:
             u_long = v_ab
             v_short = u_ab
 
-        nrows, ncols = bs.shape
-        left, right, bottom, top = extent
-        if right == left or top == bottom:
-            return {"image": None, "long_m": long_m, "short_m": short_m}
-
-        lon_res_m = abs((right - left) / max(1, ncols - 1)) * m_per_deg_lon
-        lat_res_m = abs((top - bottom) / max(1, nrows - 1)) * m_per_deg_lat
-        base_res_m = max(1.0, min(abs(lon_res_m), abs(lat_res_m)))
-        nx = int(np.clip(np.ceil(long_m / base_res_m) + 1, 32, 800))
-        ny = int(np.clip(np.ceil(short_m / base_res_m) + 1, 16, 400))
+        base_res_m = self._get_source_pixel_size_m(source_key, center_lat)
+        nx = int(np.clip(np.ceil(long_m / base_res_m) + 1, 32, 2400))
+        ny = int(np.clip(np.ceil(short_m / base_res_m) + 1, 16, 1200))
 
         x_vals = np.linspace(-0.5 * long_m, 0.5 * long_m, nx)
         y_vals = np.linspace(-0.5 * short_m, 0.5 * short_m, ny)
@@ -2594,20 +2709,44 @@ class GeoTIFFMixin:
         sample_lon = xy_m[..., 0] / m_per_deg_lon
         sample_lat = xy_m[..., 1] / m_per_deg_lat
 
-        cols = np.rint((sample_lon - left) / (right - left) * (ncols - 1)).astype(int)
-        rows = np.rint((top - sample_lat) / (top - bottom) * (nrows - 1)).astype(int)
-        in_bounds = (rows >= 0) & (rows < nrows) & (cols >= 0) & (cols < ncols)
-        image = np.full((ny, nx), np.nan, dtype=float)
-        image[in_bounds] = bs[rows[in_bounds], cols[in_bounds]]
+        if source_key == "bathy":
+            ds = getattr(self, "geotiff_dataset_original", None)
+            if ds is None:
+                return {"image": None, "long_m": long_m, "short_m": short_m}
+            image = self._sample_dataset_band_on_wgs84_grid(
+                ds,
+                1,
+                sample_lon,
+                sample_lat,
+                apply_bathy_nan=True,
+            )
+            return {"image": image, "long_m": long_m, "short_m": short_m}
+
+        path = getattr(self, "backscatter_geotiff_path", None)
+        if not path or not os.path.isfile(path):
+            return {"image": None, "long_m": long_m, "short_m": short_m}
+        band_index = int(getattr(self, "backscatter_selected_band", 1) or 1)
+        try:
+            with rasterio.open(path) as src:
+                band_index = max(1, min(int(getattr(src, "count", 1)), band_index))
+                image = self._sample_dataset_band_on_wgs84_grid(
+                    src,
+                    band_index,
+                    sample_lon,
+                    sample_lat,
+                    apply_bathy_nan=False,
+                )
+        except Exception:
+            return {"image": None, "long_m": long_m, "short_m": short_m}
         return {"image": image, "long_m": long_m, "short_m": short_m}
 
     def _compute_backscatter_box_rectified_image(self):
-        """Return a de-rotated backscatter image aligned with long axis (x) and short axis (y)."""
-        return self._compute_rectified_box_image_from_array(getattr(self, "backscatter_raster_array", None))
+        """Return a de-rotated backscatter image from full-resolution source raster."""
+        return self._compute_rectified_box_image_from_source("backscatter")
 
     def _compute_rectified_slope_aspect_from_bathy(self):
         """Compute slope and aspect from bathymetry in the selected rectified box frame."""
-        rect = self._compute_rectified_box_image_from_array(getattr(self, "geotiff_data_array", None))
+        rect = self._compute_rectified_box_image_from_source("bathy")
         bathy = rect.get("image")
         long_m = float(rect.get("long_m", 0.0))
         short_m = float(rect.get("short_m", 0.0))

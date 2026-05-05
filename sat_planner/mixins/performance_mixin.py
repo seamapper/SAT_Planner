@@ -1038,14 +1038,23 @@ class PerformanceMixin:
             return
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         dir_name = os.path.dirname(file_path)
-        meta_path = os.path.join(dir_name, f"{base_name}_performance_params.json")
         params = None
-        if os.path.exists(meta_path):
+        # Export writes metadata as "<export_name>_performance_params.json", but imported files can be "<export_name>_DDD.csv".
+        base_name_candidates = [base_name]
+        for suffix in ("_DDD", "_DMM", "_DMS", "_DD", "_DM"):
+            if base_name.endswith(suffix):
+                base_name_candidates.append(base_name[: -len(suffix)])
+        for candidate in base_name_candidates:
+            meta_path = os.path.join(dir_name, f"{candidate}_performance_params.json")
+            if not os.path.exists(meta_path):
+                continue
             try:
                 with open(meta_path, "r", encoding="utf-8") as f:
                     params = json.load(f)
+                break
             except Exception as e:
                 print(f"Warning: could not load performance metadata: {e}")
+                params = None
         all_pts = []
         for ln in lines:
             all_pts.extend(ln)
@@ -1139,6 +1148,11 @@ class PerformanceMixin:
         if hasattr(self, "_update_performance_ping_time"):
             self._update_performance_ping_time()
         self._plot_survey_plan(preserve_view_limits=True)
+        try:
+            self._last_user_xlim = self.ax.get_xlim()
+            self._last_user_ylim = self.ax.get_ylim()
+        except Exception:
+            pass
         if hasattr(self, "_draw_performance_profile"):
             self._draw_performance_profile()
 

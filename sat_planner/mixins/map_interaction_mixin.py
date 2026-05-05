@@ -563,16 +563,17 @@ class MapInteractionMixin:
         
         # Store the current zoom level before changing it (only if GeoTIFF is loaded)
         old_zoom_level = None
+        ref_extent = getattr(self, "_dynamic_resolution_reference_extent", lambda: getattr(self, "geotiff_extent", None))()
         if (self.geotiff_dataset_original is not None and 
             self.dynamic_resolution_enabled and
-            hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None):
-            full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
-            full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+            ref_extent is not None):
+            full_width = ref_extent[1] - ref_extent[0]
+            full_height = ref_extent[3] - ref_extent[2]
             current_width = cur_xlim[1] - cur_xlim[0]
             current_height = cur_ylim[1] - cur_ylim[0]
             width_ratio = current_width / full_width if full_width > 0 else 1.0
             height_ratio = current_height / full_height if full_height > 0 else 1.0
-            old_zoom_level = min(width_ratio, height_ratio)
+            old_zoom_level = max(width_ratio, height_ratio)
             
             # Initialize cumulative zoom change tracking
             if not hasattr(self, '_cumulative_zoom_change'):
@@ -628,18 +629,18 @@ class MapInteractionMixin:
         if (old_zoom_level is not None and 
             self.geotiff_dataset_original is not None and 
             self.dynamic_resolution_enabled and
-            self.geotiff_extent is not None):
+            ref_extent is not None):
             
             # Calculate new zoom level based on the updated view
-            full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
-            full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+            full_width = ref_extent[1] - ref_extent[0]
+            full_height = ref_extent[3] - ref_extent[2]
             new_width = new_xlim[1] - new_xlim[0]
             new_height = new_ylim[1] - new_ylim[0]
             
             # New zoom level is the ratio of current view to full extent
             width_ratio = new_width / full_width if full_width > 0 else 1.0
             height_ratio = new_height / full_height if full_height > 0 else 1.0
-            new_zoom_level = min(width_ratio, height_ratio)
+            new_zoom_level = max(width_ratio, height_ratio)
             new_zoom_level = max(0.01, min(10.0, new_zoom_level))
             
             # Track cumulative zoom changes
@@ -714,16 +715,17 @@ class MapInteractionMixin:
         current_xlim = self.ax.get_xlim()
         current_ylim = self.ax.get_ylim()
 
+        ref_extent = getattr(self, "_dynamic_resolution_reference_extent", lambda: getattr(self, "geotiff_extent", None))()
         if (self.geotiff_dataset_original is not None and
             self.dynamic_resolution_enabled and
-            hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None):
-            full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
-            full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+            ref_extent is not None):
+            full_width = ref_extent[1] - ref_extent[0]
+            full_height = ref_extent[3] - ref_extent[2]
             new_width = current_xlim[1] - current_xlim[0]
             new_height = current_ylim[1] - current_ylim[0]
             width_ratio = new_width / full_width if full_width > 0 else 1.0
             height_ratio = new_height / full_height if full_height > 0 else 1.0
-            new_zoom_level = min(width_ratio, height_ratio)
+            new_zoom_level = max(width_ratio, height_ratio)
             new_zoom_level = max(0.01, min(10.0, new_zoom_level))
             old_zoom_level = getattr(self, 'geotiff_zoom_level', 1.0)
             zoom_change = abs(new_zoom_level - old_zoom_level)
@@ -914,15 +916,16 @@ class MapInteractionMixin:
                         needs_reload = True
                 
                 # Also reload if dynamic resolution is enabled and zoom level changed
-                if self.dynamic_resolution_enabled and hasattr(self, 'geotiff_extent') and self.geotiff_extent is not None:
-                    full_width = self.geotiff_extent[1] - self.geotiff_extent[0]
-                    full_height = self.geotiff_extent[3] - self.geotiff_extent[2]
+                ref_extent = getattr(self, "_dynamic_resolution_reference_extent", lambda: getattr(self, "geotiff_extent", None))()
+                if self.dynamic_resolution_enabled and ref_extent is not None:
+                    full_width = ref_extent[1] - ref_extent[0]
+                    full_height = ref_extent[3] - ref_extent[2]
                     current_width = xlim[1] - xlim[0]
                     current_height = ylim[1] - ylim[0]
                     
                     width_ratio = current_width / full_width if full_width > 0 else 1.0
                     height_ratio = current_height / full_height if full_height > 0 else 1.0
-                    new_zoom_level = min(width_ratio, height_ratio)
+                    new_zoom_level = max(width_ratio, height_ratio)
                     
                     # Update zoom level if it changed significantly
                     if abs(new_zoom_level - self.geotiff_zoom_level) > 0.2:

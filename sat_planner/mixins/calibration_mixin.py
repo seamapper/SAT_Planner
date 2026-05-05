@@ -1663,14 +1663,23 @@ class CalibrationMixin:
                 return
             params = None
             imported_line_offset = None
-            base_path = os.path.splitext(file_path)[0]
-            metadata_path = os.path.join(os.path.dirname(file_path), os.path.basename(base_path) + "_params.json")
-            if os.path.exists(metadata_path):
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            dir_name = os.path.dirname(file_path)
+            base_name_candidates = [base_name]
+            for suffix in ("_DDD", "_DMM", "_DMS", "_DD", "_DM"):
+                if base_name.endswith(suffix):
+                    base_name_candidates.append(base_name[: -len(suffix)])
+
+            for candidate in base_name_candidates:
+                metadata_path = os.path.join(dir_name, f"{candidate}_params.json")
+                if not os.path.exists(metadata_path):
+                    continue
                 try:
-                    with open(metadata_path, 'r', encoding='utf-8') as f:
+                    with open(metadata_path, "r", encoding="utf-8") as f:
                         params = json.load(f)
+                    break
                 except Exception:
-                    pass
+                    params = None
             if params and isinstance(params, dict):
                 try:
                     if params.get('line_offset') is not None:
@@ -1712,6 +1721,11 @@ class CalibrationMixin:
                     getattr(self, btn_attr).setStyleSheet("")
             self._update_cal_line_times()
             self._plot_survey_plan(preserve_view_limits=True)
+            try:
+                self._last_user_xlim = self.ax.get_xlim()
+                self._last_user_ylim = self.ax.get_ylim()
+            except Exception:
+                pass
             if hasattr(self, '_draw_current_profile'):
                 self._draw_current_profile()
             elif hasattr(self, '_draw_pitch_line_profile'):

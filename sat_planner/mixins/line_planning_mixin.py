@@ -676,6 +676,27 @@ class LinePlanningMixin:
             file_ext = os.path.splitext(file_path)[1].lower()
             file_basename = os.path.basename(file_path)
             file_processed = False
+            # Optional sidecar metadata exported by this app (contains GeoTIFF path + NaN cutoff).
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            dir_name = os.path.dirname(file_path)
+            metadata_path = None
+            sidecar_params = None
+            base_name_candidates = [base_name]
+            for suffix in ("_DDD", "_DMM", "_DMS", "_DD", "_DM"):
+                if base_name.endswith(suffix):
+                    base_name_candidates.append(base_name[: -len(suffix)])
+            for candidate in base_name_candidates:
+                metadata_path = os.path.join(dir_name, f"{candidate}_params.json")
+                if not os.path.exists(metadata_path):
+                    continue
+                try:
+                    with open(metadata_path, "r", encoding="utf-8") as pf:
+                        sidecar_params = json.load(pf)
+                    if not isinstance(sidecar_params, dict):
+                        sidecar_params = None
+                    break
+                except Exception:
+                    sidecar_params = None
 
             # Single polyline: points in file order, no assignment dialog
             if file_basename.lower().endswith('_ddd.txt') and hasattr(self, '_parse_ddd_txt_file_as_polyline'):
@@ -770,6 +791,21 @@ class LinePlanningMixin:
                 self._show_message("warning", "Import Warning", "Line plan must have at least 2 points.")
                 self.line_planning_points = []
                 return
+
+            # Restore GeoTIFF + NaN cutoff from exported sidecar (so bathymetry filtering matches export).
+            if sidecar_params:
+                try:
+                    nan_cutoff = sidecar_params.get("geotiff_nan_value")
+                    if nan_cutoff is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
+                        self._set_geotiff_nan_cutoff(nan_cutoff, update_entry=True)
+                except Exception:
+                    pass
+                try:
+                    gtp = sidecar_params.get("geotiff_path")
+                    if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
+                        self._load_geotiff_from_path(gtp)
+                except Exception:
+                    pass
             if hasattr(self, 'line_export_name_entry'):
                 file_basename = os.path.splitext(os.path.basename(file_path))[0]
                 for suffix in ['_DDD', '_DMM', '_DM', '_DD', '_DMS', '.geojson', '.shp', '.lnw', '.gpx']:
@@ -778,6 +814,11 @@ class LinePlanningMixin:
                 self.line_export_name_entry.setText(file_basename)
             self._update_line_planning_button_states()
             self._plot_survey_plan(preserve_view_limits=True)
+            try:
+                self._last_user_xlim = self.ax.get_xlim()
+                self._last_user_ylim = self.ax.get_ylim()
+            except Exception:
+                pass
             # Match manual draw: profile is not updated inside _plot_survey_plan
             if hasattr(self, '_draw_current_profile'):
                 self._draw_current_profile()

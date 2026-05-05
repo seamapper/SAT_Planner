@@ -72,6 +72,14 @@ class ExportImportMixin:
                 'survey_speed': float(self.survey_speed_entry.text()),
                 'export_name': self.export_name_entry.text().strip(),
                 'geotiff_path': (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None),
+                # Backscatter survey uses BOTH:
+                # - bathymetry grid (geotiff_path)
+                # - optional separate backscatter raster (backscatter_geotiff_path)
+                'backscatter_geotiff_path': (
+                    self.backscatter_geotiff_path
+                    if hasattr(self, 'backscatter_geotiff_path') and self.backscatter_geotiff_path
+                    else None
+                ),
                 'geotiff_nan_value': float(getattr(self, 'geotiff_nan_value', -11000.0)),
                 'visualization_shapefile_paths': list(getattr(self, 'visualization_shapefile_paths', []) or []),
                 'offset_direction': self.offset_direction_var,
@@ -126,6 +134,33 @@ class ExportImportMixin:
 
             if 'geotiff_nan_value' in params and hasattr(self, '_set_geotiff_nan_cutoff'):
                 self._set_geotiff_nan_cutoff(params.get('geotiff_nan_value'), update_entry=True)
+
+            # Restore bathymetry GeoTIFF and optional backscatter GeoTIFF (if present).
+            # This is best-effort: if geotiff paths are missing or incompatible, we continue.
+            geotiff_path = params.get('geotiff_path')
+            backscatter_geotiff_path = params.get('backscatter_geotiff_path')
+            try:
+                if geotiff_path and hasattr(self, '_load_geotiff_from_path') and os.path.exists(geotiff_path):
+                    # Load bathymetry first (needed so backscatter can be reprojected/aligned).
+                    self._load_geotiff_from_path(geotiff_path, use_background_loading=False)
+                    # Re-apply stored NaN cutoff after load (GeoTIFF loader may detect its own nodata).
+                    if 'geotiff_nan_value' in params and hasattr(self, '_set_geotiff_nan_cutoff'):
+                        self._set_geotiff_nan_cutoff(params.get('geotiff_nan_value'), update_entry=True)
+                    if hasattr(self, '_reload_geotiff_at_current_zoom'):
+                        self._reload_geotiff_at_current_zoom()
+            except Exception:
+                pass
+
+            try:
+                if (
+                    backscatter_geotiff_path
+                    and hasattr(self, '_load_backscatter_geotiff_from_path')
+                    and os.path.exists(backscatter_geotiff_path)
+                ):
+                    # Requires an already-loaded bathymetry grid (geotiff_data_array / extent).
+                    self._load_backscatter_geotiff_from_path(backscatter_geotiff_path)
+            except Exception:
+                pass
 
             # Regenerate the plot with loaded parameters
             self._generate_and_plot()

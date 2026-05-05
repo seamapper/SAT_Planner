@@ -627,19 +627,29 @@ class ReferenceMixin:
             self.bisect_lead_entry.blockSignals(False)
         base_name = os.path.splitext(os.path.basename(file_path))[0]
         dir_name = os.path.dirname(file_path)
-        metadata_path = os.path.join(dir_name, f"{base_name}_params.json")
+        # Export writes metadata as "<export_name>_params.json", but users may import "<export_name>_DDD.csv" / "_DMM.csv".
+        # Try stripping common suffixes so we can still find the sidecar metadata.
+        base_name_candidates = [base_name]
+        for suffix in ("_DDD", "_DMM", "_DMS", "_DD", "_DM"):
+            if base_name.endswith(suffix):
+                base_name_candidates.append(base_name[: -len(suffix)])
         params = None
         imported_params_geotiff_path = None
         imported_params_shapefile_paths = None
-        if os.path.exists(metadata_path):
+        for candidate in base_name_candidates:
+            metadata_path = os.path.join(dir_name, f"{candidate}_params.json")
+            if not os.path.exists(metadata_path):
+                continue
             try:
-                with open(metadata_path, 'r', encoding='utf-8') as f:
+                with open(metadata_path, "r", encoding="utf-8") as f:
                     params = json.load(f)
                 if isinstance(params, dict):
-                    imported_params_geotiff_path = params.get('geotiff_path')
-                    imported_params_shapefile_paths = params.get('visualization_shapefile_paths')
+                    imported_params_geotiff_path = params.get("geotiff_path")
+                    imported_params_shapefile_paths = params.get("visualization_shapefile_paths")
+                break
             except Exception as e:
                 print(f"Warning: Could not load metadata file: {e}")
+                params = None
         try:
             if params:
                 if params.get('central_lat') is not None:
@@ -1258,8 +1268,13 @@ class ReferenceMixin:
             else:
                 self.accuracy_central_point_coords = (None, None)
 
-            # Update plot
+            # Update plot and sync dynamic-resolution/user-view state to the current imported-plan view.
             self._plot_survey_plan(preserve_view_limits=True)
+            try:
+                self._last_user_xlim = self.ax.get_xlim()
+                self._last_user_ylim = self.ax.get_ylim()
+            except Exception:
+                pass
 
             # Show success message
             imported_items = []
