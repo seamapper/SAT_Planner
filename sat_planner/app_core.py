@@ -130,6 +130,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_slope_min_deg = 0.0
         self.backscatter_slope_max_deg = 2.0
         self.backscatter_slope_areas_overlay_plot = None
+        self.backscatter_depth_filter_enabled_var = False
+        self.backscatter_depth_min_m = 0.0
+        self.backscatter_depth_max_m = 11000.0
         self.backscatter_min_area_enabled_var = False
         self.backscatter_min_area_m2 = 0.0
         self.backscatter_extent_filter_enabled_var = False
@@ -142,20 +145,26 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_raster_bands = []
         self.backscatter_is_rgb = False
         self.backscatter_selected_band = 1  # 1=Red, 2=Green, 3=Blue
-        self.show_backscatter_var = False
+        self.show_backscatter_var = True
         self.backscatter_raster_plot = None
         self.backscatter_percent_clip_enabled = True
         self.backscatter_percent_clip_min = 0.5
         self.backscatter_percent_clip_max = 0.5
         self.backscatter_box_draw_mode = False
+        self.backscatter_box_edit_width_mode = False
         self.backscatter_box_stage = 0  # 0: first point, 1: second point, 2: width click
         self.backscatter_box_centerline = None  # ((lat1, lon1), (lat2, lon2))
+        self.backscatter_box_width_point = None  # (lat, lon) width-side click used for deterministic rectified axis direction
         self.backscatter_box_vertices = None  # [(lon,lat)x4]
         self.backscatter_box_half_width_m = None
         self.backscatter_box_patch = None
+        self.backscatter_box_centerline_line = None
         self.backscatter_box_stats = None
+        self.backscatter_lead_in_m = 2000.0
+        self.backscatter_survey_speed_kn = 8.0
         self.backscatter_stats_dialog = None
         self.backscatter_stats_canvas = None
+        self.backscatter_stats_img_ax = None
         self.backscatter_stats_ax = None
         self.backscatter_stats_text_label = None
 
@@ -423,6 +432,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.backscatter_slope_min_spin.setEnabled(False)
                 self.backscatter_slope_max_spin.setEnabled(False)
                 self.backscatter_show_slope_areas_checkbox.setEnabled(False)
+            if hasattr(self, 'backscatter_depth_filter_checkbox'):
+                self.backscatter_depth_filter_checkbox.setEnabled(False)
+                self.backscatter_depth_min_m_entry.setEnabled(False)
+                self.backscatter_depth_max_m_entry.setEnabled(False)
             if hasattr(self, 'backscatter_min_area_checkbox'):
                 self.backscatter_min_area_checkbox.setEnabled(False)
                 self.backscatter_min_area_m2_entry.setEnabled(False)
@@ -435,10 +448,30 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.show_backscatter_checkbox.setEnabled(False)
             if hasattr(self, 'backscatter_draw_box_btn'):
                 self.backscatter_draw_box_btn.setEnabled(False)
+            if hasattr(self, 'backscatter_edit_width_btn'):
+                self.backscatter_edit_width_btn.setEnabled(False)
+            if hasattr(self, 'backscatter_show_info_btn'):
+                self.backscatter_show_info_btn.setEnabled(False)
+            if hasattr(self, 'backscatter_import_btn'):
+                self.backscatter_import_btn.setEnabled(False)
+            if hasattr(self, 'backscatter_export_btn'):
+                self.backscatter_export_btn.setEnabled(False)
+            if hasattr(self, 'backscatter_download_gmrt_checkbox'):
+                self.backscatter_download_gmrt_checkbox.setEnabled(False)
+            if hasattr(self, 'backscatter_gmrt_buffer_spin'):
+                self.backscatter_gmrt_buffer_spin.setEnabled(False)
             if hasattr(self, 'backscatter_show_stats_btn'):
                 self.backscatter_show_stats_btn.setEnabled(False)
             if hasattr(self, 'backscatter_clear_box_btn'):
                 self.backscatter_clear_box_btn.setEnabled(False)
+            if hasattr(self, 'backscatter_zoom_to_line_btn'):
+                self.backscatter_zoom_to_line_btn.setEnabled(False)
+            if hasattr(self, 'backscatter_remove_line_btn'):
+                self.backscatter_remove_line_btn.setEnabled(False)
+            if hasattr(self, 'backscatter_lead_in_entry'):
+                self.backscatter_lead_in_entry.setEnabled(False)
+            if hasattr(self, 'backscatter_survey_speed_entry'):
+                self.backscatter_survey_speed_entry.setEnabled(False)
 
         # Bind parameter changes to update the plot
         self._updating_from_code = False  # Flag to prevent recursion
@@ -464,6 +497,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.last_cal_import_dir = os.path.expanduser("~")
         self.last_ref_import_dir = os.path.expanduser("~")
         self.last_line_import_dir = os.path.expanduser("~")
+        self.last_backscatter_import_dir = os.path.expanduser("~")
         self.last_perf_import_dir = os.path.expanduser("~")
         self.last_shapefile_dir = os.path.expanduser("~")
         self.export_type_options = self._default_export_type_options()
@@ -1690,6 +1724,30 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         backscatter_bathy_group = QGroupBox("Bathymetry Criteria")
         backscatter_bathy_layout = QVBoxLayout(backscatter_bathy_group)
 
+        backscatter_depth_inner = QGroupBox("Depth")
+        backscatter_depth_layout = QHBoxLayout(backscatter_depth_inner)
+        backscatter_depth_layout.setContentsMargins(9, 9, 9, 9)
+        self.backscatter_depth_filter_checkbox = QCheckBox("")
+        self.backscatter_depth_filter_checkbox.setChecked(self.backscatter_depth_filter_enabled_var)
+        self.backscatter_depth_filter_checkbox.setToolTip(
+            "When enabled, only show magenta areas within the depth range Min..Max (meters, absolute depth)."
+        )
+        self.backscatter_depth_filter_checkbox.stateChanged.connect(self._on_backscatter_depth_filter_changed)
+        backscatter_depth_layout.addWidget(self.backscatter_depth_filter_checkbox)
+        backscatter_depth_layout.addWidget(QLabel("Min (m)"))
+        self.backscatter_depth_min_m_entry = QLineEdit(f"{self.backscatter_depth_min_m:g}")
+        self.backscatter_depth_min_m_entry.setMaximumWidth(100)
+        self.backscatter_depth_min_m_entry.setToolTip("Minimum depth for magenta area filtering (m, absolute depth).")
+        self.backscatter_depth_min_m_entry.textChanged.connect(self._on_backscatter_depth_text_changed)
+        backscatter_depth_layout.addWidget(self.backscatter_depth_min_m_entry)
+        backscatter_depth_layout.addWidget(QLabel("Max (m)"))
+        self.backscatter_depth_max_m_entry = QLineEdit(f"{self.backscatter_depth_max_m:g}")
+        self.backscatter_depth_max_m_entry.setMaximumWidth(100)
+        self.backscatter_depth_max_m_entry.setToolTip("Maximum depth for magenta area filtering (m, absolute depth).")
+        self.backscatter_depth_max_m_entry.textChanged.connect(self._on_backscatter_depth_text_changed)
+        backscatter_depth_layout.addWidget(self.backscatter_depth_max_m_entry)
+        backscatter_depth_layout.addStretch(1)
+
         backscatter_slope_inner = QGroupBox("Slope")
         backscatter_slope_outer = QVBoxLayout(backscatter_slope_inner)
         backscatter_slope_outer.setContentsMargins(0, 0, 0, 0)
@@ -1716,18 +1774,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_slope_max_spin.setToolTip("Maximum seafloor slope (degrees) for backscatter analysis band.")
         self.backscatter_slope_max_spin.valueChanged.connect(self._on_backscatter_slope_min_max_changed)
         backscatter_slope_row.addWidget(self.backscatter_slope_max_spin)
-
-        self.backscatter_show_slope_areas_checkbox = QCheckBox("Show Areas")
-        self.backscatter_show_slope_areas_checkbox.setChecked(self.backscatter_slope_areas_show_var)
-        self.backscatter_show_slope_areas_checkbox.setToolTip(
-            "When enabled, highlights areas where slope is between Min and Max (magenta overlay)."
-        )
-        self.backscatter_show_slope_areas_checkbox.stateChanged.connect(
-            self._on_backscatter_slope_areas_checkbox_changed
-        )
-        backscatter_slope_row.addWidget(self.backscatter_show_slope_areas_checkbox)
         backscatter_slope_row.addStretch(1)
         backscatter_slope_outer.addLayout(backscatter_slope_row)
+
+        backscatter_area_control_inner = QGroupBox("Bathymetry Area Control")
+        backscatter_area_control_outer = QVBoxLayout(backscatter_area_control_inner)
+        backscatter_area_control_outer.setContentsMargins(0, 0, 0, 0)
 
         backscatter_min_area_row = QHBoxLayout()
         backscatter_min_area_row.setContentsMargins(9, 0, 9, 9)
@@ -1748,7 +1800,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         backscatter_min_area_row.addWidget(self.backscatter_min_area_m2_entry)
         backscatter_min_area_row.addWidget(QLabel("m²"))
         backscatter_min_area_row.addStretch(1)
-        backscatter_slope_outer.addLayout(backscatter_min_area_row)
+        backscatter_area_control_outer.addLayout(backscatter_min_area_row)
 
         backscatter_extent_row = QHBoxLayout()
         backscatter_extent_row.setContentsMargins(9, 0, 9, 9)
@@ -1782,10 +1834,20 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         backscatter_extent_row.addWidget(self.backscatter_min_height_m_entry)
         backscatter_extent_row.addWidget(QLabel("m"))
         backscatter_extent_row.addStretch(1)
-        backscatter_slope_outer.addLayout(backscatter_extent_row)
+        backscatter_area_control_outer.addLayout(backscatter_extent_row)
 
-        backscatter_bathy_layout.addWidget(backscatter_slope_inner)
-        backscatter_layout.addWidget(backscatter_bathy_group)
+        backscatter_show_areas_row = QHBoxLayout()
+        backscatter_show_areas_row.setContentsMargins(9, 0, 9, 9)
+        self.backscatter_show_slope_areas_checkbox = QCheckBox("Show Areas")
+        self.backscatter_show_slope_areas_checkbox.setChecked(self.backscatter_slope_areas_show_var)
+        self.backscatter_show_slope_areas_checkbox.setToolTip(
+            "When enabled, highlights areas where slope is between Min and Max (magenta overlay)."
+        )
+        self.backscatter_show_slope_areas_checkbox.stateChanged.connect(
+            self._on_backscatter_slope_areas_checkbox_changed
+        )
+        backscatter_show_areas_row.addWidget(self.backscatter_show_slope_areas_checkbox)
+        backscatter_show_areas_row.addStretch(1)
 
         backscatter_bs_criteria_group = QGroupBox("Backscatter Criteria")
         backscatter_bs_criteria_layout = QVBoxLayout(backscatter_bs_criteria_group)
@@ -1838,32 +1900,137 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         backscatter_bs_criteria_layout.addLayout(backscatter_bs_clip_row)
         backscatter_layout.addWidget(backscatter_bs_criteria_group)
 
+        backscatter_bathy_layout.addWidget(backscatter_depth_inner)
+        backscatter_bathy_layout.addWidget(backscatter_slope_inner)
+        backscatter_bathy_layout.addWidget(backscatter_area_control_inner)
+        backscatter_bathy_layout.addLayout(backscatter_show_areas_row)
+        backscatter_layout.addWidget(backscatter_bathy_group)
+
         backscatter_line_planning_group = QGroupBox("Backscatter Line Planning")
         backscatter_line_planning_layout = QVBoxLayout(backscatter_line_planning_group)
         backscatter_line_planning_layout.setContentsMargins(9, 9, 9, 9)
         backscatter_line_planning_layout.setSpacing(6)
 
-        backscatter_area_planning_group = QGroupBox("Area Planning")
-        backscatter_area_planning_layout = QHBoxLayout(backscatter_area_planning_group)
+        backscatter_area_planning_group = QGroupBox("Area/Line Planning")
+        backscatter_area_planning_layout = QVBoxLayout(backscatter_area_planning_group)
         backscatter_area_planning_layout.setContentsMargins(9, 9, 9, 9)
         backscatter_area_planning_layout.setSpacing(6)
 
-        self.backscatter_draw_box_btn = QPushButton("Select Area")
+        backscatter_area_row_top = QHBoxLayout()
+        self.backscatter_draw_box_btn = QPushButton("Select Area/Line")
         self.backscatter_draw_box_btn.setCheckable(True)
         self.backscatter_draw_box_btn.setToolTip("Select an area on the map to compute backscatter statistics.")
         self.backscatter_draw_box_btn.toggled.connect(self._on_backscatter_draw_box_toggled)
-        backscatter_area_planning_layout.addWidget(self.backscatter_draw_box_btn, 1)
+        backscatter_area_row_top.addWidget(self.backscatter_draw_box_btn, 1)
         self.backscatter_show_stats_btn = QPushButton("Show Stats")
         self.backscatter_show_stats_btn.setToolTip("Open the Backscatter Statistics window for the current box.")
         self.backscatter_show_stats_btn.clicked.connect(self._on_backscatter_show_stats_clicked)
-        backscatter_area_planning_layout.addWidget(self.backscatter_show_stats_btn, 1)
-        self.backscatter_clear_box_btn = QPushButton("Clear Area")
+        backscatter_area_row_top.addWidget(self.backscatter_show_stats_btn, 1)
+        backscatter_area_planning_layout.addLayout(backscatter_area_row_top)
+
+        backscatter_area_row_bottom = QHBoxLayout()
+        self.backscatter_clear_box_btn = QPushButton("Clear Area/Line")
         self.backscatter_clear_box_btn.setToolTip("Clear the selected area and reset backscatter statistics.")
         self.backscatter_clear_box_btn.clicked.connect(self._on_backscatter_clear_box_clicked)
-        backscatter_area_planning_layout.addWidget(self.backscatter_clear_box_btn, 1)
+        backscatter_area_row_bottom.addWidget(self.backscatter_clear_box_btn, 1)
+        self.backscatter_edit_width_btn = QPushButton("Edit Area Width")
+        self.backscatter_edit_width_btn.setCheckable(True)
+        self.backscatter_edit_width_btn.setToolTip("Redefine the area width from the existing centerline.")
+        self.backscatter_edit_width_btn.toggled.connect(self._on_backscatter_edit_width_toggled)
+        backscatter_area_row_bottom.addWidget(self.backscatter_edit_width_btn, 1)
+        backscatter_area_planning_layout.addLayout(backscatter_area_row_bottom)
 
         backscatter_line_planning_layout.addWidget(backscatter_area_planning_group)
+
+        backscatter_line_info_group = QGroupBox("Line Info")
+        backscatter_line_info_layout = QGridLayout(backscatter_line_info_group)
+        backscatter_line_info_layout.setContentsMargins(9, 9, 9, 9)
+        backscatter_line_info_layout.setSpacing(6)
+        backscatter_line_info_layout.addWidget(QLabel("Lead-in (m)"), 0, 0)
+        self.backscatter_lead_in_entry = QLineEdit(f"{self.backscatter_lead_in_m:g}")
+        self.backscatter_lead_in_entry.setToolTip(
+            "Extend the saved backscatter normalization centerline by this distance at both ends."
+        )
+        self.backscatter_lead_in_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
+        backscatter_line_info_layout.addWidget(self.backscatter_lead_in_entry, 0, 1)
+        backscatter_line_info_layout.addWidget(QLabel("Survey Speed (kn)"), 1, 0)
+        self.backscatter_survey_speed_entry = QLineEdit(f"{self.backscatter_survey_speed_kn:g}")
+        self.backscatter_survey_speed_entry.setToolTip("Survey speed used for backscatter line planning calculations.")
+        self.backscatter_survey_speed_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
+        backscatter_line_info_layout.addWidget(self.backscatter_survey_speed_entry, 1, 1)
+        self.backscatter_show_info_btn = QPushButton("Show Survey Info")
+        self.backscatter_show_info_btn.clicked.connect(self._show_backscatter_line_information)
+        backscatter_line_info_layout.addWidget(self.backscatter_show_info_btn, 2, 0, 1, 2)
+        backscatter_line_planning_layout.addWidget(backscatter_line_info_group)
+
+        backscatter_line_plot_control_group = QGroupBox("Line Plot Control")
+        backscatter_line_plot_control_layout = QVBoxLayout(backscatter_line_plot_control_group)
+        backscatter_line_plot_control_layout.setContentsMargins(9, 9, 9, 9)
+        backscatter_line_plot_control_layout.setSpacing(6)
+        self.backscatter_zoom_to_line_btn = QPushButton("Zoom To Line")
+        self.backscatter_zoom_to_line_btn.setToolTip(
+            "Zoom the map to the bounds of the selected backscatter area."
+        )
+        self.backscatter_zoom_to_line_btn.clicked.connect(self._on_backscatter_zoom_to_line_clicked)
+        backscatter_line_plot_control_layout.addWidget(self.backscatter_zoom_to_line_btn)
+        self.backscatter_remove_line_btn = QPushButton("Remove Line")
+        self.backscatter_remove_line_btn.setToolTip(
+            "Remove the backscatter normalization line and selected area."
+        )
+        self.backscatter_remove_line_btn.clicked.connect(self._on_backscatter_remove_line_clicked)
+        backscatter_line_plot_control_layout.addWidget(self.backscatter_remove_line_btn)
+        backscatter_line_planning_layout.addWidget(backscatter_line_plot_control_group)
         backscatter_layout.addWidget(backscatter_line_planning_group)
+
+        backscatter_import_export_group = QGroupBox("Backscatter Import/Export")
+        backscatter_import_export_layout = QVBoxLayout(backscatter_import_export_group)
+        backscatter_import_export_layout.setSpacing(0)
+        backscatter_import_export_layout.setContentsMargins(9, 9, 9, 9)
+
+        self.backscatter_import_btn = QPushButton("Import Backscatter Line")
+        self.backscatter_import_btn.clicked.connect(self._import_backscatter_line)
+        backscatter_import_export_layout.addWidget(self.backscatter_import_btn)
+        backscatter_import_export_layout.addSpacing(3)
+
+        backscatter_gmrt_row = QWidget()
+        backscatter_gmrt_row_layout = QHBoxLayout(backscatter_gmrt_row)
+        backscatter_gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
+        backscatter_gmrt_row_layout.setSpacing(6)
+        self.backscatter_download_gmrt_checkbox = QCheckBox("Download GMRT")
+        self.backscatter_download_gmrt_checkbox.setChecked(False)
+        self.backscatter_download_gmrt_checkbox.setToolTip(
+            "When enabled, importing a backscatter line will download a GMRT bathymetry GeoTIFF (buffer and 100 m resolution) and load it."
+        )
+        backscatter_gmrt_row_layout.addWidget(self.backscatter_download_gmrt_checkbox)
+        self.backscatter_gmrt_buffer_spin = QDoubleSpinBox()
+        self.backscatter_gmrt_buffer_spin.setRange(0.01, 10.0)
+        self.backscatter_gmrt_buffer_spin.setSingleStep(0.1)
+        self.backscatter_gmrt_buffer_spin.setValue(0.5)
+        self.backscatter_gmrt_buffer_spin.setDecimals(2)
+        self.backscatter_gmrt_buffer_spin.setMinimumWidth(60)
+        self.backscatter_gmrt_buffer_spin.setToolTip("Buffer size in degrees around backscatter extent for GMRT download.")
+        backscatter_gmrt_row_layout.addWidget(self.backscatter_gmrt_buffer_spin)
+        backscatter_gmrt_row_layout.addStretch()
+        backscatter_import_export_layout.addWidget(backscatter_gmrt_row)
+        backscatter_import_export_layout.addSpacing(3)
+
+        self.backscatter_export_btn = QPushButton("Export Backscatter Line")
+        self.backscatter_export_btn.clicked.connect(self._export_backscatter_line)
+        backscatter_import_export_layout.addWidget(self.backscatter_export_btn)
+        backscatter_import_export_layout.addSpacing(3)
+
+        backscatter_export_name_frame = QWidget()
+        backscatter_export_name_layout = QGridLayout(backscatter_export_name_frame)
+        backscatter_export_name_layout.setSpacing(0)
+        backscatter_export_name_layout.setContentsMargins(0, 0, 0, 0)
+        backscatter_export_name_layout.setColumnStretch(0, 1)
+        backscatter_export_name_layout.setColumnStretch(1, 2)
+        backscatter_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
+        self.backscatter_export_name_entry = QLineEdit(f"BS_{datetime.datetime.now().strftime('%Y%m%d')}_0")
+        backscatter_export_name_layout.addWidget(self.backscatter_export_name_entry, 0, 1)
+        backscatter_import_export_layout.addWidget(backscatter_export_name_frame)
+
+        backscatter_layout.addWidget(backscatter_import_export_group)
 
         backscatter_layout.addStretch(1)
 

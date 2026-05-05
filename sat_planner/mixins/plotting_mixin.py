@@ -947,6 +947,18 @@ class PlottingMixin:
                     slope_degrees[np.isnan(self.geotiff_data_array)] = np.nan
 
                     mask = (slope_degrees >= min_slope) & (slope_degrees <= max_slope)
+                    if getattr(self, "backscatter_depth_filter_enabled_var", False):
+                        depth_min_m = float(getattr(self, "backscatter_depth_min_m", 0.0))
+                        depth_max_m = float(getattr(self, "backscatter_depth_max_m", 11000.0))
+                        if depth_min_m > depth_max_m:
+                            depth_min_m, depth_max_m = depth_max_m, depth_min_m
+                        depth_abs = np.abs(self.geotiff_data_array)
+                        depth_mask = (
+                            np.isfinite(depth_abs)
+                            & (depth_abs >= depth_min_m)
+                            & (depth_abs <= depth_max_m)
+                        )
+                        mask = mask & depth_mask
                     pixel_area_m2 = abs(dx_m * dy_m)
                     if (
                         getattr(self, "backscatter_min_area_enabled_var", False)
@@ -1324,7 +1336,7 @@ class PlottingMixin:
                     zorder=30,
                 )
 
-            # Plot saved Backscatter statistics box (cyan outline) if present.
+            # Plot saved Backscatter statistics area (cyan dashed outline) if present.
             box_vertices = getattr(self, "backscatter_box_vertices", None)
             if box_vertices is not None and len(box_vertices) == 4:
                 self.backscatter_box_patch = Polygon(
@@ -1333,10 +1345,25 @@ class PlottingMixin:
                     fill=False,
                     edgecolor="cyan",
                     linewidth=2.0,
-                    linestyle="-",
+                    linestyle="--",
                     zorder=40,
                 )
                 self.ax.add_patch(self.backscatter_box_patch)
+
+            # Plot saved Backscatter normalization centerline (solid cyan) if present.
+            extended_centerline = None
+            if hasattr(self, "_get_backscatter_centerline_with_lead_in"):
+                extended_centerline = self._get_backscatter_centerline_with_lead_in()
+            if extended_centerline and len(extended_centerline) == 2:
+                (a_lat, a_lon), (b_lat, b_lon) = extended_centerline
+                self.backscatter_box_centerline_line = self.ax.plot(
+                    [a_lon, b_lon],
+                    [a_lat, b_lat],
+                    color="cyan",
+                    linewidth=2.0,
+                    linestyle="-",
+                    zorder=41,
+                )[0]
 
             # Draw legend after all overlays so it sits above every layer.
             handles, labels = self.ax.get_legend_handles_labels()
@@ -1430,11 +1457,14 @@ class PlottingMixin:
             self.backscatter_selected_band = 1
             self.show_backscatter_var = False
             self.backscatter_box_draw_mode = False
+            self.backscatter_box_edit_width_mode = False
             self.backscatter_box_stage = 0
             self.backscatter_box_centerline = None
+            self.backscatter_box_width_point = None
             self.backscatter_box_vertices = None
             self.backscatter_box_half_width_m = None
             self.backscatter_box_patch = None
+            self.backscatter_box_centerline_line = None
             self.backscatter_box_stats = None
             if hasattr(self, "show_backscatter_checkbox"):
                 self.show_backscatter_checkbox.blockSignals(True)
@@ -1446,6 +1476,10 @@ class PlottingMixin:
                 self.backscatter_draw_box_btn.blockSignals(True)
                 self.backscatter_draw_box_btn.setChecked(False)
                 self.backscatter_draw_box_btn.blockSignals(False)
+            if hasattr(self, "backscatter_edit_width_btn"):
+                self.backscatter_edit_width_btn.blockSignals(True)
+                self.backscatter_edit_width_btn.setChecked(False)
+                self.backscatter_edit_width_btn.blockSignals(False)
             if hasattr(self, "backscatter_stats_dialog") and self.backscatter_stats_dialog is not None:
                 try:
                     self.backscatter_stats_dialog.close()
@@ -1453,6 +1487,7 @@ class PlottingMixin:
                     pass
                 self.backscatter_stats_dialog = None
                 self.backscatter_stats_canvas = None
+                self.backscatter_stats_img_ax = None
                 self.backscatter_stats_ax = None
                 self.backscatter_stats_text_label = None
 

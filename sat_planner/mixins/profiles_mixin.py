@@ -145,6 +145,101 @@ class ProfilesMixin:
         self.profile_fig.tight_layout(pad=1.0)
         self.profile_canvas.draw_idle()
 
+    def _draw_backscatter_line_profile(self):
+        """Draw backscatter profile with separate lead-in, on-area, and lead-out segments."""
+        self.profile_ax.clear()
+        for ax in self.profile_fig.get_axes():
+            if ax != self.profile_ax:
+                ax.remove()
+        self.profile_ax.set_title("Backscatter Centerline Elevation Profile", fontsize=8)
+        self.profile_ax.set_xlabel("Distance (m)", fontsize=8)
+        self.profile_ax.set_ylabel("Elevation (m)", fontsize=8)
+        self.profile_ax.tick_params(axis='both', which='major', labelsize=7)
+        self._profile_dists = None
+        self._profile_elevations = None
+        self._profile_slopes = None
+
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        ext = None
+        if hasattr(self, "_get_backscatter_centerline_with_lead_in"):
+            ext = self._get_backscatter_centerline_with_lead_in()
+        if (
+            not centerline
+            or len(centerline) != 2
+            or centerline[0] is None
+            or centerline[1] is None
+            or not ext
+            or len(ext) != 2
+        ):
+            self.profile_fig.tight_layout(pad=1.0)
+            self.profile_canvas.draw_idle()
+            return
+
+        (a_lat, a_lon), (b_lat, b_lon) = centerline
+        (a_ext_lat, a_ext_lon), (b_ext_lat, b_ext_lon) = ext
+        segments = [
+            ("Lead-in Elevation", "deepskyblue", (a_ext_lat, a_ext_lon, a_lat, a_lon)),
+            ("On-area Elevation", "cyan", (a_lat, a_lon, b_lat, b_lon)),
+            ("Lead-out Elevation", "royalblue", (b_lat, b_lon, b_ext_lat, b_ext_lon)),
+        ]
+
+        all_d = []
+        all_e = []
+        all_s = []
+        slope_ax = None
+        cumulative_offset = 0.0
+
+        for idx, (label, color, (lat1, lon1, lat2, lon2)) in enumerate(segments):
+            dists, elevations, slopes = self._profile_arrays_along_segment_endpoints(lat1, lon1, lat2, lon2, n=100)
+            if dists is None or elevations is None:
+                continue
+            d_shift = dists + cumulative_offset
+            cumulative_offset = float(d_shift[-1]) if len(d_shift) else cumulative_offset
+            self.profile_ax.plot(d_shift, elevations, color=color, lw=1.2, label=label)
+            if self._show_slope_on_profile():
+                if slope_ax is None:
+                    slope_ax = self.profile_ax.twinx()
+                    slope_ax.set_ylabel('Slope (deg)', fontsize=8)
+                    slope_ax.tick_params(axis='y', labelsize=7)
+                    slope_ax.grid(False)
+                slope_ax.plot(d_shift, slopes, color=color, lw=1.0, linestyle='--', alpha=0.85, label=f"{label.replace('Elevation', 'Slope')}")
+
+            if idx > 0 and len(d_shift) > 0:
+                # Visual divider between segments (lead-in -> on-area -> lead-out).
+                self.profile_ax.axvline(d_shift[0], color='gray', lw=0.8, linestyle=':')
+
+            all_d.append(d_shift)
+            all_e.append(elevations)
+            all_s.append(slopes)
+
+        if not all_d:
+            self.profile_fig.tight_layout(pad=1.0)
+            self.profile_canvas.draw_idle()
+            return
+
+        dcat = np.concatenate(all_d)
+        ecat = np.concatenate(all_e)
+        scat = np.concatenate(all_s) if all_s else np.array([])
+        self._profile_dists = dcat
+        self._profile_elevations = ecat
+        self._profile_slopes = scat
+
+        self.profile_ax.set_xlim(float(np.nanmin(dcat)), float(np.nanmax(dcat)))
+        if np.any(~np.isnan(ecat)):
+            self.profile_ax.set_ylim(np.nanmin(ecat), np.nanmax(ecat))
+        if slope_ax is not None and np.any(~np.isnan(scat)):
+            slope_ax.set_ylim(0, np.nanmax(scat[~np.isnan(scat)]) * 1.1)
+
+        handles, labels = self.profile_ax.get_legend_handles_labels()
+        if slope_ax is not None:
+            sh, sl = slope_ax.get_legend_handles_labels()
+            handles.extend(sh)
+            labels.extend(sl)
+        if handles:
+            self.profile_ax.legend(handles, labels, fontsize=9, loc='upper right')
+        self.profile_fig.tight_layout(pad=1.0)
+        self.profile_canvas.draw_idle()
+
     def _get_profile_data_from_geotiff(self, lats, lons):
         """Get elevation and slope data from GeoTIFF for profile calculations.
         Always uses the original full dataset to ensure consistent results regardless of zoom level.
@@ -754,12 +849,7 @@ class ProfilesMixin:
         elif current_tab == 2:
             self._draw_line_planning_profile()
         elif current_tab == 3:
-            self.profile_ax.clear()
-            self.profile_ax.set_title("Backscatter", fontsize=8)
-            self.profile_ax.set_xlabel("Distance (m)", fontsize=8)
-            self.profile_ax.set_ylabel("Elevation (m)", fontsize=8)
-            self.profile_fig.tight_layout(pad=1.0)
-            self.profile_canvas.draw()
+            self._draw_backscatter_line_profile()
         elif current_tab == 4:
             self._draw_performance_profile()
         else:

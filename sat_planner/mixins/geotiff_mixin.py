@@ -2,6 +2,10 @@
 GeoTIFF loading, display mode, dynamic resolution, and contour controls.
 """
 import os
+import csv
+import json
+import datetime
+import xml.etree.ElementTree as ET
 import numpy as np
 from PyQt6.QtWidgets import (
     QApplication,
@@ -20,6 +24,7 @@ from matplotlib.figure import Figure
 
 from sat_planner.constants import (
     GEOSPATIAL_LIBS_AVAILABLE,
+    LineString,
     RasterioIOError,
     Resampling,
     Window,
@@ -30,6 +35,10 @@ from sat_planner.constants import (
     pyproj,
     rasterio,
 )
+from sat_planner import export_utils
+from sat_planner.utils_geo import decimal_degrees_to_ddm
+from sat_planner.utils_geo import lat_lon_decimal_from_survey_csv_row
+from sat_planner.utils_ui import show_statistics_dialog
 
 
 class GeoTIFFMixin:
@@ -53,6 +62,551 @@ class GeoTIFFMixin:
             except (TypeError, ValueError):
                 pass
         return -11000.0
+
+    def _calculate_backscatter_line_statistics(self):
+        """Compute survey statistics for the backscatter centerline (with lead-in/out)."""
+        segment = getattr(self, "_get_backscatter_centerline_with_lead_in", lambda: None)()
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        if (
+            not segment
+            or len(segment) != 2
+            or segment[0] is None
+            or segment[1] is None
+            or not centerline
+            or len(centerline) != 2
+            or centerline[0] is None
+            or centerline[1] is None
+        ):
+            return None
+        try:
+            (lat1, lon1), (lat2, lon2) = segment
+            (a_lat, a_lon), (b_lat, b_lon) = centerline
+            geod = pyproj.Geod(ellps="WGS84")
+            fwd_az, back_az, total_distance = geod.inv(lon1, lat1, lon2, lat2)
+            _, _, lead_in_m = geod.inv(lon1, lat1, a_lon, a_lat)
+            _, _, lead_out_m = geod.inv(b_lon, b_lat, lon2, lat2)
+            try:
+                speed_knots = float(self.backscatter_survey_speed_entry.text()) if self.backscatter_survey_speed_entry.text() else 8.0
+            except Exception:
+                speed_knots = 8.0
+            speed_ms = speed_knots * 0.514444
+            total_time_seconds = total_distance / speed_ms if speed_ms > 0 else 0.0
+            total_time_minutes = total_time_seconds / 60.0
+            total_time_hours = total_time_minutes / 60.0
+
+            dists, elevations, slopes = (None, None, None)
+            if hasattr(self, "_profile_arrays_along_segment_endpoints"):
+                dists, elevations, slopes = self._profile_arrays_along_segment_endpoints(lat1, lon1, lat2, lon2, n=250)
+            depth_info = ""
+            if elevations is not None and np.size(elevations) > 0 and np.any(np.isfinite(elevations)):
+                valid_e = elevations[np.isfinite(elevations)]
+                shallowest_depth_m = float(np.min(np.abs(valid_e)))
+                max_depth_m = float(np.max(np.abs(valid_e)))
+                depth_info += f"Shallowest Depth: {shallowest_depth_m:.1f} m\n"
+                depth_info += f"Maximum Depth: {max_depth_m:.1f} m\n"
+            if slopes is not None and np.size(slopes) > 0 and np.any(np.isfinite(slopes)):
+                valid_s = slopes[np.isfinite(slopes)]
+                depth_info += f"Minimum Slope: {float(np.min(valid_s)):.2f} deg\n"
+                depth_info += f"Maximum Slope: {float(np.max(valid_s)):.2f} deg\n"
+
+            return {
+                "total_distance_m": float(total_distance),
+                "total_distance_km": float(total_distance / 1000.0),
+                "total_distance_nm": float(total_distance / 1852.0),
+                "heading": float(fwd_az % 360.0),
+                "reciprocal_heading": float(back_az % 360.0),
+                "lead_in_m": float(lead_in_m),
+                "lead_out_m": float(lead_out_m),
+                "speed_knots": float(speed_knots),
+                "total_time_minutes": float(total_time_minutes),
+                "total_time_hours": float(total_time_hours),
+                "depth_info": depth_info.strip(),
+                "line_waypoints": [(lat1, lon1), (a_lat, a_lon), (b_lat, b_lon), (lat2, lon2)],
+                "area_corners": list(getattr(self, "backscatter_box_vertices", []) or []),
+            }
+        except Exception as e:
+            print(f"Error calculating backscatter line statistics: {e}")
+            return None
+
+    def _show_backscatter_line_information(self):
+        """Show survey info dialog for backscatter line (with lead-in/out)."""
+        stats = self._calculate_backscatter_line_statistics()
+        if not stats:
+            self._show_message("warning", "No Backscatter Line", "No backscatter line is defined. Select an area/line first.")
+            return
+        stats_text = "BACKSCATTER LINE STATISTICS\n" + "=" * 31 + "\n\n"
+        stats_text += (
+            f"Total Distance: {stats['total_distance_m']:.1f} m "
+            f"({stats['total_distance_km']:.3f} km, {stats['total_distance_nm']:.3f} nm)\n"
+        )
+        stats_text += f"Heading: {stats['heading']:.1f}° (Reciprocal {stats['reciprocal_heading']:.1f}°)\n"
+        stats_text += (
+            f"Lead-in/out Length: {stats['lead_in_m']:.1f} m / {stats['lead_out_m']:.1f} m "
+            f"({stats['lead_in_m']/1852.0:.3f} / {stats['lead_out_m']/1852.0:.3f} nm)\n"
+        )
+        stats_text += f"Survey Speed: {stats['speed_knots']:.1f} knots\n"
+        stats_text += (
+            f"Estimated Time: {stats['total_time_minutes']:.1f} min "
+            f"({stats['total_time_hours']:.2f} hr)\n\n"
+        )
+        if stats["depth_info"]:
+            stats_text += stats["depth_info"] + "\n\n"
+
+        line_waypoints = stats.get("line_waypoints", [])
+        if len(line_waypoints) == 4:
+            dmm_heading = "Backscatter Line Waypoints (DMM)"
+            stats_text += f"{dmm_heading}\n" + "-" * len(dmm_heading) + "\n"
+            labels = ["Lead-in Start", "Area Start", "Area End", "Lead-out End"]
+            for i, (lat, lon) in enumerate(line_waypoints):
+                stats_text += f"{labels[i]}: {decimal_degrees_to_ddm(lat, True)}, {decimal_degrees_to_ddm(lon, False)}\n"
+            ddd_heading = "Backscatter Line Waypoints (DDD)"
+            stats_text += f"\n{ddd_heading}\n" + "-" * len(ddd_heading) + "\n"
+            for i, (lat, lon) in enumerate(line_waypoints):
+                stats_text += f"{labels[i]}: {lat:.6f}, {lon:.6f}\n"
+
+        area_corners = stats.get("area_corners", [])
+        if len(area_corners) == 4:
+            dmm_heading = "Backscatter Area Corners (DMM)"
+            stats_text += f"\n{dmm_heading}\n" + "-" * len(dmm_heading) + "\n"
+            for i, (lon, lat) in enumerate(area_corners):
+                stats_text += f"C{i+1}: {decimal_degrees_to_ddm(lat, True)}, {decimal_degrees_to_ddm(lon, False)}\n"
+            ddd_heading = "Backscatter Area Corners (DDD)"
+            stats_text += f"\n{ddd_heading}\n" + "-" * len(ddd_heading) + "\n"
+            for i, (lon, lat) in enumerate(area_corners):
+                stats_text += f"C{i+1}: {lat:.6f}, {lon:.6f}\n"
+
+        show_statistics_dialog(self, "Survey Info", stats_text)
+
+    def _update_backscatter_export_name_default(self):
+        """Set default backscatter export name: BS_YYYYMMDD_<mean depth along line>."""
+        if not hasattr(self, "backscatter_export_name_entry"):
+            return
+        date_str = datetime.datetime.now().strftime("%Y%m%d")
+        mean_depth_m = 0.0
+        try:
+            segment = getattr(self, "_get_backscatter_centerline_with_lead_in", lambda: None)()
+            if segment and len(segment) == 2 and segment[0] is not None and segment[1] is not None:
+                (lat1, lon1), (lat2, lon2) = segment
+                dists, elevations, _ = self._profile_arrays_along_segment_endpoints(lat1, lon1, lat2, lon2, n=250)
+                if elevations is not None and np.size(elevations) > 0 and np.any(np.isfinite(elevations)):
+                    mean_depth_m = float(np.nanmean(np.abs(elevations[np.isfinite(elevations)])))
+        except Exception:
+            mean_depth_m = 0.0
+        self.backscatter_export_name_entry.setText(f"BS_{date_str}_{mean_depth_m:.0f}")
+
+    def _download_and_load_gmrt_after_backscatter_import(self):
+        """Download and load GMRT data around imported backscatter line extent."""
+        segment = getattr(self, "_get_backscatter_centerline_with_lead_in", lambda: None)()
+        if not segment or len(segment) != 2 or segment[0] is None or segment[1] is None:
+            self._show_message("warning", "GMRT Download", "No backscatter line to compute extent.")
+            return
+        (lat1, lon1), (lat2, lon2) = segment
+        mid_lat = (lat1 + lat2) / 2.0
+        mid_lon = (lon1 + lon2) / 2.0
+        buffer_deg = 0.5
+        if hasattr(self, "backscatter_gmrt_buffer_spin"):
+            try:
+                buffer_deg = float(self.backscatter_gmrt_buffer_spin.value())
+            except (ValueError, TypeError):
+                pass
+        west = mid_lon - buffer_deg
+        east = mid_lon + buffer_deg
+        south = mid_lat - buffer_deg
+        north = mid_lat + buffer_deg
+        self._download_gmrt_and_load(
+            west, east, south, north,
+            resolution=100,
+            layer="topo",
+            default_filename_prefix="GMRT_Bathy",
+            log_func=lambda msg, append=True: self.set_line_info_text(msg, append=append) if hasattr(self, "set_line_info_text") else None,
+            default_directory=getattr(self, "last_backscatter_import_dir", None),
+        )
+
+    def _import_backscatter_line(self):
+        """Import backscatter line/area from supported survey files + optional params sidecar."""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Backscatter Line File to Import", self.last_backscatter_import_dir,
+            "Known Line Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx);;"
+            "All files (*.*)"
+        )
+        if not file_path:
+            return
+        import_dir = os.path.dirname(file_path)
+        if import_dir and os.path.isdir(import_dir):
+            self.last_backscatter_import_dir = import_dir
+
+        points = []
+        ext = os.path.splitext(file_path)[1].lower()
+        try:
+            if file_path.lower().endswith("_ddd.txt") and hasattr(self, "_parse_ddd_txt_file_as_polyline"):
+                points = self._parse_ddd_txt_file_as_polyline(file_path) or []
+            elif file_path.lower().endswith("_dms.txt") and hasattr(self, "_parse_dms_txt_file_as_polyline"):
+                points = self._parse_dms_txt_file_as_polyline(file_path) or []
+            elif file_path.lower().endswith("_dmm.txt") and hasattr(self, "_parse_dmm_txt_file_as_polyline"):
+                points = self._parse_dmm_txt_file_as_polyline(file_path) or []
+            elif ext == ".lnw" and hasattr(self, "_parse_lnw_file_as_polyline"):
+                from .survey_parsers_mixin import UTMZoneDialog
+                utm_dialog = UTMZoneDialog(self)
+                if utm_dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                zone, hem = utm_dialog.get_utm_info()
+                points = self._parse_lnw_file_as_polyline(file_path, zone, hem) or []
+            elif ext == ".gpx" and hasattr(self, "_parse_gpx_file_as_polyline"):
+                points = self._parse_gpx_file_as_polyline(file_path) or []
+            elif ext == ".csv":
+                with open(file_path, "r", encoding="utf-8") as csvfile:
+                    reader = csv.DictReader(csvfile)
+                    for row in reader:
+                        try:
+                            lat, lon = lat_lon_decimal_from_survey_csv_row(row)
+                            points.append((lat, lon))
+                        except Exception:
+                            continue
+            elif ext in [".geojson", ".json"]:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    gj = json.load(f)
+                feats = gj.get("features", []) if gj.get("type") == "FeatureCollection" else []
+                for feat in feats:
+                    geom = feat.get("geometry", {})
+                    if geom.get("type") == "LineString":
+                        for coord in geom.get("coordinates", []):
+                            if len(coord) >= 2:
+                                points.append((coord[1], coord[0]))
+            if len(points) < 2:
+                self._show_message("warning", "Import Warning", "Imported backscatter line must contain at least 2 points.")
+                return
+
+            params_path = os.path.join(import_dir, f"{os.path.splitext(os.path.basename(file_path))[0]}_params.json")
+            params = {}
+            if os.path.exists(params_path):
+                try:
+                    with open(params_path, "r", encoding="utf-8") as pf:
+                        params = json.load(pf)
+                except Exception:
+                    params = {}
+
+            if "backscatter_centerline" in params and "backscatter_half_width_m" in params and "backscatter_vertices" in params:
+                cl = params.get("backscatter_centerline") or []
+                if len(cl) == 2:
+                    self.backscatter_box_centerline = ((float(cl[0][0]), float(cl[0][1])), (float(cl[1][0]), float(cl[1][1])))
+                self.backscatter_box_half_width_m = float(params.get("backscatter_half_width_m", 0.0))
+                verts = params.get("backscatter_vertices") or []
+                if len(verts) == 4:
+                    self.backscatter_box_vertices = [(float(v[0]), float(v[1])) for v in verts]
+                wp = params.get("backscatter_width_point")
+                if wp and len(wp) == 2:
+                    self.backscatter_box_width_point = (float(wp[0]), float(wp[1]))
+                self.backscatter_lead_in_m = float(params.get("backscatter_lead_in_m", self.backscatter_lead_in_m))
+                self.backscatter_survey_speed_kn = float(params.get("backscatter_survey_speed_kn", self.backscatter_survey_speed_kn))
+                if hasattr(self, "backscatter_lead_in_entry"):
+                    self.backscatter_lead_in_entry.setText(f"{self.backscatter_lead_in_m:g}")
+                if hasattr(self, "backscatter_survey_speed_entry"):
+                    self.backscatter_survey_speed_entry.setText(f"{self.backscatter_survey_speed_kn:g}")
+            else:
+                self.backscatter_box_centerline = (points[0], points[-1])
+                self.backscatter_box_half_width_m = 0.0
+                self.backscatter_box_vertices = None
+
+            # Restore saved NaN sentinel and backscatter criteria (when present).
+            if params.get("geotiff_nan_value") is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
+                self._set_geotiff_nan_cutoff(params.get("geotiff_nan_value"), update_entry=True)
+
+            try:
+                if "backscatter_slope_min_deg" in params:
+                    self.backscatter_slope_min_deg = float(params.get("backscatter_slope_min_deg"))
+                if "backscatter_slope_max_deg" in params:
+                    self.backscatter_slope_max_deg = float(params.get("backscatter_slope_max_deg"))
+                if hasattr(self, "backscatter_slope_min_spin"):
+                    self.backscatter_slope_min_spin.blockSignals(True)
+                    self.backscatter_slope_min_spin.setValue(float(self.backscatter_slope_min_deg))
+                    self.backscatter_slope_min_spin.blockSignals(False)
+                if hasattr(self, "backscatter_slope_max_spin"):
+                    self.backscatter_slope_max_spin.blockSignals(True)
+                    self.backscatter_slope_max_spin.setValue(float(self.backscatter_slope_max_deg))
+                    self.backscatter_slope_max_spin.blockSignals(False)
+            except (TypeError, ValueError):
+                pass
+
+            if "backscatter_slope_areas_show_var" in params:
+                self.backscatter_slope_areas_show_var = bool(params.get("backscatter_slope_areas_show_var"))
+                if hasattr(self, "backscatter_show_slope_areas_checkbox"):
+                    self.backscatter_show_slope_areas_checkbox.blockSignals(True)
+                    self.backscatter_show_slope_areas_checkbox.setChecked(self.backscatter_slope_areas_show_var)
+                    self.backscatter_show_slope_areas_checkbox.blockSignals(False)
+
+            if "backscatter_depth_filter_enabled_var" in params:
+                self.backscatter_depth_filter_enabled_var = bool(params.get("backscatter_depth_filter_enabled_var"))
+            if params.get("backscatter_depth_min_m") is not None:
+                try:
+                    self.backscatter_depth_min_m = float(params.get("backscatter_depth_min_m"))
+                except (TypeError, ValueError):
+                    pass
+            if params.get("backscatter_depth_max_m") is not None:
+                try:
+                    self.backscatter_depth_max_m = float(params.get("backscatter_depth_max_m"))
+                except (TypeError, ValueError):
+                    pass
+            if hasattr(self, "backscatter_depth_filter_checkbox"):
+                self.backscatter_depth_filter_checkbox.blockSignals(True)
+                self.backscatter_depth_filter_checkbox.setChecked(bool(self.backscatter_depth_filter_enabled_var))
+                self.backscatter_depth_filter_checkbox.blockSignals(False)
+            if hasattr(self, "backscatter_depth_min_m_entry"):
+                self.backscatter_depth_min_m_entry.setText(f"{self.backscatter_depth_min_m:g}")
+            if hasattr(self, "backscatter_depth_max_m_entry"):
+                self.backscatter_depth_max_m_entry.setText(f"{self.backscatter_depth_max_m:g}")
+
+            if "backscatter_min_area_enabled_var" in params:
+                self.backscatter_min_area_enabled_var = bool(params.get("backscatter_min_area_enabled_var"))
+            if params.get("backscatter_min_area_m2") is not None:
+                try:
+                    self.backscatter_min_area_m2 = float(params.get("backscatter_min_area_m2"))
+                except (TypeError, ValueError):
+                    pass
+            if hasattr(self, "backscatter_min_area_checkbox"):
+                self.backscatter_min_area_checkbox.blockSignals(True)
+                self.backscatter_min_area_checkbox.setChecked(bool(self.backscatter_min_area_enabled_var))
+                self.backscatter_min_area_checkbox.blockSignals(False)
+            if hasattr(self, "backscatter_min_area_m2_entry"):
+                self.backscatter_min_area_m2_entry.setText(f"{self.backscatter_min_area_m2:g}")
+
+            if "backscatter_extent_filter_enabled_var" in params:
+                self.backscatter_extent_filter_enabled_var = bool(params.get("backscatter_extent_filter_enabled_var"))
+            if params.get("backscatter_min_width_m") is not None:
+                try:
+                    self.backscatter_min_width_m = float(params.get("backscatter_min_width_m"))
+                except (TypeError, ValueError):
+                    pass
+            if params.get("backscatter_min_height_m") is not None:
+                try:
+                    self.backscatter_min_height_m = float(params.get("backscatter_min_height_m"))
+                except (TypeError, ValueError):
+                    pass
+            if hasattr(self, "backscatter_extent_checkbox"):
+                self.backscatter_extent_checkbox.blockSignals(True)
+                self.backscatter_extent_checkbox.setChecked(bool(self.backscatter_extent_filter_enabled_var))
+                self.backscatter_extent_checkbox.blockSignals(False)
+            if hasattr(self, "backscatter_min_width_m_entry"):
+                self.backscatter_min_width_m_entry.setText(f"{self.backscatter_min_width_m:g}")
+            if hasattr(self, "backscatter_min_height_m_entry"):
+                self.backscatter_min_height_m_entry.setText(f"{self.backscatter_min_height_m:g}")
+
+            if "backscatter_percent_clip_enabled" in params:
+                self.backscatter_percent_clip_enabled = bool(params.get("backscatter_percent_clip_enabled"))
+            if params.get("backscatter_percent_clip_min") is not None:
+                try:
+                    self.backscatter_percent_clip_min = float(params.get("backscatter_percent_clip_min"))
+                except (TypeError, ValueError):
+                    pass
+            if params.get("backscatter_percent_clip_max") is not None:
+                try:
+                    self.backscatter_percent_clip_max = float(params.get("backscatter_percent_clip_max"))
+                except (TypeError, ValueError):
+                    pass
+            if hasattr(self, "backscatter_percent_clip_checkbox"):
+                self.backscatter_percent_clip_checkbox.blockSignals(True)
+                self.backscatter_percent_clip_checkbox.setChecked(bool(self.backscatter_percent_clip_enabled))
+                self.backscatter_percent_clip_checkbox.blockSignals(False)
+            if hasattr(self, "backscatter_percent_clip_min_entry"):
+                self.backscatter_percent_clip_min_entry.setText(f"{self.backscatter_percent_clip_min:g}")
+            if hasattr(self, "backscatter_percent_clip_max_entry"):
+                self.backscatter_percent_clip_max_entry.setText(f"{self.backscatter_percent_clip_max:g}")
+
+            if "show_backscatter_var" in params:
+                self.show_backscatter_var = bool(params.get("show_backscatter_var"))
+                if hasattr(self, "show_backscatter_checkbox"):
+                    self.show_backscatter_checkbox.blockSignals(True)
+                    self.show_backscatter_checkbox.setChecked(self.show_backscatter_var)
+                    self.show_backscatter_checkbox.blockSignals(False)
+
+            # Restore bathymetry/backscatter rasters when paths were saved.
+            geotiff_path = params.get("geotiff_path")
+            if geotiff_path and os.path.isfile(geotiff_path):
+                try:
+                    self._load_geotiff_from_path(geotiff_path, use_background_loading=False)
+                except Exception:
+                    pass
+            bs_geotiff_path = params.get("backscatter_geotiff_path")
+            if bs_geotiff_path and os.path.isfile(bs_geotiff_path):
+                try:
+                    self._load_backscatter_geotiff_from_path(bs_geotiff_path)
+                except Exception:
+                    pass
+
+            self.backscatter_box_stats = self._compute_backscatter_box_stats()
+            self._plot_survey_plan(preserve_view_limits=True)
+            # Fit view to imported geometry so imported line/area is immediately visible.
+            try:
+                lon_vals = []
+                lat_vals = []
+                if self.backscatter_box_centerline and len(self.backscatter_box_centerline) == 2:
+                    for lat, lon in self.backscatter_box_centerline:
+                        if lat is not None and lon is not None:
+                            lat_vals.append(float(lat))
+                            lon_vals.append(float(lon))
+                if self.backscatter_box_vertices and len(self.backscatter_box_vertices) == 4:
+                    for lon, lat in self.backscatter_box_vertices:
+                        lat_vals.append(float(lat))
+                        lon_vals.append(float(lon))
+                if lon_vals and lat_vals:
+                    lon_min, lon_max = min(lon_vals), max(lon_vals)
+                    lat_min, lat_max = min(lat_vals), max(lat_vals)
+                    lon_pad = max((lon_max - lon_min) * 0.2, 0.001)
+                    lat_pad = max((lat_max - lat_min) * 0.2, 0.001)
+                    self.ax.set_xlim(lon_min - lon_pad, lon_max + lon_pad)
+                    self.ax.set_ylim(lat_min - lat_pad, lat_max + lat_pad)
+                    self.canvas.draw_idle()
+            except Exception:
+                pass
+            if hasattr(self, "_draw_current_profile"):
+                self._draw_current_profile()
+            self._update_backscatter_export_name_default()
+            if getattr(self, "backscatter_download_gmrt_checkbox", None) and self.backscatter_download_gmrt_checkbox.isChecked():
+                self._download_and_load_gmrt_after_backscatter_import()
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Failed to import backscatter line: {e}")
+
+    def _export_backscatter_line(self):
+        """Export backscatter line/area using Export Types and include backscatter statistics image."""
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        if not centerline or centerline[0] is None or centerline[1] is None:
+            self._show_message("warning", "No Backscatter Line", "Select an area/line first.")
+            return
+        export_name = "BS_export"
+        if hasattr(self, "backscatter_export_name_entry"):
+            export_name = self.backscatter_export_name_entry.text().strip() or export_name
+            self.backscatter_export_name_entry.setText(export_name)
+        export_dir = QFileDialog.getExistingDirectory(self, "Select Export Directory", self.last_export_dir)
+        if not export_dir:
+            return
+        self.last_export_dir = export_dir
+        if hasattr(self, "_save_last_export_dir"):
+            self._save_last_export_dir()
+
+        try:
+            line_points = list(getattr(self, "_calculate_backscatter_line_statistics", lambda: {})().get("line_waypoints", []))
+            if len(line_points) < 2:
+                line_points = [centerline[0], centerline[1]]
+            rows = [(1, "BackscatterLine", f"P{i+1}", lat, lon) for i, (lat, lon) in enumerate(line_points)]
+
+            export_shapefile = self._export_type_enabled("esri_shapefile") if hasattr(self, "_export_type_enabled") else True
+            export_sis = self._export_type_enabled("sis_asciiplan") if hasattr(self, "_export_type_enabled") else True
+            export_gpx = self._export_type_enabled("gpx") if hasattr(self, "_export_type_enabled") else True
+            export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
+            export_text_txt = self._export_type_enabled("text_txt") if hasattr(self, "_export_type_enabled") else True
+            export_hypack = self._export_type_enabled("hypack_lnw") if hasattr(self, "_export_type_enabled") else True
+            export_map_png = self._export_type_enabled("map_png") if hasattr(self, "_export_type_enabled") else True
+            export_profiles_png = self._export_type_enabled("profiles_png") if hasattr(self, "_export_type_enabled") else True
+
+            csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
+            ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
+            dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
+            ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
+            dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
+            txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
+            if export_text_csv:
+                export_utils.write_ddd_csv(csv_file_path, rows, newline="")
+                export_utils.write_dmm_csv(ddm_file_path, rows)
+                export_utils.write_dms_csv(dms_file_path, rows)
+            if export_text_txt:
+                export_utils.write_dmm_txt(ddm_txt_file_path, rows)
+                export_utils.write_dms_txt(dms_txt_file_path, rows)
+                export_utils.write_ddd_txt(txt_file_path, rows)
+
+            geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
+            gj_features = [{
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": [[lon, lat] for lat, lon in line_points]},
+                "properties": {
+                    "line_num": 1,
+                    "survey_speed": float(getattr(self, "backscatter_survey_speed_kn", 8.0)),
+                },
+            }]
+            geojson_collection = {
+                "type": "FeatureCollection",
+                "properties": {"geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0))},
+                "features": gj_features,
+            }
+            with open(geojson_file_path, "w", encoding="utf-8") as f:
+                json.dump(geojson_collection, f, indent=2)
+
+            lnw_file_path = None
+            if export_hypack:
+                lnw_lines = [("BACKSCATTER", [line_points[0], line_points[-1]])]
+                zone, hem = export_utils.compute_utm_zone_from_points([line_points[0], line_points[-1]])
+                lnw_file_path = os.path.join(export_dir, f"{export_name}_UTM{zone}{'N' if hem == 'North' else 'S'}.lnw")
+                if not export_utils.write_lnw(lnw_file_path, lnw_lines):
+                    lnw_file_path = None
+
+            sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
+            if export_sis:
+                export_utils.write_asciiplan(sis_file_path, [("BackscatterLine", [line_points[0], line_points[-1]])])
+
+            gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
+            if export_gpx:
+                export_utils.write_gpx(gpx_file_path, [("BackscatterLine", line_points)])
+
+            shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
+            if export_shapefile and LineString is not None:
+                try:
+                    from shapely.geometry import mapping
+                    import fiona
+                    schema = {"geometry": "LineString", "properties": {"line_num": "int", "line_name": "str"}}
+                    with fiona.open(shapefile_path, "w", driver="ESRI Shapefile", crs="EPSG:4326", schema=schema) as collection:
+                        collection.writerecord({
+                            "geometry": mapping(LineString([(lon, lat) for lat, lon in line_points])),
+                            "properties": {"line_num": 1, "line_name": "BackscatterLine"},
+                        })
+                except Exception:
+                    shapefile_path = None
+
+            map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
+            if export_map_png and hasattr(self, "figure"):
+                self.figure.savefig(map_png_path, dpi=300)
+            profile_png_path = os.path.join(export_dir, f"{export_name}_profiles.png")
+            if export_profiles_png and hasattr(self, "profile_fig"):
+                self.profile_fig.savefig(profile_png_path, dpi=300)
+
+            if getattr(self, "backscatter_box_stats", None) is None:
+                self.backscatter_box_stats = self._compute_backscatter_box_stats()
+            self._show_backscatter_stats_dialog()
+            stats_png_path = os.path.join(export_dir, f"{export_name}_backscatter_stats.png")
+            if hasattr(self, "backscatter_stats_canvas") and self.backscatter_stats_canvas is not None:
+                self._save_backscatter_stats_png_without_hover(stats_png_path, dpi=300)
+
+            params_json_path = os.path.join(export_dir, f"{export_name}_params.json")
+            payload = {
+                "backscatter_centerline": list(getattr(self, "backscatter_box_centerline", []) or []),
+                "backscatter_half_width_m": float(getattr(self, "backscatter_box_half_width_m", 0.0) or 0.0),
+                "backscatter_vertices": list(getattr(self, "backscatter_box_vertices", []) or []),
+                "backscatter_width_point": list(getattr(self, "backscatter_box_width_point", []) or []) if getattr(self, "backscatter_box_width_point", None) else None,
+                "backscatter_lead_in_m": float(getattr(self, "backscatter_lead_in_m", 0.0) or 0.0),
+                "backscatter_survey_speed_kn": float(getattr(self, "backscatter_survey_speed_kn", 8.0) or 8.0),
+                "backscatter_slope_areas_show_var": bool(getattr(self, "backscatter_slope_areas_show_var", False)),
+                "backscatter_slope_min_deg": float(getattr(self, "backscatter_slope_min_deg", 0.0) or 0.0),
+                "backscatter_slope_max_deg": float(getattr(self, "backscatter_slope_max_deg", 2.0) or 2.0),
+                "backscatter_depth_filter_enabled_var": bool(getattr(self, "backscatter_depth_filter_enabled_var", False)),
+                "backscatter_depth_min_m": float(getattr(self, "backscatter_depth_min_m", 0.0) or 0.0),
+                "backscatter_depth_max_m": float(getattr(self, "backscatter_depth_max_m", 11000.0) or 11000.0),
+                "backscatter_min_area_enabled_var": bool(getattr(self, "backscatter_min_area_enabled_var", False)),
+                "backscatter_min_area_m2": float(getattr(self, "backscatter_min_area_m2", 0.0) or 0.0),
+                "backscatter_extent_filter_enabled_var": bool(getattr(self, "backscatter_extent_filter_enabled_var", False)),
+                "backscatter_min_width_m": float(getattr(self, "backscatter_min_width_m", 0.0) or 0.0),
+                "backscatter_min_height_m": float(getattr(self, "backscatter_min_height_m", 0.0) or 0.0),
+                "show_backscatter_var": bool(getattr(self, "show_backscatter_var", False)),
+                "backscatter_percent_clip_enabled": bool(getattr(self, "backscatter_percent_clip_enabled", True)),
+                "backscatter_percent_clip_min": float(getattr(self, "backscatter_percent_clip_min", 0.5) or 0.5),
+                "backscatter_percent_clip_max": float(getattr(self, "backscatter_percent_clip_max", 0.5) or 0.5),
+                "geotiff_path": self.current_geotiff_path if hasattr(self, "current_geotiff_path") else None,
+                "backscatter_geotiff_path": self.backscatter_geotiff_path if hasattr(self, "backscatter_geotiff_path") else None,
+                "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+            }
+            with open(params_json_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+
+            if hasattr(self, "set_line_info_text"):
+                self.set_line_info_text(f"Backscatter line exported to {export_dir}", append=False)
+        except Exception as e:
+            self._show_message("error", "Export Error", f"Failed to export backscatter line: {e}")
 
     def _set_geotiff_nan_cutoff(self, value, update_entry=True):
         """Persist NaN cutoff and optionally synchronize the UI entry."""
@@ -1189,6 +1743,136 @@ class GeoTIFFMixin:
         except Exception:
             pass
 
+    def _on_backscatter_depth_filter_changed(self, *_args):
+        """Enable/disable depth-range filter for magenta overlay and refresh."""
+        if hasattr(self, "backscatter_depth_filter_checkbox"):
+            self.backscatter_depth_filter_enabled_var = self.backscatter_depth_filter_checkbox.isChecked()
+        if hasattr(self, "backscatter_depth_min_m_entry"):
+            raw_min = self.backscatter_depth_min_m_entry.text().strip()
+            if raw_min:
+                try:
+                    v = float(raw_min)
+                    if v >= 0.0:
+                        self.backscatter_depth_min_m = v
+                except ValueError:
+                    pass
+        if hasattr(self, "backscatter_depth_max_m_entry"):
+            raw_max = self.backscatter_depth_max_m_entry.text().strip()
+            if raw_max:
+                try:
+                    v = float(raw_max)
+                    if v >= 0.0:
+                        self.backscatter_depth_max_m = v
+                except ValueError:
+                    pass
+        if not getattr(self, "backscatter_slope_areas_show_var", False):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_backscatter_depth_text_changed(self, *_args):
+        """Debounce depth-range edits before refreshing magenta overlay."""
+        if not hasattr(self, "_backscatter_depth_debounce_timer"):
+            self._backscatter_depth_debounce_timer = QTimer()
+            self._backscatter_depth_debounce_timer.setSingleShot(True)
+            self._backscatter_depth_debounce_timer.timeout.connect(self._apply_backscatter_depth_text)
+        self._backscatter_depth_debounce_timer.stop()
+        self._backscatter_depth_debounce_timer.start(350)
+
+    def _apply_backscatter_depth_text(self):
+        """Parse depth min/max and redraw if magenta overlay is enabled."""
+        if hasattr(self, "backscatter_depth_min_m_entry"):
+            raw_min = self.backscatter_depth_min_m_entry.text().strip()
+            if raw_min:
+                try:
+                    v = float(raw_min)
+                    if v >= 0.0:
+                        self.backscatter_depth_min_m = v
+                except ValueError:
+                    pass
+        if hasattr(self, "backscatter_depth_max_m_entry"):
+            raw_max = self.backscatter_depth_max_m_entry.text().strip()
+            if raw_max:
+                try:
+                    v = float(raw_max)
+                    if v >= 0.0:
+                        self.backscatter_depth_max_m = v
+                except ValueError:
+                    pass
+        if not getattr(self, "backscatter_slope_areas_show_var", False):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_backscatter_line_info_text_changed(self, *_args):
+        """Debounce Lead-in / Survey Speed typing, then apply and redraw centerline if needed."""
+        if not hasattr(self, "_backscatter_line_info_debounce_timer"):
+            self._backscatter_line_info_debounce_timer = QTimer()
+            self._backscatter_line_info_debounce_timer.setSingleShot(True)
+            self._backscatter_line_info_debounce_timer.timeout.connect(self._apply_backscatter_line_info_text)
+        self._backscatter_line_info_debounce_timer.stop()
+        self._backscatter_line_info_debounce_timer.start(350)
+
+    def _apply_backscatter_line_info_text(self):
+        """Parse Lead-in / Survey Speed values; refresh map if centerline is present."""
+        if hasattr(self, "backscatter_lead_in_entry"):
+            raw_lead = self.backscatter_lead_in_entry.text().strip()
+            if raw_lead:
+                try:
+                    lead_m = float(raw_lead)
+                    if lead_m >= 0.0:
+                        self.backscatter_lead_in_m = lead_m
+                except ValueError:
+                    pass
+        if hasattr(self, "backscatter_survey_speed_entry"):
+            raw_speed = self.backscatter_survey_speed_entry.text().strip()
+            if raw_speed:
+                try:
+                    speed_kn = float(raw_speed)
+                    if speed_kn > 0.0:
+                        self.backscatter_survey_speed_kn = speed_kn
+                except ValueError:
+                    pass
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        if not centerline or centerline[0] is None or centerline[1] is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+        if hasattr(self, "_draw_current_profile"):
+            self._draw_current_profile()
+        if hasattr(self, "_update_backscatter_export_name_default"):
+            self._update_backscatter_export_name_default()
+        if hasattr(self, "_update_backscatter_export_name_default"):
+            self._update_backscatter_export_name_default()
+
     def _toggle_slope_visualization(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning", "Disabled Feature",
@@ -1500,19 +2184,68 @@ class GeoTIFFMixin:
         """Enable/disable map box drawing mode for backscatter statistics."""
         self.backscatter_box_draw_mode = bool(checked)
         if self.backscatter_box_draw_mode:
+            self.backscatter_box_edit_width_mode = False
+            if hasattr(self, "backscatter_edit_width_btn"):
+                self.backscatter_edit_width_btn.blockSignals(True)
+                self.backscatter_edit_width_btn.setChecked(False)
+                self.backscatter_edit_width_btn.blockSignals(False)
             self.backscatter_box_stage = 0
             self.backscatter_box_centerline = None
+            self.backscatter_box_width_point = None
+            if hasattr(self, "backscatter_draw_box_btn"):
+                self.backscatter_draw_box_btn.setText("Draw Center Line")
+                self.backscatter_draw_box_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
             self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
         else:
             had_partial = int(getattr(self, "backscatter_box_stage", 0)) > 0
             self.backscatter_box_stage = 0
-            self.backscatter_box_centerline = None
+            if had_partial:
+                self.backscatter_box_centerline = None
+                self.backscatter_box_width_point = None
+            if hasattr(self, "_clear_backscatter_draw_tooltip"):
+                self._clear_backscatter_draw_tooltip()
+            if hasattr(self, "backscatter_draw_box_btn"):
+                self.backscatter_draw_box_btn.setText("Select Area/Line")
+                self.backscatter_draw_box_btn.setStyleSheet("")
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             if had_partial:
                 try:
                     self._plot_survey_plan(preserve_view_limits=True)
                 except Exception:
                     self.canvas.draw_idle()
+
+    def _on_backscatter_edit_width_toggled(self, checked):
+        """Enable/disable width edit mode for an existing backscatter area centerline."""
+        self.backscatter_box_edit_width_mode = bool(checked)
+        if self.backscatter_box_edit_width_mode:
+            centerline = getattr(self, "backscatter_box_centerline", None)
+            if not centerline or centerline[0] is None or centerline[1] is None:
+                self.backscatter_box_edit_width_mode = False
+                if hasattr(self, "backscatter_edit_width_btn"):
+                    self.backscatter_edit_width_btn.blockSignals(True)
+                    self.backscatter_edit_width_btn.setChecked(False)
+                    self.backscatter_edit_width_btn.setText("Edit Area Width")
+                    self.backscatter_edit_width_btn.setStyleSheet("")
+                    self.backscatter_edit_width_btn.blockSignals(False)
+                self._show_message("info", "Edit Area Width", "Select an area first, then edit width.")
+                return
+            self.backscatter_box_draw_mode = False
+            self.backscatter_box_stage = 0
+            if hasattr(self, "backscatter_draw_box_btn"):
+                self.backscatter_draw_box_btn.blockSignals(True)
+                self.backscatter_draw_box_btn.setChecked(False)
+                self.backscatter_draw_box_btn.blockSignals(False)
+            if hasattr(self, "backscatter_edit_width_btn"):
+                self.backscatter_edit_width_btn.setText("Set Width")
+                self.backscatter_edit_width_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+            self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            if hasattr(self, "backscatter_edit_width_btn"):
+                self.backscatter_edit_width_btn.setText("Edit Area Width")
+                self.backscatter_edit_width_btn.setStyleSheet("")
+            if hasattr(self, "_clear_backscatter_draw_tooltip"):
+                self._clear_backscatter_draw_tooltip()
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
 
     def _on_backscatter_show_stats_clicked(self):
         """Open backscatter statistics dialog for the currently saved box."""
@@ -1521,24 +2254,71 @@ class GeoTIFFMixin:
             return
         self._show_backscatter_stats_dialog()
 
+    def _on_backscatter_zoom_to_line_clicked(self):
+        """Zoom map to selected backscatter area bounds (box, not centerline)."""
+        vertices = getattr(self, "backscatter_box_vertices", None)
+        if not vertices or len(vertices) != 4:
+            self._show_message("info", "Backscatter Area", "Select an area first.")
+            return
+        verts = np.array(vertices, dtype=float)
+        if verts.shape != (4, 2):
+            self._show_message("info", "Backscatter Area", "Select an area first.")
+            return
+        lon_min = float(np.min(verts[:, 0]))
+        lon_max = float(np.max(verts[:, 0]))
+        lat_min = float(np.min(verts[:, 1]))
+        lat_max = float(np.max(verts[:, 1]))
+        dlon = max(1e-6, lon_max - lon_min)
+        dlat = max(1e-6, lat_max - lat_min)
+        xlim = (lon_min - 0.05 * dlon, lon_max + 0.05 * dlon)
+        ylim = (lat_min - 0.05 * dlat, lat_max + 0.05 * dlat)
+        if getattr(self, "geotiff_dataset_original", None) is not None and hasattr(self, "_apply_map_zoom_limits_and_reload_geotiff"):
+            self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
+        else:
+            self.ax.set_xlim(xlim)
+            self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+
+    def _on_backscatter_remove_line_clicked(self):
+        """Remove backscatter normalization centerline and area overlay."""
+        self._on_backscatter_clear_box_clicked()
+
     def _on_backscatter_clear_box_clicked(self):
         """Remove backscatter stats box overlay and clear cached statistics."""
         self.backscatter_box_draw_mode = False
+        self.backscatter_box_edit_width_mode = False
         self.backscatter_box_stage = 0
         self.backscatter_box_centerline = None
+        self.backscatter_box_width_point = None
+        if hasattr(self, "_clear_backscatter_draw_tooltip"):
+            self._clear_backscatter_draw_tooltip()
         self.backscatter_box_vertices = None
         self.backscatter_box_half_width_m = None
         self.backscatter_box_stats = None
         if hasattr(self, "backscatter_draw_box_btn"):
             self.backscatter_draw_box_btn.blockSignals(True)
             self.backscatter_draw_box_btn.setChecked(False)
+            self.backscatter_draw_box_btn.setText("Select Area/Line")
+            self.backscatter_draw_box_btn.setStyleSheet("")
             self.backscatter_draw_box_btn.blockSignals(False)
+        if hasattr(self, "backscatter_edit_width_btn"):
+            self.backscatter_edit_width_btn.blockSignals(True)
+            self.backscatter_edit_width_btn.setChecked(False)
+            self.backscatter_edit_width_btn.setText("Edit Area Width")
+            self.backscatter_edit_width_btn.setStyleSheet("")
+            self.backscatter_edit_width_btn.blockSignals(False)
         if hasattr(self, "backscatter_box_patch") and self.backscatter_box_patch is not None:
             try:
                 self.backscatter_box_patch.remove()
             except Exception:
                 pass
             self.backscatter_box_patch = None
+        if hasattr(self, "backscatter_box_centerline_line") and self.backscatter_box_centerline_line is not None:
+            try:
+                self.backscatter_box_centerline_line.remove()
+            except Exception:
+                pass
+            self.backscatter_box_centerline_line = None
         if hasattr(self, "backscatter_stats_dialog") and self.backscatter_stats_dialog is not None:
             try:
                 self.backscatter_stats_dialog.close()
@@ -1546,6 +2326,7 @@ class GeoTIFFMixin:
                 pass
             self.backscatter_stats_dialog = None
             self.backscatter_stats_canvas = None
+            self.backscatter_stats_img_ax = None
             self.backscatter_stats_ax = None
             self.backscatter_stats_text_label = None
         self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
@@ -1553,6 +2334,8 @@ class GeoTIFFMixin:
             self._plot_survey_plan(preserve_view_limits=True)
         except Exception:
             self.canvas.draw_idle()
+        if hasattr(self, "_draw_current_profile"):
+            self._draw_current_profile()
 
     def _update_backscatter_box_patch(self, vertices):
         """Create/update temporary cyan oriented rectangle while drawing."""
@@ -1617,6 +2400,21 @@ class GeoTIFFMixin:
             return 0.0
         return abs(vx * wy - vy * wx) / norm
 
+    def _get_backscatter_centerline_with_lead_in(self):
+        """Return saved centerline endpoints extended by Lead-in at both ends."""
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        if not centerline or len(centerline) != 2 or centerline[0] is None or centerline[1] is None:
+            return None
+        (a_lat, a_lon), (b_lat, b_lon) = centerline
+        lead_in_m = float(max(0.0, getattr(self, "backscatter_lead_in_m", 0.0) or 0.0))
+        if lead_in_m <= 0.0:
+            return (a_lat, a_lon), (b_lat, b_lon)
+        geod = pyproj.Geod(ellps="WGS84")
+        az_ab, az_ba, _ = geod.inv(a_lon, a_lat, b_lon, b_lat)
+        a_lon_ext, a_lat_ext, _ = geod.fwd(a_lon, a_lat, az_ba, lead_in_m)
+        b_lon_ext, b_lat_ext, _ = geod.fwd(b_lon, b_lat, az_ab, lead_in_m)
+        return (a_lat_ext, a_lon_ext), (b_lat_ext, b_lon_ext)
+
     def _finalize_backscatter_box(self, vertices, centerline, half_width_m):
         """Finalize oriented box polygon, compute stats, redraw, and open stats dialog."""
         if not vertices or len(vertices) != 4:
@@ -1627,6 +2425,10 @@ class GeoTIFFMixin:
         self.backscatter_box_half_width_m = float(max(0.0, half_width_m))
         self.backscatter_box_stats = self._compute_backscatter_box_stats()
         self._plot_survey_plan(preserve_view_limits=True)
+        if hasattr(self, "_draw_current_profile"):
+            self._draw_current_profile()
+        if hasattr(self, "_update_backscatter_export_name_default"):
+            self._update_backscatter_export_name_default()
         self._show_backscatter_stats_dialog()
 
     def _compute_backscatter_box_stats(self):
@@ -1673,11 +2475,159 @@ class GeoTIFFMixin:
         else:
             height_m = 0.0
         width_m = 2.0 * float(getattr(self, "backscatter_box_half_width_m", 0.0) or 0.0)
+        rectified = self._compute_backscatter_box_rectified_image()
+        bathy_rect = self._compute_rectified_slope_aspect_from_bathy()
         return {
             "values": valid,
             "width_m": float(abs(width_m)),
             "height_m": float(abs(height_m)),
+            "rectified_image": rectified.get("image"),
+            "rectified_long_m": float(rectified.get("long_m", 0.0)),
+            "rectified_short_m": float(rectified.get("short_m", 0.0)),
+            "bathy_rectified": self._compute_rectified_box_image_from_array(getattr(self, "geotiff_data_array", None)).get("image"),
+            "slope_rectified": bathy_rect.get("slope"),
         }
+
+    def _get_backscatter_display_vmin_vmax(self, values):
+        """Compute display scaling for backscatter using the same percent-clip rules as main map."""
+        valid = np.isfinite(values)
+        if not np.any(valid):
+            return 0.0, 1.0
+        arr = values[valid]
+        if getattr(self, "backscatter_percent_clip_enabled", True):
+            min_pct = float(getattr(self, "backscatter_percent_clip_min", 0.5))
+            max_pct = float(getattr(self, "backscatter_percent_clip_max", 0.5))
+            min_pct = max(0.0, min(49.9, min_pct))
+            max_pct = max(0.0, min(49.9, max_pct))
+            low_q = min_pct
+            high_q = 100.0 - max_pct
+            if high_q <= low_q:
+                low_q = 0.5
+                high_q = 99.5
+            vmin = float(np.nanpercentile(arr, low_q))
+            vmax = float(np.nanpercentile(arr, high_q))
+        else:
+            vmin = float(np.nanmin(arr))
+            vmax = float(np.nanmax(arr))
+        if vmin >= vmax:
+            vmin = float(np.nanmin(arr))
+            vmax = float(np.nanmax(arr))
+        if vmin >= vmax:
+            vmax = vmin + 1e-6
+        return vmin, vmax
+
+    def _compute_rectified_box_image_from_array(self, data_array):
+        """Return a de-rotated image aligned with selected box long axis (x) and short axis (y)."""
+        bs = data_array
+        extent = getattr(self, "geotiff_extent", None)
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        half_width = float(getattr(self, "backscatter_box_half_width_m", 0.0) or 0.0)
+        if (
+            bs is None
+            or extent is None
+            or centerline is None
+            or len(centerline) != 2
+            or centerline[0] is None
+            or centerline[1] is None
+            or half_width <= 0.0
+        ):
+            return {"image": None, "long_m": 0.0, "short_m": 0.0}
+
+        (a_lat, a_lon), (b_lat, b_lon) = centerline
+        geod = pyproj.Geod(ellps="WGS84")
+        _, _, centerline_len_m = geod.inv(a_lon, a_lat, b_lon, b_lat)
+        width_m = 2.0 * half_width
+        long_m = float(max(centerline_len_m, width_m))
+        short_m = float(min(centerline_len_m, width_m))
+        if long_m <= 0.0 or short_m <= 0.0:
+            return {"image": None, "long_m": 0.0, "short_m": 0.0}
+
+        center_lat = 0.5 * (a_lat + b_lat)
+        center_lon = 0.5 * (a_lon + b_lon)
+        m_per_deg_lat = 111320.0
+        m_per_deg_lon = 111320.0 * np.cos(np.radians(center_lat))
+        if abs(m_per_deg_lon) < 1e-9:
+            return {"image": None, "long_m": long_m, "short_m": short_m}
+
+        ax_m = np.array([a_lon * m_per_deg_lon, a_lat * m_per_deg_lat], dtype=float)
+        bx_m = np.array([b_lon * m_per_deg_lon, b_lat * m_per_deg_lat], dtype=float)
+        c_m = 0.5 * (ax_m + bx_m)
+        ab_vec = bx_m - ax_m
+        ab_norm = float(np.hypot(ab_vec[0], ab_vec[1]))
+        if ab_norm <= 0.0:
+            return {"image": None, "long_m": long_m, "short_m": short_m}
+        u_ab = ab_vec / ab_norm
+        v_ab = np.array([-u_ab[1], u_ab[0]], dtype=float)
+        width_point = getattr(self, "backscatter_box_width_point", None)
+        if width_point is not None and len(width_point) == 2:
+            wp_lat, wp_lon = width_point
+            wp_m = np.array([wp_lon * m_per_deg_lon, wp_lat * m_per_deg_lat], dtype=float)
+            side_sign = float(np.dot(wp_m - c_m, v_ab))
+            if side_sign < 0.0:
+                v_ab = -v_ab
+
+        # Deterministic convention:
+        # - If centerline is longer, +X is first centerline click -> second centerline click.
+        # - If width is longer, +X is toward the side used for width-click definition.
+        if centerline_len_m >= width_m:
+            u_long = u_ab
+            v_short = v_ab
+        else:
+            u_long = v_ab
+            v_short = u_ab
+
+        nrows, ncols = bs.shape
+        left, right, bottom, top = extent
+        if right == left or top == bottom:
+            return {"image": None, "long_m": long_m, "short_m": short_m}
+
+        lon_res_m = abs((right - left) / max(1, ncols - 1)) * m_per_deg_lon
+        lat_res_m = abs((top - bottom) / max(1, nrows - 1)) * m_per_deg_lat
+        base_res_m = max(1.0, min(abs(lon_res_m), abs(lat_res_m)))
+        nx = int(np.clip(np.ceil(long_m / base_res_m) + 1, 32, 800))
+        ny = int(np.clip(np.ceil(short_m / base_res_m) + 1, 16, 400))
+
+        x_vals = np.linspace(-0.5 * long_m, 0.5 * long_m, nx)
+        y_vals = np.linspace(-0.5 * short_m, 0.5 * short_m, ny)
+        xx, yy = np.meshgrid(x_vals, y_vals)
+        xy_m = c_m.reshape(1, 1, 2) + xx[..., None] * u_long.reshape(1, 1, 2) + yy[..., None] * v_short.reshape(1, 1, 2)
+        sample_lon = xy_m[..., 0] / m_per_deg_lon
+        sample_lat = xy_m[..., 1] / m_per_deg_lat
+
+        cols = np.rint((sample_lon - left) / (right - left) * (ncols - 1)).astype(int)
+        rows = np.rint((top - sample_lat) / (top - bottom) * (nrows - 1)).astype(int)
+        in_bounds = (rows >= 0) & (rows < nrows) & (cols >= 0) & (cols < ncols)
+        image = np.full((ny, nx), np.nan, dtype=float)
+        image[in_bounds] = bs[rows[in_bounds], cols[in_bounds]]
+        return {"image": image, "long_m": long_m, "short_m": short_m}
+
+    def _compute_backscatter_box_rectified_image(self):
+        """Return a de-rotated backscatter image aligned with long axis (x) and short axis (y)."""
+        return self._compute_rectified_box_image_from_array(getattr(self, "backscatter_raster_array", None))
+
+    def _compute_rectified_slope_aspect_from_bathy(self):
+        """Compute slope and aspect from bathymetry in the selected rectified box frame."""
+        rect = self._compute_rectified_box_image_from_array(getattr(self, "geotiff_data_array", None))
+        bathy = rect.get("image")
+        long_m = float(rect.get("long_m", 0.0))
+        short_m = float(rect.get("short_m", 0.0))
+        if bathy is None or np.size(bathy) == 0:
+            return {"slope": None, "aspect": None}
+        ny, nx = bathy.shape
+        if nx < 2 or ny < 2 or long_m <= 0.0 or short_m <= 0.0:
+            return {"slope": None, "aspect": None}
+
+        dx_m = long_m / max(1, nx - 1)
+        dy_m = short_m / max(1, ny - 1)
+        z = np.array(bathy, dtype=float)
+        z_filled = np.where(np.isfinite(z), z, 0.0)
+        dz_dy, dz_dx = np.gradient(z_filled, dy_m, dx_m)
+        slope_deg = np.degrees(np.arctan(np.sqrt(dz_dx ** 2 + dz_dy ** 2)))
+        aspect_deg = (np.degrees(np.arctan2(dz_dy, -dz_dx)) + 360.0) % 360.0
+        invalid = ~np.isfinite(z)
+        slope_deg[invalid] = np.nan
+        aspect_deg[invalid] = np.nan
+        return {"slope": slope_deg, "aspect": aspect_deg}
 
     def _show_backscatter_stats_dialog(self):
         """Create/show Backscatter Statistics dialog with histogram and box dimensions."""
@@ -1687,15 +2637,21 @@ class GeoTIFFMixin:
         if self.backscatter_stats_dialog is None:
             self.backscatter_stats_dialog = QDialog(self)
             self.backscatter_stats_dialog.setWindowTitle("Backscatter Statistics")
-            self.backscatter_stats_dialog.resize(700, 620)
+            self.backscatter_stats_dialog.resize(1100, 760)
             layout = QVBoxLayout(self.backscatter_stats_dialog)
             top_row = QWidget()
             top_layout = QVBoxLayout(top_row)
             top_layout.setContentsMargins(0, 0, 0, 0)
-            fig = Figure(figsize=(6.4, 4.2))
-            self.backscatter_stats_ax = fig.add_subplot(111)
-            fig.subplots_adjust(bottom=0.18)
+            fig = Figure(figsize=(6.8, 6.4))
+            self.backscatter_stats_img_ax = fig.add_subplot(221)
+            self.backscatter_stats_ax = fig.add_subplot(222)
+            self.backscatter_stats_aspect_ax = fig.add_subplot(223)
+            self.backscatter_stats_slope_ax = fig.add_subplot(224)
+            fig.subplots_adjust(wspace=0.26, hspace=0.32, bottom=0.09, top=0.94, left=0.07, right=0.98)
             self.backscatter_stats_canvas = FigureCanvas(fig)
+            self.backscatter_stats_motion_cid = self.backscatter_stats_canvas.mpl_connect(
+                "motion_notify_event", self._on_backscatter_stats_motion
+            )
             top_layout.addWidget(self.backscatter_stats_canvas)
             layout.addWidget(top_row)
             self.backscatter_stats_text_label = QLabel("")
@@ -1704,13 +2660,141 @@ class GeoTIFFMixin:
             layout.addWidget(self.backscatter_stats_text_label)
 
         vals = stats.get("values", np.array([]))
+        rectified_img = stats.get("rectified_image", None)
+        long_m = float(stats.get("rectified_long_m", 0.0))
+        short_m = float(stats.get("rectified_short_m", 0.0))
+        slope_rectified = stats.get("slope_rectified", None)
+        bathy_rectified = stats.get("bathy_rectified", None)
+        self._backscatter_stats_rectified_img = rectified_img
+        self._backscatter_stats_slope_rectified = slope_rectified
+        self._backscatter_stats_bathy_rectified = bathy_rectified
+        self._backscatter_stats_long_m = long_m
+        self._backscatter_stats_short_m = short_m
+        self.backscatter_stats_img_ax.clear()
+        if rectified_img is not None and np.size(rectified_img) > 0 and np.any(np.isfinite(rectified_img)):
+            vmin, vmax = self._get_backscatter_display_vmin_vmax(rectified_img)
+            self.backscatter_stats_img_ax.imshow(
+                rectified_img,
+                cmap="gray",
+                origin="lower",
+                aspect="auto",
+                extent=(0.0, long_m, 0.0, short_m),
+                vmin=vmin,
+                vmax=vmax,
+                interpolation="nearest",
+            )
+            self.backscatter_stats_img_ax.set_title("Backscatter Area (Long Axis × Short Axis)")
+            self.backscatter_stats_img_ax.set_xlabel("Long Direction (m)")
+            self.backscatter_stats_img_ax.set_ylabel("Short Direction (m)")
+            self.backscatter_stats_img_hover_text = self.backscatter_stats_img_ax.text(
+                0.02, 0.98, "Value: -",
+                transform=self.backscatter_stats_img_ax.transAxes,
+                ha="left", va="top", fontsize=8,
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+                zorder=20,
+            )
+        else:
+            self.backscatter_stats_img_ax.text(
+                0.5,
+                0.5,
+                "No valid backscatter image for selected area.",
+                transform=self.backscatter_stats_img_ax.transAxes,
+                ha="center",
+                va="center",
+            )
+            self.backscatter_stats_img_ax.set_title("Backscatter Area (Long Axis × Short Axis)")
+            self.backscatter_stats_img_ax.set_xlabel("Long Direction (m)")
+            self.backscatter_stats_img_ax.set_ylabel("Short Direction (m)")
+            self.backscatter_stats_img_hover_text = None
+
+        self.backscatter_stats_slope_ax.clear()
+        if slope_rectified is not None and np.size(slope_rectified) > 0 and np.any(np.isfinite(slope_rectified)):
+            self.backscatter_stats_slope_ax.imshow(
+                slope_rectified,
+                cmap="inferno",
+                origin="lower",
+                aspect="auto",
+                extent=(0.0, long_m, 0.0, short_m),
+                interpolation="nearest",
+            )
+            self.backscatter_stats_slope_ax.set_title("Bathymetry Slope (deg)")
+            self.backscatter_stats_slope_ax.set_xlabel("Long Direction (m)")
+            self.backscatter_stats_slope_ax.set_ylabel("Short Direction (m)")
+            self.backscatter_stats_slope_hover_text = self.backscatter_stats_slope_ax.text(
+                0.02, 0.98, "Value: -",
+                transform=self.backscatter_stats_slope_ax.transAxes,
+                ha="left", va="top", fontsize=8,
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+                zorder=20,
+            )
+        else:
+            self.backscatter_stats_slope_ax.text(
+                0.5, 0.5, "No valid slope map.",
+                transform=self.backscatter_stats_slope_ax.transAxes,
+                ha="center", va="center",
+            )
+            self.backscatter_stats_slope_ax.set_title("Bathymetry Slope (deg)")
+            self.backscatter_stats_slope_ax.set_xlabel("Long Direction (m)")
+            self.backscatter_stats_slope_ax.set_ylabel("Short Direction (m)")
+            self.backscatter_stats_slope_hover_text = None
+
+        self.backscatter_stats_aspect_ax.clear()
+        if bathy_rectified is not None and np.size(bathy_rectified) > 0 and np.any(np.isfinite(bathy_rectified)):
+            bmin = float(np.nanmin(bathy_rectified))
+            bmax = float(np.nanmax(bathy_rectified))
+            if bmin >= bmax:
+                bmax = bmin + 1e-6
+            self.backscatter_stats_aspect_ax.imshow(
+                bathy_rectified,
+                cmap="terrain",
+                origin="lower",
+                aspect="auto",
+                extent=(0.0, long_m, 0.0, short_m),
+                vmin=bmin,
+                vmax=bmax,
+                interpolation="nearest",
+            )
+            self.backscatter_stats_aspect_ax.set_title("Bathymetry (m)")
+            self.backscatter_stats_aspect_ax.set_xlabel("Long Direction (m)")
+            self.backscatter_stats_aspect_ax.set_ylabel("Short Direction (m)")
+            self.backscatter_stats_bathy_hover_text = self.backscatter_stats_aspect_ax.text(
+                0.02, 0.98, "Value: -",
+                transform=self.backscatter_stats_aspect_ax.transAxes,
+                ha="left", va="top", fontsize=8,
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+                zorder=20,
+            )
+        else:
+            self.backscatter_stats_aspect_ax.text(
+                0.5, 0.5, "No valid bathymetry map.",
+                transform=self.backscatter_stats_aspect_ax.transAxes,
+                ha="center", va="center",
+            )
+            self.backscatter_stats_aspect_ax.set_title("Bathymetry (m)")
+            self.backscatter_stats_aspect_ax.set_xlabel("Long Direction (m)")
+            self.backscatter_stats_aspect_ax.set_ylabel("Short Direction (m)")
+            self.backscatter_stats_bathy_hover_text = None
+
         self.backscatter_stats_ax.clear()
         if vals.size > 0:
-            self.backscatter_stats_ax.hist(vals, bins=40, color="steelblue", edgecolor="black", alpha=0.85)
+            counts, bin_edges, _ = self.backscatter_stats_ax.hist(
+                vals, bins=40, color="steelblue", edgecolor="black", alpha=0.85
+            )
+            self._backscatter_hist_counts = np.array(counts, dtype=float)
+            self._backscatter_hist_edges = np.array(bin_edges, dtype=float)
             self.backscatter_stats_ax.set_title("Backscatter Value Distribution")
             self.backscatter_stats_ax.set_xlabel("Backscatter Value")
             self.backscatter_stats_ax.set_ylabel("Count")
+            self.backscatter_stats_hist_hover_text = self.backscatter_stats_ax.text(
+                0.02, 0.98, "Bin: -\nCount: -",
+                transform=self.backscatter_stats_ax.transAxes,
+                ha="left", va="top", fontsize=8,
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+                zorder=20,
+            )
         else:
+            self._backscatter_hist_counts = None
+            self._backscatter_hist_edges = None
             self.backscatter_stats_ax.text(
                 0.5,
                 0.5,
@@ -1720,7 +2804,8 @@ class GeoTIFFMixin:
                 va="center",
             )
             self.backscatter_stats_ax.set_title("Backscatter Value Distribution")
-        self.backscatter_stats_ax.figure.subplots_adjust(bottom=0.18)
+            self.backscatter_stats_hist_hover_text = None
+        self.backscatter_stats_ax.figure.subplots_adjust(wspace=0.26, hspace=0.32, bottom=0.09, top=0.94, left=0.07, right=0.98)
         self.backscatter_stats_canvas.draw_idle()
 
         width_m = float(stats.get("width_m", 0.0))
@@ -1737,6 +2822,106 @@ class GeoTIFFMixin:
         self.backscatter_stats_dialog.show()
         self.backscatter_stats_dialog.raise_()
         self.backscatter_stats_dialog.activateWindow()
+
+    def _save_backscatter_stats_png_without_hover(self, path, dpi=300):
+        """Write stats figure to PNG without hover readout boxes (matplotlib text artists)."""
+        canvas = getattr(self, "backscatter_stats_canvas", None)
+        if canvas is None:
+            return
+        hover_artists = [
+            getattr(self, "backscatter_stats_img_hover_text", None),
+            getattr(self, "backscatter_stats_slope_hover_text", None),
+            getattr(self, "backscatter_stats_bathy_hover_text", None),
+            getattr(self, "backscatter_stats_hist_hover_text", None),
+        ]
+        prev_vis = []
+        for t in hover_artists:
+            if t is not None:
+                prev_vis.append((t, t.get_visible()))
+                t.set_visible(False)
+            else:
+                prev_vis.append(None)
+        try:
+            fig = canvas.figure
+            canvas.draw()
+            fig.savefig(path, dpi=dpi)
+        finally:
+            for entry in prev_vis:
+                if entry is not None:
+                    t, vis = entry
+                    t.set_visible(vis)
+            canvas.draw_idle()
+
+    def _on_backscatter_stats_motion(self, event):
+        """Show upper-left value readout for backscatter/slope/bathymetry stats maps."""
+        long_m = float(getattr(self, "_backscatter_stats_long_m", 0.0) or 0.0)
+        short_m = float(getattr(self, "_backscatter_stats_short_m", 0.0) or 0.0)
+        if long_m <= 0.0 or short_m <= 0.0:
+            return
+
+        def _update_for_axis(target_ax, arr, text_artist, fmt):
+            if target_ax is None or text_artist is None or arr is None:
+                return False
+            if event.inaxes != target_ax or event.xdata is None or event.ydata is None:
+                return False
+            if np.size(arr) == 0:
+                text_artist.set_text("Value: -")
+                return True
+            ny, nx = arr.shape
+            x = float(np.clip(event.xdata, 0.0, long_m))
+            y = float(np.clip(event.ydata, 0.0, short_m))
+            ix = int(np.clip(round((x / max(long_m, 1e-12)) * (nx - 1)), 0, nx - 1))
+            iy = int(np.clip(round((y / max(short_m, 1e-12)) * (ny - 1)), 0, ny - 1))
+            val = arr[iy, ix]
+            text_artist.set_text("Value: -" if not np.isfinite(val) else fmt.format(float(val)))
+            return True
+
+        handled = False
+        handled |= _update_for_axis(
+            getattr(self, "backscatter_stats_img_ax", None),
+            getattr(self, "_backscatter_stats_rectified_img", None),
+            getattr(self, "backscatter_stats_img_hover_text", None),
+            "Value: {:.3f}",
+        )
+        handled |= _update_for_axis(
+            getattr(self, "backscatter_stats_slope_ax", None),
+            getattr(self, "_backscatter_stats_slope_rectified", None),
+            getattr(self, "backscatter_stats_slope_hover_text", None),
+            "Value: {:.2f} deg",
+        )
+        handled |= _update_for_axis(
+            getattr(self, "backscatter_stats_aspect_ax", None),
+            getattr(self, "_backscatter_stats_bathy_rectified", None),
+            getattr(self, "backscatter_stats_bathy_hover_text", None),
+            "Value: {:.2f} m",
+        )
+        if (
+            event.inaxes == getattr(self, "backscatter_stats_ax", None)
+            and hasattr(self, "backscatter_stats_hist_hover_text")
+            and self.backscatter_stats_hist_hover_text is not None
+            and getattr(self, "_backscatter_hist_counts", None) is not None
+            and getattr(self, "_backscatter_hist_edges", None) is not None
+            and event.xdata is not None
+            and event.ydata is not None
+        ):
+            counts = self._backscatter_hist_counts
+            edges = self._backscatter_hist_edges
+            idx = int(np.searchsorted(edges, event.xdata, side="right") - 1)
+            if 0 <= idx < len(counts):
+                lo = float(edges[idx])
+                hi = float(edges[idx + 1])
+                count = int(round(float(counts[idx])))
+                if 0.0 <= event.ydata <= float(max(counts[idx], 0.0)):
+                    self.backscatter_stats_hist_hover_text.set_text(
+                        f"Bin: {lo:.3f} to {hi:.3f}\nCount: {count}"
+                    )
+                else:
+                    self.backscatter_stats_hist_hover_text.set_text("Bin: -\nCount: -")
+            else:
+                self.backscatter_stats_hist_hover_text.set_text("Bin: -\nCount: -")
+            handled = True
+        if handled and hasattr(self, "backscatter_stats_canvas") and self.backscatter_stats_canvas is not None:
+            self.backscatter_stats_canvas.draw_idle()
 
     def _zoom_to_geotiff(self):
         """Zooms the plot to the initial GeoTIFF bounds (same as when first loaded)."""

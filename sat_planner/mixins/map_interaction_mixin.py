@@ -45,6 +45,43 @@ class MapInteractionMixin:
         dy = (lat1 - lat0) * m_per_deg_lat
         return float(np.hypot(dx, dy))
 
+    @staticmethod
+    def _format_distance_triplet(distance_m):
+        """Format a distance in meters, kilometers, and nautical miles."""
+        km = distance_m / 1000.0
+        nm = distance_m / 1852.0
+        return f"{distance_m:,.1f} m | {km:,.3f} km | {nm:,.3f} nm"
+
+    def _set_backscatter_draw_tooltip(self, centerline_m=None, width_m=None):
+        """Show/update tooltip text for backscatter centerline/width drawing."""
+        lines = ["Backscatter Area Planning"]
+        if centerline_m is not None and np.isfinite(centerline_m):
+            lines.append(f"Centerline: {self._format_distance_triplet(centerline_m)}")
+        if width_m is not None and np.isfinite(width_m):
+            lines.append(f"Width: {self._format_distance_triplet(width_m)}")
+        if centerline_m is None and width_m is None:
+            lines.append("Click first centerline point.")
+        text = "\n".join(lines)
+        if hasattr(self, "backscatter_draw_info_text") and self.backscatter_draw_info_text is not None:
+            self.backscatter_draw_info_text.set_text(text)
+            self.backscatter_draw_info_text.set_visible(True)
+        else:
+            self.backscatter_draw_info_text = self.ax.text(
+                0.02, 0.86, text,
+                transform=self.ax.transAxes,
+                fontsize=9,
+                va='top',
+                ha='left',
+                bbox=dict(boxstyle='round', facecolor='lightcyan', alpha=0.85),
+                zorder=41,
+            )
+
+    def _clear_backscatter_draw_tooltip(self):
+        """Hide and clear backscatter draw tooltip text."""
+        if hasattr(self, "backscatter_draw_info_text") and self.backscatter_draw_info_text is not None:
+            self.backscatter_draw_info_text.set_visible(False)
+            self.backscatter_draw_info_text = None
+
     def _toggle_pick_center_mode(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot pick center.")
@@ -94,7 +131,9 @@ class MapInteractionMixin:
             stage = int(getattr(self, "backscatter_box_stage", 0))
             if stage == 0:
                 self.backscatter_box_centerline = ((clicked_lat, clicked_lon), None)
+                self.backscatter_box_width_point = None
                 self.backscatter_box_stage = 1
+                self._set_backscatter_draw_tooltip(centerline_m=0.0)
             elif stage == 1:
                 first = getattr(self, "backscatter_box_centerline", (None, None))[0]
                 if first is None:
@@ -110,6 +149,10 @@ class MapInteractionMixin:
                     return
                 self.backscatter_box_centerline = (first, (clicked_lat, clicked_lon))
                 self.backscatter_box_stage = 2
+                if hasattr(self, "backscatter_draw_box_btn"):
+                    self.backscatter_draw_box_btn.setText("Set Width")
+                    self.backscatter_draw_box_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+                self._set_backscatter_draw_tooltip(centerline_m=axis_len_m, width_m=0.0)
             else:
                 centerline = getattr(self, "backscatter_box_centerline", None)
                 if not centerline or centerline[0] is None or centerline[1] is None:
@@ -122,17 +165,49 @@ class MapInteractionMixin:
                     if half_width_m <= 0:
                         self._show_message("warning", "Backscatter Box", "Width must be greater than zero.")
                         return
+                    self.backscatter_box_width_point = (clicked_lat, clicked_lon)
                     vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, b_lat, b_lon, half_width_m)
                     if hasattr(self, "_finalize_backscatter_box"):
                         self._finalize_backscatter_box(vertices, centerline, half_width_m)
                 self.backscatter_box_stage = 0
                 self.backscatter_box_draw_mode = False
-                self.backscatter_box_centerline = None
                 if hasattr(self, "backscatter_draw_box_btn"):
                     self.backscatter_draw_box_btn.blockSignals(True)
                     self.backscatter_draw_box_btn.setChecked(False)
+                    self.backscatter_draw_box_btn.setText("Select Area/Line")
+                    self.backscatter_draw_box_btn.setStyleSheet("")
                     self.backscatter_draw_box_btn.blockSignals(False)
                 self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+                self._clear_backscatter_draw_tooltip()
+            return
+        if getattr(self, "backscatter_box_edit_width_mode", False):
+            clicked_lon, clicked_lat = self._main_map_click_lonlat(event)
+            if clicked_lon is None or clicked_lat is None:
+                return
+            centerline = getattr(self, "backscatter_box_centerline", None)
+            if not centerline or centerline[0] is None or centerline[1] is None:
+                return
+            (a_lat, a_lon), (b_lat, b_lon) = centerline
+            if hasattr(self, "_backscatter_half_width_from_point") and hasattr(self, "_backscatter_oriented_box_vertices"):
+                half_width_m = self._backscatter_half_width_from_point(
+                    a_lat, a_lon, b_lat, b_lon, clicked_lat, clicked_lon
+                )
+                if half_width_m <= 0:
+                    self._show_message("warning", "Backscatter Box", "Width must be greater than zero.")
+                    return
+                self.backscatter_box_width_point = (clicked_lat, clicked_lon)
+                vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, b_lat, b_lon, half_width_m)
+                if hasattr(self, "_finalize_backscatter_box"):
+                    self._finalize_backscatter_box(vertices, centerline, half_width_m)
+            self.backscatter_box_edit_width_mode = False
+            if hasattr(self, "backscatter_edit_width_btn"):
+                self.backscatter_edit_width_btn.blockSignals(True)
+                self.backscatter_edit_width_btn.setChecked(False)
+                self.backscatter_edit_width_btn.setText("Edit Area Width")
+                self.backscatter_edit_width_btn.setStyleSheet("")
+                self.backscatter_edit_width_btn.blockSignals(False)
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+            self._clear_backscatter_draw_tooltip()
             return
         if getattr(self, '_handle_line_planning_plot_click', lambda e: False)(event):
             return
@@ -1013,6 +1088,8 @@ class MapInteractionMixin:
             centerline = getattr(self, "backscatter_box_centerline", None)
             if stage == 1 and centerline and centerline[0] is not None:
                 (a_lat, a_lon) = centerline[0]
+                centerline_m = self._approx_map_distance_m(a_lat, a_lon, mouse_lat, mouse_lon)
+                self._set_backscatter_draw_tooltip(centerline_m=centerline_m)
                 if hasattr(self, "_backscatter_oriented_box_vertices") and hasattr(self, "_update_backscatter_box_patch"):
                     vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, mouse_lat, mouse_lon, 0.0)
                     if vertices is not None:
@@ -1020,6 +1097,7 @@ class MapInteractionMixin:
                         self.canvas.draw_idle()
             elif stage == 2 and centerline and centerline[0] is not None and centerline[1] is not None:
                 (a_lat, a_lon), (b_lat, b_lon) = centerline
+                centerline_m = self._approx_map_distance_m(a_lat, a_lon, b_lat, b_lon)
                 if (
                     hasattr(self, "_backscatter_half_width_from_point")
                     and hasattr(self, "_backscatter_oriented_box_vertices")
@@ -1028,6 +1106,29 @@ class MapInteractionMixin:
                     half_width_m = self._backscatter_half_width_from_point(
                         a_lat, a_lon, b_lat, b_lon, mouse_lat, mouse_lon
                     )
+                    self._set_backscatter_draw_tooltip(centerline_m=centerline_m, width_m=(2.0 * half_width_m))
+                    vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, b_lat, b_lon, half_width_m)
+                    if vertices is not None:
+                        self._update_backscatter_box_patch(vertices)
+                        self.canvas.draw_idle()
+            else:
+                self._set_backscatter_draw_tooltip()
+            return
+        if getattr(self, "backscatter_box_edit_width_mode", False):
+            self._cancel_eez_hover_lookup()
+            centerline = getattr(self, "backscatter_box_centerline", None)
+            if centerline and centerline[0] is not None and centerline[1] is not None:
+                (a_lat, a_lon), (b_lat, b_lon) = centerline
+                centerline_m = self._approx_map_distance_m(a_lat, a_lon, b_lat, b_lon)
+                if (
+                    hasattr(self, "_backscatter_half_width_from_point")
+                    and hasattr(self, "_backscatter_oriented_box_vertices")
+                    and hasattr(self, "_update_backscatter_box_patch")
+                ):
+                    half_width_m = self._backscatter_half_width_from_point(
+                        a_lat, a_lon, b_lat, b_lon, mouse_lat, mouse_lon
+                    )
+                    self._set_backscatter_draw_tooltip(centerline_m=centerline_m, width_m=(2.0 * half_width_m))
                     vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, b_lat, b_lon, half_width_m)
                     if vertices is not None:
                         self._update_backscatter_box_patch(vertices)
