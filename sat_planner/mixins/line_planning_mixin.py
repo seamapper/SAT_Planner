@@ -451,9 +451,9 @@ class LinePlanningMixin:
                     export_speed = float(self.line_survey_speed_entry.text()) if hasattr(self, 'line_survey_speed_entry') and self.line_survey_speed_entry.text() else 8.0
                 except (ValueError, TypeError):
                     export_speed = 8.0
-                geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "survey_speed": export_speed, "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
+                geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "survey_speed": export_speed, "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0), "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
                 with open(geojson_file_path, 'w') as f:
-                    json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0))}, "features": [geojson_feature]}, f, indent=2)
+                    json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0)}, "features": [geojson_feature]}, f, indent=2)
             lnw_file_path = None
             lnw_lines = [(export_name, list(self.line_planning_points))]
             if export_hypack and len(self.line_planning_points) >= 2:
@@ -552,6 +552,12 @@ class LinePlanningMixin:
                         else None
                     ),
                     "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                    "show_contours_var": bool(getattr(self, "show_contours_var", False)),
+                    "contour_interval_m": (
+                        float(self.contour_interval_entry.text())
+                        if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text()
+                        else 200.0
+                    ),
                     "visualization_shapefile_paths": list(
                         getattr(self, "visualization_shapefile_paths", []) or []
                     ),
@@ -798,6 +804,17 @@ class LinePlanningMixin:
                     nan_cutoff = sidecar_params.get("geotiff_nan_value")
                     if nan_cutoff is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
                         self._set_geotiff_nan_cutoff(nan_cutoff, update_entry=True)
+                except Exception:
+                    pass
+                try:
+                    if "show_contours_var" in sidecar_params:
+                        self.show_contours_var = bool(sidecar_params.get("show_contours_var"))
+                        if hasattr(self, "show_contours_checkbox"):
+                            self.show_contours_checkbox.blockSignals(True)
+                            self.show_contours_checkbox.setChecked(self.show_contours_var)
+                            self.show_contours_checkbox.blockSignals(False)
+                    if sidecar_params.get("contour_interval_m") is not None and hasattr(self, "contour_interval_entry"):
+                        self.contour_interval_entry.setText(f"{float(sidecar_params.get('contour_interval_m')):g}")
                 except Exception:
                     pass
                 try:

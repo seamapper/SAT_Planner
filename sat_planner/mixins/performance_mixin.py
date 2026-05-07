@@ -1090,6 +1090,17 @@ class PerformanceMixin:
                     self.performance_export_name_entry.setText(str(en))
                 if params.get("geotiff_nan_value") is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
                     self._set_geotiff_nan_cutoff(params.get("geotiff_nan_value"), update_entry=True)
+                if "show_contours_var" in params:
+                    self.show_contours_var = bool(params.get("show_contours_var"))
+                    if hasattr(self, "show_contours_checkbox"):
+                        self.show_contours_checkbox.blockSignals(True)
+                        self.show_contours_checkbox.setChecked(self.show_contours_var)
+                        self.show_contours_checkbox.blockSignals(False)
+                if params.get("contour_interval_m") is not None and hasattr(self, "contour_interval_entry"):
+                    try:
+                        self.contour_interval_entry.setText(f"{float(params.get('contour_interval_m')):g}")
+                    except Exception:
+                        pass
                 gtp = params.get("geotiff_path")
                 if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                     self._load_geotiff_from_path(gtp)

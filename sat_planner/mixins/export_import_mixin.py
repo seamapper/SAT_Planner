@@ -82,6 +82,12 @@ class ExportImportMixin:
                 ),
                 'geotiff_nan_value': float(getattr(self, 'geotiff_nan_value', -11000.0)),
                 'visualization_shapefile_paths': list(getattr(self, 'visualization_shapefile_paths', []) or []),
+                'show_contours_var': bool(getattr(self, 'show_contours_var', False)),
+                'contour_interval_m': (
+                    float(self.contour_interval_entry.text())
+                    if hasattr(self, 'contour_interval_entry') and self.contour_interval_entry.text()
+                    else 200.0
+                ),
                 'offset_direction': self.offset_direction_var,
                 'line_length_multiplier': self.line_length_multiplier,
                     'dist_between_lines_multiplier': self.dist_between_lines_multiplier
@@ -134,6 +140,17 @@ class ExportImportMixin:
 
             if 'geotiff_nan_value' in params and hasattr(self, '_set_geotiff_nan_cutoff'):
                 self._set_geotiff_nan_cutoff(params.get('geotiff_nan_value'), update_entry=True)
+            if 'show_contours_var' in params:
+                self.show_contours_var = bool(params.get('show_contours_var'))
+                if hasattr(self, 'show_contours_checkbox'):
+                    self.show_contours_checkbox.blockSignals(True)
+                    self.show_contours_checkbox.setChecked(self.show_contours_var)
+                    self.show_contours_checkbox.blockSignals(False)
+            if params.get('contour_interval_m') is not None and hasattr(self, 'contour_interval_entry'):
+                try:
+                    self.contour_interval_entry.setText(f"{float(params.get('contour_interval_m')):g}")
+                except Exception:
+                    pass
 
             # Restore bathymetry GeoTIFF and optional backscatter GeoTIFF (if present).
             # This is best-effort: if geotiff paths are missing or incompatible, we continue.
@@ -517,6 +534,12 @@ class ExportImportMixin:
                     else None
                 )
                 params['geotiff_nan_value'] = float(getattr(self, 'geotiff_nan_value', -11000.0))
+                params['show_contours_var'] = bool(getattr(self, 'show_contours_var', False))
+                params['contour_interval_m'] = (
+                    float(self.contour_interval_entry.text())
+                    if hasattr(self, 'contour_interval_entry') and self.contour_interval_entry.text()
+                    else 200.0
+                )
                 params['central_point_depth_m'] = (
                     float(self._depth_at_picked_point)
                     if hasattr(self, '_depth_at_picked_point') and self._depth_at_picked_point is not None
@@ -849,6 +872,12 @@ class ExportImportMixin:
                 "geotiff_path": geotiff_path,
                 "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
                 "visualization_shapefile_paths": list(getattr(self, 'visualization_shapefile_paths', []) or []),
+                "show_contours_var": bool(getattr(self, "show_contours_var", False)),
+                "contour_interval_m": (
+                    float(self.contour_interval_entry.text())
+                    if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text()
+                    else 200.0
+                ),
                 "test_speed_kts": speed_kts,
             }
             for key, attr in (

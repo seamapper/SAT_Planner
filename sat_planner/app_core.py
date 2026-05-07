@@ -127,6 +127,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # Backscatter bathymetry analysis: slope band overlay (magenta), separate from GeoTIFF "Slopes" overlay
         self.backscatter_slope_areas_show_var = False
+        self.backscatter_slope_areas_color_hex = "#ff00ff"
+        self.backscatter_slope_filter_enabled_var = True
+        self.backscatter_slope_areas_opacity_percent = 40.0
         self.backscatter_slope_min_deg = 0.0
         self.backscatter_slope_max_deg = 2.0
         self.backscatter_slope_areas_overlay_plot = None
@@ -145,6 +148,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_raster_bands = []
         self.backscatter_is_rgb = False
         self.backscatter_selected_band = 1  # 1=Red, 2=Green, 3=Blue
+        self.backscatter_nan_value = -9999.0
         self.show_backscatter_var = True
         self.backscatter_raster_plot = None
         self.backscatter_percent_clip_enabled = True
@@ -162,6 +166,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_box_stats = None
         self.backscatter_lead_in_m = 2000.0
         self.backscatter_survey_speed_kn = 8.0
+        self.backscatter_swath_ang_deg = 75.0
+        self.backscatter_sv_mps = 1500.0
         self.backscatter_stats_dialog = None
         self.backscatter_stats_canvas = None
         self.backscatter_stats_img_ax = None
@@ -177,6 +183,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # Initialize the picking mode state
         self.pick_center_mode = False
+        self.measurement_tool_mode = False
+        self.measurement_start_point = None  # (lat, lon)
+        self.measurement_end_point = None  # (lat, lon) once locked by second click
+        self.measurement_line_artist = None
 
         # Pyproj transformers
         self.geod = None  # Geodetic object for precise distance/bearing on ellipsoid
@@ -379,6 +389,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self.add_shapefile_btn = QPushButton("Add Shapefile")
             self.add_shapefile_btn.clicked.connect(self._on_visualization_shapefile_button_clicked)
             self.add_shapefile_btn.setToolTip("Load a polygon/line shapefile for map visualization only.")
+            self.measurement_tool_btn = QPushButton("Measurement Tool")
+            self.measurement_tool_btn.clicked.connect(self._toggle_measurement_tool_mode)
+            self.measurement_tool_btn.setToolTip("Toggle map distance/heading measurement mode.")
 
         # Export type/About buttons (only create once)
         if not hasattr(self, "export_type_btn"):
@@ -472,6 +485,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.backscatter_lead_in_entry.setEnabled(False)
             if hasattr(self, 'backscatter_survey_speed_entry'):
                 self.backscatter_survey_speed_entry.setEnabled(False)
+            if hasattr(self, 'backscatter_swath_ang_entry'):
+                self.backscatter_swath_ang_entry.setEnabled(False)
+            if hasattr(self, 'backscatter_sv_entry'):
+                self.backscatter_sv_entry.setEnabled(False)
 
         # Bind parameter changes to update the plot
         self._updating_from_code = False  # Flag to prevent recursion
@@ -744,8 +761,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                     if hasattr(self, 'eez_opacity_slider'):
                         self.eez_opacity_slider.setMaximumWidth(100)
                         checkbox_button_layout.addWidget(self.eez_opacity_slider)
-                    if hasattr(self, 'add_shapefile_btn'):
-                        checkbox_button_layout.addWidget(self.add_shapefile_btn)
+                if hasattr(self, 'add_shapefile_btn'):
+                    checkbox_button_layout.addWidget(self.add_shapefile_btn)
+                if hasattr(self, 'measurement_tool_btn'):
+                    checkbox_button_layout.addWidget(self.measurement_tool_btn)
                 checkbox_button_layout.addStretch()
                 if hasattr(self, 'about_btn'):
                     if hasattr(self, "export_type_btn"):
@@ -819,14 +838,36 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
     def _open_gmrt_download_dialog(self):
         """Open the embedded GMRT Download dialog (non-modal). When a GeoTIFF is downloaded, load it and refresh profile."""
         try:
+            if not hasattr(self, '_gmrt_dialogs'):
+                self._gmrt_dialogs = []
+            # Reuse an existing visible GMRT window if one is already open.
+            alive_dialogs = []
+            for dlg in list(self._gmrt_dialogs):
+                if dlg is None:
+                    continue
+                try:
+                    if dlg.isVisible():
+                        alive_dialogs.append(dlg)
+                except Exception:
+                    continue
+            self._gmrt_dialogs = alive_dialogs
+            if self._gmrt_dialogs:
+                dialog = self._gmrt_dialogs[-1]
+                try:
+                    if dialog.isMinimized():
+                        dialog.showNormal()
+                except Exception:
+                    pass
+                dialog.raise_()
+                dialog.activateWindow()
+                return
+
             # Create with parent=None so it opens as a separate top-level window and does not overwrite the main app
             dialog = GMRTGrabber(None)
             dialog.geotiff_downloaded.connect(self._on_gmrt_dialog_geotiff_downloaded)
             dialog.show()
             dialog.raise_()
             dialog.activateWindow()
-            if not hasattr(self, '_gmrt_dialogs'):
-                self._gmrt_dialogs = []
             self._gmrt_dialogs.append(dialog)
         except Exception as e:
             self._show_message("error", "GMRT Dialog", f"Could not open GMRT Download dialog: {e}")
@@ -884,7 +925,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         param_layout = QVBoxLayout(param_widget)
 
         # --- GeoTIFF Control GroupBox (above tabs) ---
-        geotiff_groupbox = QGroupBox("GeoTIFF Control")
+        geotiff_groupbox = QGroupBox("Bathymetry GeoTIFF")
         geotiff_layout = QVBoxLayout(geotiff_groupbox)
         geotiff_layout.setSpacing(0)
         geotiff_layout.setContentsMargins(9, 9, 9, 9)
@@ -1758,6 +1799,15 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         backscatter_slope_row = QHBoxLayout()
         backscatter_slope_row.setContentsMargins(9, 9, 9, 9)
 
+        self.backscatter_slope_filter_checkbox = QCheckBox("")
+        self.backscatter_slope_filter_checkbox.setChecked(self.backscatter_slope_filter_enabled_var)
+        self.backscatter_slope_filter_checkbox.setToolTip(
+            "When enabled, use slope Min/Max to determine magenta areas."
+        )
+        self.backscatter_slope_filter_checkbox.stateChanged.connect(
+            self._on_backscatter_slope_filter_checkbox_changed
+        )
+        backscatter_slope_row.addWidget(self.backscatter_slope_filter_checkbox)
         backscatter_slope_row.addWidget(QLabel("Min (°):"))
         self.backscatter_slope_min_spin = QDoubleSpinBox()
         self.backscatter_slope_min_spin.setRange(0.0, 90.0)
@@ -1841,7 +1891,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         backscatter_show_areas_row = QHBoxLayout()
         backscatter_show_areas_row.setContentsMargins(9, 0, 9, 9)
-        self.backscatter_show_slope_areas_checkbox = QCheckBox("Show Areas")
+        self.backscatter_show_slope_areas_checkbox = QCheckBox("Show Normalization Areas")
         self.backscatter_show_slope_areas_checkbox.setChecked(self.backscatter_slope_areas_show_var)
         self.backscatter_show_slope_areas_checkbox.setToolTip(
             "When enabled, highlights areas where slope is between Min and Max (magenta overlay)."
@@ -1850,6 +1900,28 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self._on_backscatter_slope_areas_checkbox_changed
         )
         backscatter_show_areas_row.addWidget(self.backscatter_show_slope_areas_checkbox)
+        self.backscatter_slope_areas_color_btn = QPushButton("")
+        self.backscatter_slope_areas_color_btn.setFixedSize(18, 18)
+        self.backscatter_slope_areas_color_btn.setToolTip(
+            "Normalization area color. Click to choose a different overlay color."
+        )
+        self.backscatter_slope_areas_color_btn.clicked.connect(self._on_backscatter_slope_color_button_clicked)
+        if hasattr(self, "_update_backscatter_slope_color_button"):
+            self._update_backscatter_slope_color_button()
+        backscatter_show_areas_row.addWidget(self.backscatter_slope_areas_color_btn)
+        backscatter_show_areas_row.addSpacing(8)
+        backscatter_show_areas_row.addWidget(QLabel("Opacity"))
+        self.backscatter_slope_areas_opacity_spin = QDoubleSpinBox()
+        self.backscatter_slope_areas_opacity_spin.setRange(0.0, 100.0)
+        self.backscatter_slope_areas_opacity_spin.setDecimals(0)
+        self.backscatter_slope_areas_opacity_spin.setSingleStep(5.0)
+        self.backscatter_slope_areas_opacity_spin.setSuffix("%")
+        self.backscatter_slope_areas_opacity_spin.setValue(float(getattr(self, "backscatter_slope_areas_opacity_percent", 40.0)))
+        self.backscatter_slope_areas_opacity_spin.setToolTip(
+            "Opacity of the magenta normalization areas overlay."
+        )
+        self.backscatter_slope_areas_opacity_spin.valueChanged.connect(self._on_backscatter_slope_area_opacity_changed)
+        backscatter_show_areas_row.addWidget(self.backscatter_slope_areas_opacity_spin)
         backscatter_show_areas_row.addStretch(1)
 
         backscatter_bs_criteria_group = QGroupBox("Backscatter Criteria")
@@ -1863,13 +1935,24 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         )
         self.load_backscatter_geotiff_btn.clicked.connect(self._load_backscatter_geotiff)
         backscatter_bs_top_row.addWidget(self.load_backscatter_geotiff_btn)
-        self.show_backscatter_checkbox = QCheckBox("Show")
+        backscatter_nan_frame = QWidget()
+        backscatter_nan_layout = QHBoxLayout(backscatter_nan_frame)
+        backscatter_nan_layout.setContentsMargins(0, 0, 0, 0)
+        backscatter_nan_layout.setSpacing(4)
+        backscatter_nan_layout.addWidget(QLabel("NaN Value:"))
+        self.backscatter_nan_entry = QLineEdit(f"{self.backscatter_nan_value:g}")
+        self.backscatter_nan_entry.setToolTip(
+            "Backscatter values equal to this sentinel value are treated as NaN."
+        )
+        self.backscatter_nan_entry.textChanged.connect(self._on_backscatter_nan_value_changed)
+        backscatter_nan_layout.addWidget(self.backscatter_nan_entry, 1)
+        backscatter_bs_top_row.addWidget(backscatter_nan_frame)
+        self.show_backscatter_checkbox = QCheckBox("Show Backscatter Grid")
         self.show_backscatter_checkbox.setChecked(self.show_backscatter_var)
         self.show_backscatter_checkbox.setToolTip(
             "When enabled, draw the loaded backscatter grid on the map (grey scale: dark = low, bright = high)."
         )
         self.show_backscatter_checkbox.stateChanged.connect(self._on_show_backscatter_checkbox_changed)
-        backscatter_bs_top_row.addWidget(self.show_backscatter_checkbox)
         self.backscatter_band_combo = QComboBox()
         self.backscatter_band_combo.addItems(["Red", "Green", "Blue"])
         self.backscatter_band_combo.setCurrentIndex(0)
@@ -1877,7 +1960,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_band_combo.setEnabled(False)
         self.backscatter_band_combo.setToolTip("Select which RGB band to display from a 3-band backscatter GeoTIFF.")
         self.backscatter_band_combo.currentIndexChanged.connect(self._on_backscatter_band_changed)
-        backscatter_bs_top_row.addWidget(self.backscatter_band_combo)
         backscatter_bs_top_row.addStretch(1)
         backscatter_bs_criteria_layout.addLayout(backscatter_bs_top_row)
 
@@ -1901,6 +1983,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         backscatter_bs_clip_row.addWidget(self.backscatter_percent_clip_max_entry)
         backscatter_bs_clip_row.addStretch(1)
         backscatter_bs_criteria_layout.addLayout(backscatter_bs_clip_row)
+
+        backscatter_bs_show_row = QHBoxLayout()
+        backscatter_bs_show_row.addWidget(self.show_backscatter_checkbox)
+        backscatter_bs_show_row.addWidget(self.backscatter_band_combo)
+        backscatter_bs_show_row.addStretch(1)
+        backscatter_bs_criteria_layout.addLayout(backscatter_bs_show_row)
         backscatter_layout.addWidget(backscatter_bs_criteria_group)
 
         backscatter_bathy_layout.addWidget(backscatter_depth_inner)
@@ -1956,14 +2044,24 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         )
         self.backscatter_lead_in_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
         backscatter_line_info_layout.addWidget(self.backscatter_lead_in_entry, 0, 1)
-        backscatter_line_info_layout.addWidget(QLabel("Survey Speed (kn)"), 1, 0)
+        backscatter_line_info_layout.addWidget(QLabel("Survey Speed (kn)"), 0, 2)
         self.backscatter_survey_speed_entry = QLineEdit(f"{self.backscatter_survey_speed_kn:g}")
         self.backscatter_survey_speed_entry.setToolTip("Survey speed used for backscatter line planning calculations.")
         self.backscatter_survey_speed_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
-        backscatter_line_info_layout.addWidget(self.backscatter_survey_speed_entry, 1, 1)
+        backscatter_line_info_layout.addWidget(self.backscatter_survey_speed_entry, 0, 3)
+        backscatter_line_info_layout.addWidget(QLabel("Swath Ang (deg)"), 1, 0)
+        self.backscatter_swath_ang_entry = QLineEdit(f"{self.backscatter_swath_ang_deg:g}")
+        self.backscatter_swath_ang_entry.setToolTip("Backscatter swath angle in degrees.")
+        self.backscatter_swath_ang_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
+        backscatter_line_info_layout.addWidget(self.backscatter_swath_ang_entry, 1, 1)
+        backscatter_line_info_layout.addWidget(QLabel("SV (m/sec)"), 1, 2)
+        self.backscatter_sv_entry = QLineEdit(f"{self.backscatter_sv_mps:g}")
+        self.backscatter_sv_entry.setToolTip("Sound velocity in meters per second.")
+        self.backscatter_sv_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
+        backscatter_line_info_layout.addWidget(self.backscatter_sv_entry, 1, 3)
         self.backscatter_show_info_btn = QPushButton("Show Survey Info")
         self.backscatter_show_info_btn.clicked.connect(self._show_backscatter_line_information)
-        backscatter_line_info_layout.addWidget(self.backscatter_show_info_btn, 2, 0, 1, 2)
+        backscatter_line_info_layout.addWidget(self.backscatter_show_info_btn, 2, 0, 1, 4)
         backscatter_line_planning_layout.addWidget(backscatter_line_info_group)
 
         backscatter_line_plot_control_group = QGroupBox("Line Plot Control")
@@ -1975,13 +2073,15 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             "Zoom the map to the bounds of the selected backscatter area."
         )
         self.backscatter_zoom_to_line_btn.clicked.connect(self._on_backscatter_zoom_to_line_clicked)
-        backscatter_line_plot_control_layout.addWidget(self.backscatter_zoom_to_line_btn)
+        backscatter_line_plot_controls_row = QHBoxLayout()
+        backscatter_line_plot_controls_row.addWidget(self.backscatter_zoom_to_line_btn)
         self.backscatter_remove_line_btn = QPushButton("Remove Line")
         self.backscatter_remove_line_btn.setToolTip(
             "Remove the backscatter normalization line and selected area."
         )
         self.backscatter_remove_line_btn.clicked.connect(self._on_backscatter_remove_line_clicked)
-        backscatter_line_plot_control_layout.addWidget(self.backscatter_remove_line_btn)
+        backscatter_line_plot_controls_row.addWidget(self.backscatter_remove_line_btn)
+        backscatter_line_plot_control_layout.addLayout(backscatter_line_plot_controls_row)
         backscatter_line_planning_layout.addWidget(backscatter_line_plot_control_group)
         backscatter_layout.addWidget(backscatter_line_planning_group)
 

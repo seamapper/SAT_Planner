@@ -68,6 +68,14 @@ class GMRTGrabber(QWidget):
         # Worker threads for background operations
         self.current_worker = None         # Current download worker
         self.current_map_worker = None     # Current map preview worker
+        self.map_request_counter = 0
+        self.active_map_request_id = None
+        self.map_auto_retry_count = 0
+        self.map_auto_retry_max = 1
+        self.last_map_request_params = None
+        self.map_request_watchdog = QTimer()
+        self.map_request_watchdog.setSingleShot(True)
+        self.map_request_watchdog.timeout.connect(self._on_map_request_timeout)
         # Initialize the user interface
         self.init_ui()
         # Set default window size
@@ -514,7 +522,7 @@ class GMRTGrabber(QWidget):
             self.estimated_pixels_label.setText("Est. pixels: —")
             self.estimated_pixels_label.setStyleSheet("color: #a0a0a0; font-size: 9pt;")
 
-    def update_map_preview(self):
+    def update_map_preview(self, force=False, is_auto_retry=False):
         """
         Update the map preview with the current coordinate settings.
         
@@ -534,29 +542,77 @@ class GMRTGrabber(QWidget):
             return
         
         # Log the map preview request
-        self.log_message(f"Requesting map preview: {west:.4f}°E to {east:.4f}°E, {south:.4f}°N to {north:.4f}°N")
+        if is_auto_retry:
+            self.log_message(
+                f"Auto-retrying map preview ({self.map_auto_retry_count}/{self.map_auto_retry_max}): "
+                f"{west:.4f}°E to {east:.4f}°E, {south:.4f}°N to {north:.4f}°N"
+            )
+        else:
+            self.log_message(f"Requesting map preview: {west:.4f}°E to {east:.4f}°E, {south:.4f}°N to {north:.4f}°N")
         
-        # Do not start a new worker if the previous one is still running
-        if self.current_map_worker and self.current_map_worker.isRunning():
+        # Do not start a new worker if the previous one is still running,
+        # unless this is a forced auto-retry.
+        if self.current_map_worker and self.current_map_worker.isRunning() and not force:
             return
+        if not is_auto_retry:
+            self.map_auto_retry_count = 0
         
-        # Create new map worker with current settings
-        self.current_map_worker = MapWorker(
-            west, east, south, north, 
-            width=800,  # Fixed width for consistent preview quality
-            mask=self.mask_checkbox.isChecked()  # Use current mask setting
+        self._start_map_preview_request(
+            west,
+            east,
+            south,
+            north,
+            bool(self.mask_checkbox.isChecked()),
+            is_auto_retry=is_auto_retry,
         )
-        
-        # Connect worker signals to UI update methods
-        self.current_map_worker.map_loaded.connect(self.on_map_loaded)
-        self.current_map_worker.map_error.connect(self.on_map_error)
-        
-        # Update UI to show loading state
-        self.map_status_label.setText("Map: Loading...")
-        self.refresh_map_btn.setEnabled(False)  # Prevent multiple requests
-        self.current_map_worker.start()  # Start the background download
+
+    def _start_map_preview_request(self, west, east, south, north, mask, is_auto_retry=False):
+        """Start a map preview worker and arm a 5s watchdog for stalled responses."""
+        self.map_request_counter += 1
+        request_id = int(self.map_request_counter)
+        self.active_map_request_id = request_id
+        self.last_map_request_params = (float(west), float(east), float(south), float(north), bool(mask))
+
+        self.current_map_worker = MapWorker(
+            west, east, south, north,
+            width=800,
+            mask=mask
+        )
+        self.current_map_worker.map_loaded.connect(
+            lambda pixmap, req_id=request_id: self.on_map_loaded(pixmap, req_id)
+        )
+        self.current_map_worker.map_error.connect(
+            lambda error_msg, req_id=request_id: self.on_map_error(error_msg, req_id)
+        )
+
+        if is_auto_retry:
+            self.map_status_label.setText("Map: Loading... (auto-retry)")
+        else:
+            self.map_status_label.setText("Map: Loading...")
+        self.refresh_map_btn.setEnabled(False)
+        self.current_map_worker.start()
+        self.map_request_watchdog.start(5000)
+
+    def _on_map_request_timeout(self):
+        """Retry map preview if no map response activity occurs within 5 seconds."""
+        active_id = getattr(self, "active_map_request_id", None)
+        if active_id is None:
+            return
+        if self.map_auto_retry_count >= self.map_auto_retry_max:
+            self.log_message("Map preview still pending after watchdog timeout; auto-retry limit reached.")
+            self.map_status_label.setText("Map: Delayed (click Refresh Map)")
+            self.refresh_map_btn.setEnabled(True)
+            return
+        params = getattr(self, "last_map_request_params", None)
+        if not params:
+            self.refresh_map_btn.setEnabled(True)
+            return
+        self.map_auto_retry_count += 1
+        self.log_message("Map preview appears stalled after 5 seconds; retrying automatically.")
+        west, east, south, north, mask = params
+        self._start_map_preview_request(west, east, south, north, mask, is_auto_retry=True)
     
-    def on_map_loaded(self, pixmap):
+    def on_map_loaded(self, pixmap, request_id=None):
         """
         Handle successful map loading from the worker thread.
         
@@ -567,6 +623,11 @@ class GMRTGrabber(QWidget):
         Args:
             pixmap (QPixmap): The loaded map image
         """
+        if request_id is not None and request_id != getattr(self, "active_map_request_id", None):
+            return
+        self.map_request_watchdog.stop()
+        self.active_map_request_id = None
+        self.map_auto_retry_count = 0
         # Scale the pixmap to fit the label while maintaining aspect ratio
         scaled_pixmap = pixmap.scaled(
             self.map_widget.size(), 
@@ -588,7 +649,7 @@ class GMRTGrabber(QWidget):
         self.refresh_map_btn.setEnabled(True)  # Re-enable the refresh button
         self.log_message("Map preview updated")
     
-    def on_map_error(self, error_msg):
+    def on_map_error(self, error_msg, request_id=None):
         """
         Handle map loading errors from the worker thread.
         
@@ -598,6 +659,11 @@ class GMRTGrabber(QWidget):
         Args:
             error_msg (str): Description of the error that occurred
         """
+        if request_id is not None and request_id != getattr(self, "active_map_request_id", None):
+            return
+        self.map_request_watchdog.stop()
+        self.active_map_request_id = None
+        self.map_auto_retry_count = 0
         # Display error message in the map area
         self.map_widget.set_pixmap(QPixmap()) # Clear any previous image
         self.map_status_label.setText("Map: Error")

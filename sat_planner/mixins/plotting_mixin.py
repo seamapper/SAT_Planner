@@ -750,7 +750,7 @@ class PlottingMixin:
                             vmax=vmax,
                             alpha=0.9,
                             zorder=0,
-                            interpolation="bilinear",
+                            interpolation="nearest",
                         )
                 except Exception as e:
                     print(f"Warning: could not plot backscatter overlay: {e}")
@@ -946,7 +946,10 @@ class PlottingMixin:
                     slope_degrees = np.degrees(slope_rad)
                     slope_degrees[np.isnan(self.geotiff_data_array)] = np.nan
 
-                    mask = (slope_degrees >= min_slope) & (slope_degrees <= max_slope)
+                    if getattr(self, "backscatter_slope_filter_enabled_var", True):
+                        mask = (slope_degrees >= min_slope) & (slope_degrees <= max_slope)
+                    else:
+                        mask = np.isfinite(self.geotiff_data_array)
                     if getattr(self, "backscatter_depth_filter_enabled_var", False):
                         depth_min_m = float(getattr(self, "backscatter_depth_min_m", 0.0))
                         depth_max_m = float(getattr(self, "backscatter_depth_max_m", 11000.0))
@@ -978,10 +981,19 @@ class PlottingMixin:
                                 mask, dx_m, dy_m, mw, mh
                             )
                     overlay = np.zeros((slope_degrees.shape[0], slope_degrees.shape[1], 4), dtype=np.float32)
-                    overlay[mask, 0] = 1.0   # R
-                    overlay[mask, 1] = 0.0   # G
-                    overlay[mask, 2] = 1.0   # B — magenta
-                    overlay[mask, 3] = 0.45  # alpha
+                    color_hex = str(getattr(self, "backscatter_slope_areas_color_hex", "#ff00ff") or "#ff00ff").strip()
+                    if not color_hex.startswith("#"):
+                        color_hex = f"#{color_hex}"
+                    try:
+                        rgb = [int(color_hex[i:i + 2], 16) / 255.0 for i in (1, 3, 5)]
+                    except Exception:
+                        rgb = [1.0, 0.0, 1.0]  # fallback magenta
+                    overlay[mask, 0] = float(rgb[0])
+                    overlay[mask, 1] = float(rgb[1])
+                    overlay[mask, 2] = float(rgb[2])
+                    opacity_pct = float(getattr(self, "backscatter_slope_areas_opacity_percent", 40.0))
+                    alpha = max(0.0, min(1.0, opacity_pct / 100.0))
+                    overlay[mask, 3] = alpha
                     overlay[~mask, 3] = 0.0
 
                     self.backscatter_slope_areas_overlay_plot = self.ax.imshow(
@@ -1364,6 +1376,36 @@ class PlottingMixin:
                     linestyle="-",
                     zorder=41,
                 )[0]
+                # Label backscatter waypoints on-map: Lead-in, Start, End, Lead-out.
+                try:
+                    stats = self._calculate_backscatter_line_statistics() if hasattr(self, "_calculate_backscatter_line_statistics") else None
+                    line_waypoints = stats.get("line_waypoints", []) if isinstance(stats, dict) else []
+                    if len(line_waypoints) == 4:
+                        waypoint_labels = ["BS1LI", "BS1S", "BS1E", "BS1LO"]
+                        for label, (wp_lat, wp_lon) in zip(waypoint_labels, line_waypoints):
+                            self.ax.plot(
+                                wp_lon,
+                                wp_lat,
+                                marker="o",
+                                color="cyan",
+                                markersize=5,
+                                linestyle="None",
+                                zorder=42,
+                            )
+                            self.ax.annotate(
+                                label,
+                                (wp_lon, wp_lat),
+                                textcoords="offset points",
+                                xytext=(5, 5),
+                                ha="left",
+                                va="bottom",
+                                fontsize=8,
+                                color="black",
+                                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.75),
+                                zorder=43,
+                            )
+                except Exception:
+                    pass
 
             # Draw legend after all overlays so it sits above every layer.
             handles, labels = self.ax.get_legend_handles_labels()

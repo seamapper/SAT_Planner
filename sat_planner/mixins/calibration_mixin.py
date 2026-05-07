@@ -1122,6 +1122,12 @@ class CalibrationMixin:
                         "properties": {
                             "geotiff_path": _cal_geotiff,
                             "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                            "show_contours_var": bool(getattr(self, "show_contours_var", False)),
+                            "contour_interval_m": (
+                                float(self.contour_interval_entry.text())
+                                if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text()
+                                else 200.0
+                            ),
                         },
                         "features": geojson_features,
                     },
@@ -1194,6 +1200,12 @@ class CalibrationMixin:
                     else None
                 )
                 params['geotiff_nan_value'] = float(getattr(self, "geotiff_nan_value", -11000.0))
+                params['show_contours_var'] = bool(getattr(self, "show_contours_var", False))
+                params['contour_interval_m'] = (
+                    float(self.contour_interval_entry.text())
+                    if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text()
+                    else 200.0
+                )
                 params['visualization_shapefile_paths'] = list(getattr(self, 'visualization_shapefile_paths', []) or [])
                 json_metadata_path = os.path.join(export_dir, f"{export_name}_params.json")
                 with open(json_metadata_path, 'w', encoding='utf-8') as f:
@@ -1693,6 +1705,17 @@ class CalibrationMixin:
                         self.cal_turn_time_entry.setText(str(params['turn_time']))
                     if params.get('geotiff_nan_value') is not None and hasattr(self, '_set_geotiff_nan_cutoff'):
                         self._set_geotiff_nan_cutoff(params.get('geotiff_nan_value'), update_entry=True)
+                    if 'show_contours_var' in params:
+                        self.show_contours_var = bool(params.get('show_contours_var'))
+                        if hasattr(self, 'show_contours_checkbox'):
+                            self.show_contours_checkbox.blockSignals(True)
+                            self.show_contours_checkbox.setChecked(self.show_contours_var)
+                            self.show_contours_checkbox.blockSignals(False)
+                    if params.get('contour_interval_m') is not None and hasattr(self, 'contour_interval_entry'):
+                        try:
+                            self.contour_interval_entry.setText(f"{float(params.get('contour_interval_m')):g}")
+                        except Exception:
+                            pass
                 except Exception:
                     pass
             elif imported_geojson_nan_cutoff is not None and hasattr(self, '_set_geotiff_nan_cutoff'):

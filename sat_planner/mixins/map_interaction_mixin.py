@@ -82,6 +82,68 @@ class MapInteractionMixin:
             self.backscatter_draw_info_text.set_visible(False)
             self.backscatter_draw_info_text = None
 
+    def _update_measurement_button_state(self):
+        """Refresh measurement button text/style from mode state."""
+        btn = getattr(self, "measurement_tool_btn", None)
+        if btn is None:
+            return
+        if getattr(self, "measurement_tool_mode", False):
+            btn.setText("Click to Stop")
+            btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+        else:
+            btn.setText("Measurement Tool")
+            btn.setStyleSheet("")
+
+    def _clear_measurement_line_overlay(self):
+        """Remove temporary/final measurement line from plot."""
+        line = getattr(self, "measurement_line_artist", None)
+        if line is not None:
+            try:
+                line.remove()
+            except Exception:
+                pass
+        self.measurement_line_artist = None
+
+    def _draw_measurement_line_overlay(self, start_lat, start_lon, end_lat, end_lon, locked=False):
+        """Create/update the on-map measurement line."""
+        line = getattr(self, "measurement_line_artist", None)
+        line_kwargs = {
+            "color": "orange",
+            "linewidth": 2.0,
+            "zorder": 14,
+            "alpha": 0.9,
+            "linestyle": "-" if locked else "--",
+        }
+        if line is not None and line in self.ax.lines:
+            line.set_data([start_lon, end_lon], [start_lat, end_lat])
+            line.set_linestyle(line_kwargs["linestyle"])
+            line.set_color(line_kwargs["color"])
+            line.set_linewidth(line_kwargs["linewidth"])
+            line.set_alpha(line_kwargs["alpha"])
+            line.set_zorder(line_kwargs["zorder"])
+            return
+        self.measurement_line_artist, = self.ax.plot(
+            [start_lon, end_lon], [start_lat, end_lat], **line_kwargs
+        )
+
+    def _toggle_measurement_tool_mode(self):
+        """Enable/disable interactive map measurement mode."""
+        self.measurement_tool_mode = not bool(getattr(self, "measurement_tool_mode", False))
+        if self.measurement_tool_mode:
+            if getattr(self, "pick_center_mode", False):
+                self._toggle_pick_center_mode()
+            self.measurement_start_point = None
+            self.measurement_end_point = None
+            self._clear_measurement_line_overlay()
+            self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
+        else:
+            self.measurement_start_point = None
+            self.measurement_end_point = None
+            self._clear_measurement_line_overlay()
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+        self._update_measurement_button_state()
+        self.canvas.draw_idle()
+
     def _toggle_pick_center_mode(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot pick center.")
@@ -208,6 +270,28 @@ class MapInteractionMixin:
                 self.backscatter_edit_width_btn.blockSignals(False)
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             self._clear_backscatter_draw_tooltip()
+            return
+        if getattr(self, "measurement_tool_mode", False):
+            clicked_lon, clicked_lat = self._main_map_click_lonlat(event)
+            if clicked_lon is None or clicked_lat is None:
+                return
+            start_point = getattr(self, "measurement_start_point", None)
+            end_point = getattr(self, "measurement_end_point", None)
+
+            # First click starts the measurement, second click locks it,
+            # and any subsequent click starts a new measurement from that point.
+            if start_point is None or end_point is not None:
+                self.measurement_start_point = (clicked_lat, clicked_lon)
+                self.measurement_end_point = None
+                self._draw_measurement_line_overlay(clicked_lat, clicked_lon, clicked_lat, clicked_lon, locked=False)
+            else:
+                start_lat, start_lon = start_point
+                self.measurement_end_point = (clicked_lat, clicked_lon)
+                self._draw_measurement_line_overlay(start_lat, start_lon, clicked_lat, clicked_lon, locked=True)
+
+            self._update_default_hover_info(clicked_lat, clicked_lon)
+            self._schedule_eez_hover_lookup(clicked_lat, clicked_lon)
+            self.canvas.draw_idle()
             return
         if getattr(self, '_handle_line_planning_plot_click', lambda e: False)(event):
             return
@@ -1137,6 +1221,18 @@ class MapInteractionMixin:
                         self._update_backscatter_box_patch(vertices)
                         self.canvas.draw_idle()
             return
+        if getattr(self, "measurement_tool_mode", False):
+            start_point = getattr(self, "measurement_start_point", None)
+            end_point = getattr(self, "measurement_end_point", None)
+            if start_point is not None and end_point is None:
+                start_lat, start_lon = start_point
+                self._draw_measurement_line_overlay(start_lat, start_lon, mouse_lat, mouse_lon, locked=False)
+            self._hover_mouse_lat = mouse_lat
+            self._hover_mouse_lon = mouse_lon
+            self._update_default_hover_info(mouse_lat, mouse_lon)
+            self._schedule_eez_hover_lookup(mouse_lat, mouse_lon)
+            self.canvas.draw_idle()
+            return
 
         if hasattr(self, 'line_planning_mode') and self.line_planning_mode and len(self.line_planning_points) >= 1:
             self._cancel_eez_hover_lookup()
@@ -1324,6 +1420,37 @@ class MapInteractionMixin:
         lat_str = decimal_degrees_to_ddm(mouse_lat, is_latitude=True)
         lon_str = decimal_degrees_to_ddm(mouse_lon, is_latitude=False)
         info_str = f"Lat: {lat_str}\nLon: {lon_str}\nElevation: {elev_str}\nSlope: {slope_str}"
+        if getattr(self, "measurement_tool_mode", False):
+            start_point = getattr(self, "measurement_start_point", None)
+            if start_point is None:
+                info_str += "\nMeasurement: click first point"
+            else:
+                end_point = getattr(self, "measurement_end_point", None)
+                start_lat, start_lon = start_point
+                if end_point is not None:
+                    target_lat, target_lon = end_point
+                    self._draw_measurement_line_overlay(start_lat, start_lon, target_lat, target_lon, locked=True)
+                else:
+                    target_lat, target_lon = mouse_lat, mouse_lon
+                try:
+                    geod = pyproj.Geod(ellps="WGS84")
+                    fwd_az, _, distance_m = geod.inv(start_lon, start_lat, target_lon, target_lat)
+                    heading = fwd_az % 360.0
+                    distance_nm = distance_m / 1852.0
+                    if distance_m < 1000.0:
+                        info_str += (
+                            f"\nDistance: {distance_m:,.1f} m"
+                            f"\nDistance: {distance_nm:,.3f} nm"
+                            f"\nHeading: {heading:.1f}°"
+                        )
+                    else:
+                        info_str += (
+                            f"\nDistance: {distance_m / 1000.0:,.3f} km"
+                            f"\nDistance: {distance_nm:,.3f} nm"
+                            f"\nHeading: {heading:.1f}°"
+                        )
+                except Exception:
+                    info_str += "\nDistance: -\nHeading: -"
         if getattr(self, 'show_eez_var', False):
             eez_name = None
             lookup_point = getattr(self, '_hover_eez_lookup_point', None)
