@@ -6,11 +6,12 @@ A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing
 
 ## Overview
 
-The SAT/QAT Planner is a desktop application designed for planning and visualizing multibeam testing operations. It supports four main planning modes:
+The SAT/QAT Planner is a desktop application designed for planning and visualizing multibeam testing and calibration operations. It supports five main planning modes:
 - **Calibration Survey Planning**: Plan pitch, roll, and heading calibration lines
 - **Accuracy Survey Planning**: Generate parallel survey lines with customizable parameters
 - **Performance (Swath) Survey Planning**: Plan a four-heading swath performance test with optional RX-noise BIST legs relative to swell direction
 - **Line Planning**: Interactive line drawing with real-time elevation profiles
+- **Backscatter Normalization Planning**: Interactive line and area selection for backscatter calibration.
 
 ## Features
 
