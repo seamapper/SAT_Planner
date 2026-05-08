@@ -63,6 +63,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.auto_regenerate_timer = QTimer()
         self.auto_regenerate_timer.setSingleShot(True)
         self.auto_regenerate_timer.timeout.connect(self._auto_regenerate_survey_plan)
+        # Debounce calibration lead-in updates while typing.
+        self.cal_lead_in_update_timer = QTimer()
+        self.cal_lead_in_update_timer.setSingleShot(True)
+        self.cal_lead_in_update_timer.timeout.connect(self._apply_cal_lead_in_change)
 
         # Central widget for main layout
         self.central_widget = QWidget()
@@ -1514,6 +1518,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_test_plan_info_layout.setColumnStretch(3, 2)
 
         cal_test_plan_row = 0
+        cal_test_plan_info_layout.addWidget(QLabel("Lead-In (m):"), cal_test_plan_row, 0)
+        self.cal_lead_in_entry = QLineEdit("0")
+        self.cal_lead_in_entry.textChanged.connect(self._on_cal_lead_in_changed)
+        cal_test_plan_info_layout.addWidget(self.cal_lead_in_entry, cal_test_plan_row, 1)
+        cal_test_plan_row += 1
+
         cal_test_plan_info_layout.addWidget(QLabel("Survey Speed (knots):"), cal_test_plan_row, 0)
         self.cal_survey_speed_entry = QLineEdit("8")
         cal_test_plan_info_layout.addWidget(self.cal_survey_speed_entry, cal_test_plan_row, 1)

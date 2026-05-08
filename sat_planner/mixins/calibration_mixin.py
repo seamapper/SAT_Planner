@@ -993,6 +993,8 @@ class CalibrationMixin:
 
         if hasattr(self, 'cal_survey_speed_entry'):
             self.cal_survey_speed_entry.setText("8")
+        if hasattr(self, 'cal_lead_in_entry'):
+            self.cal_lead_in_entry.setText("0")
         if hasattr(self, 'cal_line_offset_entry'):
             self.cal_line_offset_entry.clear()
         if hasattr(self, 'cal_export_name_entry'):
@@ -1019,6 +1021,51 @@ class CalibrationMixin:
             self._draw_pitch_line_profile()
         if hasattr(self, '_update_cal_line_times'):
             self._update_cal_line_times()
+
+    def _get_cal_lead_in_m(self):
+        """Return calibration lead distance (meters), clamped to >= 0."""
+        try:
+            lead_in_m = float(self.cal_lead_in_entry.text()) if hasattr(self, "cal_lead_in_entry") and self.cal_lead_in_entry.text() else 0.0
+        except Exception:
+            lead_in_m = 0.0
+        return max(0.0, lead_in_m)
+
+    def _on_cal_lead_in_changed(self):
+        """Debounce calibration lead-in updates while user is typing."""
+        if hasattr(self, "cal_lead_in_update_timer"):
+            self.cal_lead_in_update_timer.start(700)
+            return
+        self._apply_cal_lead_in_change()
+
+    def _apply_cal_lead_in_change(self):
+        """Refresh calibration plan and stats after lead-in edit settles."""
+        try:
+            self._plot_survey_plan(preserve_view_limits=True)
+        except Exception:
+            pass
+        try:
+            self._update_cal_line_times()
+        except Exception:
+            pass
+
+    def _build_calibration_export_points(self, line_key, pts, geod, lead_in_m):
+        """Return list of points with lead-in/out points inserted for export."""
+        if not pts or len(pts) < 2 or geod is None or lead_in_m <= 0:
+            return list(pts)
+        start = pts[0]
+        end = pts[1]
+        try:
+            az12, _az21, _ = geod.inv(start[1], start[0], end[1], end[0])
+            li_lon, li_lat, _ = geod.fwd(start[1], start[0], (az12 + 180.0) % 360.0, lead_in_m)
+            lo_lon, lo_lat = end[1], end[0]
+            if line_key in ("pitch", "roll"):
+                lo_lon, lo_lat, _ = geod.fwd(end[1], end[0], az12 % 360.0, lead_in_m)
+            points = [(li_lat, li_lon), start, end]
+            if line_key in ("pitch", "roll"):
+                points.append((lo_lat, lo_lon))
+            return points
+        except Exception:
+            return list(pts)
 
     def _export_cal_survey_files(self):
         export_shapefile = self._export_type_enabled("esri_shapefile") if hasattr(self, "_export_type_enabled") else True
@@ -1063,21 +1110,33 @@ class CalibrationMixin:
         self.last_export_dir = export_dir
         self._save_last_export_dir()
         try:
+            geod = pyproj.Geod(ellps="WGS84") if pyproj is not None else None
+            lead_in_m = self._get_cal_lead_in_m()
             # --- Build common rows and write DDD/DMM/DMS CSV and TXT via export_utils ---
             cal_rows = []
+            export_lines = []
             for num, name, pts in lines:
+                role_key = name.lower()
+                export_pts = self._build_calibration_export_points(role_key, pts, geod, lead_in_m)
                 if name.lower().startswith('pitch'):
-                    line_name, start_label, end_label = 'Pitch', 'PLS', 'PLE'
+                    line_name = 'Pitch'
+                    waypoint_labels = ['PLLI', 'PLS', 'PLE', 'PLLO'] if len(export_pts) >= 4 else ['PLS', 'PLE']
                 elif name.lower().startswith('roll'):
-                    line_name, start_label, end_label = 'Roll', 'RLS', 'RLE'
+                    line_name = 'Roll'
+                    waypoint_labels = ['RLLI', 'RLS', 'RLE', 'RLLO'] if len(export_pts) >= 4 else ['RLS', 'RLE']
                 elif name.lower().startswith('heading'):
                     m = re.search(r'(\d+)', name)
                     n = m.group(1) if m else '1'
-                    line_name, start_label, end_label = f'Heading{n}', f'H{n}S', f'H{n}E'
+                    line_name = f'Heading{n}'
+                    waypoint_labels = [f'H{n}LI', f'H{n}S', f'H{n}E'] if len(export_pts) >= 3 else [f'H{n}S', f'H{n}E']
                 else:
-                    line_name, start_label, end_label = name, 'START', 'END'
-                cal_rows.append((num, line_name, start_label, pts[0][0], pts[0][1]))
-                cal_rows.append((num, line_name, end_label, pts[1][0], pts[1][1]))
+                    line_name = name
+                    waypoint_labels = ['START', 'END']
+                if len(waypoint_labels) != len(export_pts):
+                    waypoint_labels = ['START', 'END'] if len(export_pts) == 2 else [f"WP{i + 1}" for i in range(len(export_pts))]
+                for label, point in zip(waypoint_labels, export_pts):
+                    cal_rows.append((num, line_name, label, point[0], point[1]))
+                export_lines.append((num, name, export_pts))
 
             csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
             ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
@@ -1097,7 +1156,7 @@ class CalibrationMixin:
                 schema = {'geometry': 'LineString', 'properties': {'line_num': 'int', 'line_name': 'str'}}
                 crs_epsg = 'EPSG:4326'
                 features = []
-                for num, name, pts in lines:
+                for num, name, pts in export_lines:
                     shapely_line = LineString([(p[1], p[0]) for p in pts])
                     features.append({'geometry': mapping(shapely_line), 'properties': {'line_num': num, 'line_name': name}})
                 with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
@@ -1109,10 +1168,10 @@ class CalibrationMixin:
                 else None
             )
             geojson_features = []
-            for num, name, pts in lines:
+            for num, name, pts in export_lines:
                 geojson_features.append({
                     "type": "Feature",
-                    "geometry": {"type": "LineString", "coordinates": [[pts[0][1], pts[0][0]], [pts[1][1], pts[1][0]]]},
+                    "geometry": {"type": "LineString", "coordinates": [[p[1], p[0]] for p in pts]},
                     "properties": {"line_num": num, "line_name": name},
                 })
             with open(geojson_file_path, 'w', encoding='utf-8') as f:
@@ -1135,7 +1194,7 @@ class CalibrationMixin:
                     indent=2,
                 )
             lnw_file_path = None
-            lnw_lines = [(name, list(pts)) for _num, name, pts in lines]
+            lnw_lines = [(name, list(pts)) for _num, name, pts in export_lines]
             if export_hypack and lnw_lines:
                 all_pts = [p for _name, pts in lnw_lines for p in pts]
                 zone, hem = export_utils.compute_utm_zone_from_points(all_pts)
@@ -1144,7 +1203,7 @@ class CalibrationMixin:
                 if not export_utils.write_lnw(lnw_file_path, lnw_lines):
                     lnw_file_path = None
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
-            cal_ascii_lines = [(name, list(pts)) for _num, name, pts in lines]
+            cal_ascii_lines = [(name, list(pts)) for _num, name, pts in export_lines]
             if export_sis:
                 export_utils.write_asciiplan(sis_file_path, cal_ascii_lines)
             gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
@@ -1152,7 +1211,7 @@ class CalibrationMixin:
             gpx_per_test_names = []
             if export_gpx:
                 gpx_written = export_utils.write_gpx(gpx_file_path, cal_ascii_lines)
-                cal_gpx_tests = [(_name, _name, list(pts)) for _num, _name, pts in lines]
+                cal_gpx_tests = [(_name, _name, list(pts)) for _num, _name, pts in export_lines]
                 gpx_per_test_names = export_utils.write_gpx_per_test_files(
                     export_dir, export_name, cal_gpx_tests, creator="SAT Planner Calibration"
                 )
@@ -1186,6 +1245,10 @@ class CalibrationMixin:
                     params['survey_speed'] = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
                 except Exception:
                     params['survey_speed'] = 8.0
+                try:
+                    params['lead_in_m'] = self._get_cal_lead_in_m()
+                except Exception:
+                    params['lead_in_m'] = 0.0
                 try:
                     params['turn_time'] = (
                         float(self.cal_turn_time_entry.text())
@@ -1613,10 +1676,10 @@ class CalibrationMixin:
                     if not isinstance(geometry, dict) or geometry.get('type') != 'LineString':
                         continue
                     coordinates = geometry.get('coordinates', [])
-                    if not isinstance(coordinates, list) or len(coordinates) != 2:
+                    if not isinstance(coordinates, list) or len(coordinates) < 2:
                         continue
                     point1 = (coordinates[0][1], coordinates[0][0])
-                    point2 = (coordinates[1][1], coordinates[1][0])
+                    point2 = (coordinates[-1][1], coordinates[-1][0])
                     properties = feature.get('properties', {}) or {}
                     if imported_geojson_geotiff_path is None:
                         imported_geojson_geotiff_path = properties.get('geotiff_path')
@@ -1701,6 +1764,8 @@ class CalibrationMixin:
                         self.cal_export_name_entry.setText(params['export_name'])
                     if params.get('survey_speed') is not None:
                         self.cal_survey_speed_entry.setText(str(params['survey_speed']))
+                    if params.get('lead_in_m') is not None and hasattr(self, 'cal_lead_in_entry'):
+                        self.cal_lead_in_entry.setText(str(params['lead_in_m']))
                     if params.get('turn_time') is not None and hasattr(self, 'cal_turn_time_entry'):
                         self.cal_turn_time_entry.setText(str(params['turn_time']))
                     if params.get('geotiff_nan_value') is not None and hasattr(self, '_set_geotiff_nan_cutoff'):
@@ -1744,6 +1809,8 @@ class CalibrationMixin:
                     getattr(self, btn_attr).setStyleSheet("")
             self._update_cal_line_times()
             self._plot_survey_plan(preserve_view_limits=True)
+            if hasattr(self, "_zoom_to_any_lines"):
+                self._zoom_to_any_lines()
             try:
                 self._last_user_xlim = self.ax.get_xlim()
                 self._last_user_ylim = self.ax.get_ylim()
@@ -1818,6 +1885,7 @@ class CalibrationMixin:
             geod = pyproj.Geod(ellps="WGS84")
             speed_knots = float(self.cal_survey_speed_entry.text()) if self.cal_survey_speed_entry.text() else 8.0
             speed_m_per_h = speed_knots * 1852
+            lead_in_m = self._get_cal_lead_in_m()
             turn_time_min = float(self.cal_turn_time_entry.text()) if hasattr(self, 'cal_turn_time_entry') and self.cal_turn_time_entry.text() else 5.0
 
             stats = {
@@ -1829,6 +1897,7 @@ class CalibrationMixin:
                 'heading1_time_min': 0.0,
                 'heading2_distance_m': 0.0,
                 'heading2_time_min': 0.0,
+                'lead_in_m': lead_in_m,
                 'travel_pitch_to_roll_m': 0.0,
                 'travel_pitch_to_roll_min': 0.0,
                 'travel_roll_to_heading1_m': 0.0,
@@ -1844,7 +1913,9 @@ class CalibrationMixin:
                 (lat1, lon1), (lat2, lon2) = self.pitch_line_points
                 _, _, pitch_distance = geod.inv(lon1, lat1, lon2, lat2)
                 stats['pitch_line_distance_m'] = pitch_distance
-                pitch_time_hours = pitch_distance / speed_m_per_h if speed_m_per_h > 0 else 0
+                # Per pass, count one lead segment: the far-end "lead-out" is the reciprocal run lead-in.
+                pitch_pass_distance = pitch_distance + lead_in_m
+                pitch_time_hours = pitch_pass_distance / speed_m_per_h if speed_m_per_h > 0 else 0
                 # 2 passes + 1 turn time between passes
                 stats['pitch_line_time_min'] = pitch_time_hours * 60 * 2 + turn_time_min
 
@@ -1852,7 +1923,9 @@ class CalibrationMixin:
                 (lat1, lon1), (lat2, lon2) = self.roll_line_points
                 _, _, roll_distance = geod.inv(lon1, lat1, lon2, lat2)
                 stats['roll_line_distance_m'] = roll_distance
-                roll_time_hours = roll_distance / speed_m_per_h if speed_m_per_h > 0 else 0
+                # Per pass, count one lead segment: the far-end "lead-out" is the reciprocal run lead-in.
+                roll_pass_distance = roll_distance + lead_in_m
+                roll_time_hours = roll_pass_distance / speed_m_per_h if speed_m_per_h > 0 else 0
                 # 2 passes + 1 turn time between passes
                 stats['roll_line_time_min'] = roll_time_hours * 60 * 2 + turn_time_min
 
@@ -1860,14 +1933,16 @@ class CalibrationMixin:
                 (lat1, lon1), (lat2, lon2) = self.heading_lines[0]
                 _, _, heading1_distance = geod.inv(lon1, lat1, lon2, lat2)
                 stats['heading1_distance_m'] = heading1_distance
-                heading1_time_hours = heading1_distance / speed_m_per_h if speed_m_per_h > 0 else 0
+                heading1_pass_distance = heading1_distance + lead_in_m
+                heading1_time_hours = heading1_pass_distance / speed_m_per_h if speed_m_per_h > 0 else 0
                 stats['heading1_time_min'] = heading1_time_hours * 60
 
             if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 2:
                 (lat1, lon1), (lat2, lon2) = self.heading_lines[1]
                 _, _, heading2_distance = geod.inv(lon1, lat1, lon2, lat2)
                 stats['heading2_distance_m'] = heading2_distance
-                heading2_time_hours = heading2_distance / speed_m_per_h if speed_m_per_h > 0 else 0
+                heading2_pass_distance = heading2_distance + lead_in_m
+                heading2_time_hours = heading2_pass_distance / speed_m_per_h if speed_m_per_h > 0 else 0
                 stats['heading2_time_min'] = heading2_time_hours * 60
 
             if (hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2 and
@@ -1900,10 +1975,10 @@ class CalibrationMixin:
                 stats['travel_heading1_to_heading2_min'] = travel_time_hours * 60 + turn_time_min
 
             stats['total_distance_m'] = (
-                stats['pitch_line_distance_m'] * 2 +
-                stats['roll_line_distance_m'] * 2 +
-                stats['heading1_distance_m'] +
-                stats['heading2_distance_m'] +
+                (stats['pitch_line_distance_m'] + lead_in_m) * 2 +
+                (stats['roll_line_distance_m'] + lead_in_m) * 2 +
+                (stats['heading1_distance_m'] + lead_in_m) +
+                (stats['heading2_distance_m'] + lead_in_m) +
                 stats['travel_pitch_to_roll_m'] +
                 stats['travel_roll_to_heading1_m'] +
                 stats['travel_heading1_to_heading2_m']
@@ -1977,6 +2052,8 @@ class CalibrationMixin:
             stats_text += f"Survey Speed: {speed_knots} knots\n"
         except Exception:
             stats_text += "Survey Speed: 8.0 knots (default)\n"
+        lead_in_m = stats.get('lead_in_m', 0.0)
+        stats_text += f"Lead-In (per segment): {lead_in_m:.1f} m\n"
         try:
             turn_time_min = float(self.cal_turn_time_entry.text()) if hasattr(self, 'cal_turn_time_entry') and self.cal_turn_time_entry.text() else 5.0
             stats_text += f"Turn Time (per turn): {turn_time_min} min\n\n"
@@ -1997,7 +2074,8 @@ class CalibrationMixin:
                     stats_text += f"  Reciprocal Heading: {back_az % 360:.1f}°\n"
                 except Exception:
                     pass
-            stats_text += f"  Distance (per pass): {stats['pitch_line_distance_m']:.1f} m ({stats['pitch_line_distance_km']:.3f} km, {stats['pitch_line_distance_nm']:.3f} nm)\n"
+            pitch_pass_m = stats['pitch_line_distance_m'] + lead_in_m
+            stats_text += f"  Distance (per pass incl. lead-in): {pitch_pass_m:.1f} m ({pitch_pass_m/1000.0:.3f} km, {pitch_pass_m/1852.0:.3f} nm)\n"
             stats_text += f"  Time (total): {stats['pitch_line_time_min']:.1f} min\n"
             pitch_depths = self._pitch_line_depth_stats_abs_m()
             if pitch_depths:
@@ -2022,7 +2100,8 @@ class CalibrationMixin:
                     stats_text += f"  Reciprocal Heading: {back_az % 360:.1f}°\n"
                 except Exception:
                     pass
-            stats_text += f"  Distance (per pass): {stats['roll_line_distance_m']:.1f} m ({stats['roll_line_distance_km']:.3f} km, {stats['roll_line_distance_nm']:.3f} nm)\n"
+            roll_pass_m = stats['roll_line_distance_m'] + lead_in_m
+            stats_text += f"  Distance (per pass incl. lead-in): {roll_pass_m:.1f} m ({roll_pass_m/1000.0:.3f} km, {roll_pass_m/1852.0:.3f} nm)\n"
             stats_text += f"  Time (total): {stats['roll_line_time_min']:.1f} min\n"
             roll_depths = self._roll_line_depth_stats_abs_m()
             if roll_depths:
@@ -2046,9 +2125,10 @@ class CalibrationMixin:
                     stats_text += f"  Heading: {fwd_az % 360:.1f}°\n"
                 except Exception:
                     pass
+            heading1_pass_m = stats['heading1_distance_m'] + lead_in_m
             stats_text += (
-                f"  Distance (one pass): {stats['heading1_distance_m']:.1f} m "
-                f"({stats['heading1_distance_km']:.3f} km, {stats['heading1_distance_nm']:.3f} nm)\n"
+                f"  Distance (one pass incl. lead-in): {heading1_pass_m:.1f} m "
+                f"({heading1_pass_m/1000.0:.3f} km, {heading1_pass_m/1852.0:.3f} nm)\n"
             )
             stats_text += f"  Time (total): {stats['heading1_time_min']:.1f} min\n\n"
         if stats['heading2_distance_m'] > 0:
@@ -2061,9 +2141,10 @@ class CalibrationMixin:
                     stats_text += f"  Heading: {fwd_az % 360:.1f}°\n"
                 except Exception:
                     pass
+            heading2_pass_m = stats['heading2_distance_m'] + lead_in_m
             stats_text += (
-                f"  Distance (one pass): {stats['heading2_distance_m']:.1f} m "
-                f"({stats['heading2_distance_km']:.3f} km, {stats['heading2_distance_nm']:.3f} nm)\n"
+                f"  Distance (one pass incl. lead-in): {heading2_pass_m:.1f} m "
+                f"({heading2_pass_m/1000.0:.3f} km, {heading2_pass_m/1852.0:.3f} nm)\n"
             )
             stats_text += f"  Time (total): {stats['heading2_time_min']:.1f} min\n\n"
         stats_text += "TRANSIT DISTANCES AND TIMES\n"
@@ -2116,23 +2197,31 @@ class CalibrationMixin:
         if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
             pitch_start = self.pitch_line_points[0]
             pitch_end = self.pitch_line_points[1]
-            stats_text += f"Pitch Start: {decimal_degrees_to_ddm(pitch_start[0], True)}, {decimal_degrees_to_ddm(pitch_start[1], False)}\n"
-            stats_text += f"Pitch End: {decimal_degrees_to_ddm(pitch_end[0], True)}, {decimal_degrees_to_ddm(pitch_end[1], False)}\n"
+            pitch_pts = self._build_calibration_export_points('pitch', [pitch_start, pitch_end], pyproj.Geod(ellps="WGS84") if pyproj is not None else None, lead_in_m)
+            pitch_labels = ['PLLI', 'PLS', 'PLE', 'PLLO'] if len(pitch_pts) >= 4 else ['PLS', 'PLE']
+            for label, point in zip(pitch_labels, pitch_pts):
+                stats_text += f"{label}: {decimal_degrees_to_ddm(point[0], True)}, {decimal_degrees_to_ddm(point[1], False)}\n"
         if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
             roll_start = self.roll_line_points[0]
             roll_end = self.roll_line_points[1]
-            stats_text += f"Roll Start: {decimal_degrees_to_ddm(roll_start[0], True)}, {decimal_degrees_to_ddm(roll_start[1], False)}\n"
-            stats_text += f"Roll End: {decimal_degrees_to_ddm(roll_end[0], True)}, {decimal_degrees_to_ddm(roll_end[1], False)}\n"
+            roll_pts = self._build_calibration_export_points('roll', [roll_start, roll_end], pyproj.Geod(ellps="WGS84") if pyproj is not None else None, lead_in_m)
+            roll_labels = ['RLLI', 'RLS', 'RLE', 'RLLO'] if len(roll_pts) >= 4 else ['RLS', 'RLE']
+            for label, point in zip(roll_labels, roll_pts):
+                stats_text += f"{label}: {decimal_degrees_to_ddm(point[0], True)}, {decimal_degrees_to_ddm(point[1], False)}\n"
         if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 1:
             h1_start = self.heading_lines[0][0]
             h1_end = self.heading_lines[0][1]
-            stats_text += f"Heading1 Start: {decimal_degrees_to_ddm(h1_start[0], True)}, {decimal_degrees_to_ddm(h1_start[1], False)}\n"
-            stats_text += f"Heading1 End: {decimal_degrees_to_ddm(h1_end[0], True)}, {decimal_degrees_to_ddm(h1_end[1], False)}\n"
+            h1_pts = self._build_calibration_export_points('heading1', [h1_start, h1_end], pyproj.Geod(ellps="WGS84") if pyproj is not None else None, lead_in_m)
+            h1_labels = ['H1LI', 'H1S', 'H1E'] if len(h1_pts) >= 3 else ['H1S', 'H1E']
+            for label, point in zip(h1_labels, h1_pts):
+                stats_text += f"{label}: {decimal_degrees_to_ddm(point[0], True)}, {decimal_degrees_to_ddm(point[1], False)}\n"
         if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 2:
             h2_start = self.heading_lines[1][0]
             h2_end = self.heading_lines[1][1]
-            stats_text += f"Heading2 Start: {decimal_degrees_to_ddm(h2_start[0], True)}, {decimal_degrees_to_ddm(h2_start[1], False)}\n"
-            stats_text += f"Heading2 End: {decimal_degrees_to_ddm(h2_end[0], True)}, {decimal_degrees_to_ddm(h2_end[1], False)}\n"
+            h2_pts = self._build_calibration_export_points('heading2', [h2_start, h2_end], pyproj.Geod(ellps="WGS84") if pyproj is not None else None, lead_in_m)
+            h2_labels = ['H2LI', 'H2S', 'H2E'] if len(h2_pts) >= 3 else ['H2S', 'H2E']
+            for label, point in zip(h2_labels, h2_pts):
+                stats_text += f"{label}: {decimal_degrees_to_ddm(point[0], True)}, {decimal_degrees_to_ddm(point[1], False)}\n"
 
         # Calibration Waypoints (DDD)
         ddd_heading = "Calibration Waypoints (DDD)"
@@ -2141,23 +2230,31 @@ class CalibrationMixin:
         if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
             pitch_start = self.pitch_line_points[0]
             pitch_end = self.pitch_line_points[1]
-            stats_text += f"Pitch Start: {pitch_start[0]:.6f}, {pitch_start[1]:.6f}\n"
-            stats_text += f"Pitch End: {pitch_end[0]:.6f}, {pitch_end[1]:.6f}\n"
+            pitch_pts = self._build_calibration_export_points('pitch', [pitch_start, pitch_end], pyproj.Geod(ellps="WGS84") if pyproj is not None else None, lead_in_m)
+            pitch_labels = ['PLLI', 'PLS', 'PLE', 'PLLO'] if len(pitch_pts) >= 4 else ['PLS', 'PLE']
+            for label, point in zip(pitch_labels, pitch_pts):
+                stats_text += f"{label}: {point[0]:.6f}, {point[1]:.6f}\n"
         if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
             roll_start = self.roll_line_points[0]
             roll_end = self.roll_line_points[1]
-            stats_text += f"Roll Start: {roll_start[0]:.6f}, {roll_start[1]:.6f}\n"
-            stats_text += f"Roll End: {roll_end[0]:.6f}, {roll_end[1]:.6f}\n"
+            roll_pts = self._build_calibration_export_points('roll', [roll_start, roll_end], pyproj.Geod(ellps="WGS84") if pyproj is not None else None, lead_in_m)
+            roll_labels = ['RLLI', 'RLS', 'RLE', 'RLLO'] if len(roll_pts) >= 4 else ['RLS', 'RLE']
+            for label, point in zip(roll_labels, roll_pts):
+                stats_text += f"{label}: {point[0]:.6f}, {point[1]:.6f}\n"
         if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 1:
             h1_start = self.heading_lines[0][0]
             h1_end = self.heading_lines[0][1]
-            stats_text += f"Heading1 Start: {h1_start[0]:.6f}, {h1_start[1]:.6f}\n"
-            stats_text += f"Heading1 End: {h1_end[0]:.6f}, {h1_end[1]:.6f}\n"
+            h1_pts = self._build_calibration_export_points('heading1', [h1_start, h1_end], pyproj.Geod(ellps="WGS84") if pyproj is not None else None, lead_in_m)
+            h1_labels = ['H1LI', 'H1S', 'H1E'] if len(h1_pts) >= 3 else ['H1S', 'H1E']
+            for label, point in zip(h1_labels, h1_pts):
+                stats_text += f"{label}: {point[0]:.6f}, {point[1]:.6f}\n"
         if hasattr(self, 'heading_lines') and len(self.heading_lines) >= 2:
             h2_start = self.heading_lines[1][0]
             h2_end = self.heading_lines[1][1]
-            stats_text += f"Heading2 Start: {h2_start[0]:.6f}, {h2_start[1]:.6f}\n"
-            stats_text += f"Heading2 End: {h2_end[0]:.6f}, {h2_end[1]:.6f}\n"
+            h2_pts = self._build_calibration_export_points('heading2', [h2_start, h2_end], pyproj.Geod(ellps="WGS84") if pyproj is not None else None, lead_in_m)
+            h2_labels = ['H2LI', 'H2S', 'H2E'] if len(h2_pts) >= 3 else ['H2S', 'H2E']
+            for label, point in zip(h2_labels, h2_pts):
+                stats_text += f"{label}: {point[0]:.6f}, {point[1]:.6f}\n"
 
         return stats_text
 

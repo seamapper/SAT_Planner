@@ -35,12 +35,20 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Draw pitch and roll calibration lines interactively
 - Generate heading calibration lines from pitch line
 - **Reverse Line Direction**: Flip start/end of any calibration line(s) (Pitch, Roll, Heading1, Heading2) via checkboxes
+- **Lead-In (m)** parameter (default `0`) adds calibration run extensions:
+  - Pitch: `PLLI` (lead-in), `PLLO` (lead-out)
+  - Roll: `RLLI` (lead-in), `RLLO` (lead-out)
+  - Heading 1: `H1LI` (lead-in only), Heading 2: `H2LI` (lead-in only)
+- Lead-in/out segments are plotted in calibration colors with **dashed** style; main calibration lines remain **solid**; lead segments are excluded from legend entries
+- If a calibration line is reversed, lead-in stays with line start and lead-out (Pitch/Roll) stays with line end
 - Calculate heading line offset based on median depth
 - Display pitch line depth statistics (shallowest, maximum, mean, median)
 - Configure turn time for accurate time estimates
 - Import calibration surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON); **suggested line assignment** from file labels or geometry (Pitch = middle parallel line, Roll = non-parallel, Heading1/2 by file order); optional GMRT download after import (checkbox + buffer)
-- GeoJSON import loads geometry from **`{name}.geojson`**; **`{name}_params.json`** in the same folder (if present) supplies **survey speed**, **turn time (min)**, **heading line offset**, and **export name** so you can edit those fields without changing the geometry file
-- **Calibration Survey Info** dialog and *_info.txt with **Calibration Waypoints (DMM)** and **Calibration Waypoints (DDD)** sections (Pitch/Roll/Heading1/Heading2 start and end)
+- GeoJSON import loads geometry from **`{name}.geojson`**; **`{name}_params.json`** in the same folder (if present) supplies **survey speed**, **turn time (min)**, **lead-in (m)**, **heading line offset**, and **export name** so you can edit those fields without changing the geometry file
+- Import auto-zooms to the extents of all loaded calibration geometry, including lead-in/out when present
+- **Calibration Survey Info** dialog and *_info.txt with **Calibration Waypoints (DMM)** and **Calibration Waypoints (DDD)** sections (including core start/end waypoints and lead waypoints when lead-in is nonzero)
+- **Calibration Survey Info** / `*_info.txt` timing includes lead distance; for Pitch/Roll reciprocal runs, per-pass timing is `lead-in + main line` (far-end lead-out is treated as the reciprocal lead-in)
 - Comprehensive statistics with survey time, transit time, and turn time breakdowns
 - Validation warning when heading line offset exceeds 2x shallowest depth
 - Export calibration survey plans with detailed statistics (shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`)
@@ -78,6 +86,15 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Export uses shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`
 - Line export writes `*_params.json` including line survey speed, GeoTIFF path, and visualization shapefile path list
 
+### Backscatter Normalization Planning
+- Dedicated **Backscatter** tab with criteria controls and a line/area planning workflow
+- Optional **Load Backscatter GeoTIFF** and **Show Backscatter Grid** overlay (resampled to current bathymetry grid/extent)
+- **Show Normalization Areas** overlay based on slope-band filtering with configurable color/opacity
+- Optional filters for depth range, minimum connected area, minimum feature width/height, and percentile clipping
+- **Backscatter Line Planning** supports centerline with lead-in/lead-out and area width planning; map labels include `BS1LI`, `BS1S`, `BS1E`, `BS1LO`
+- **Show Area Stats** and **Survey Info** include line/area metrics and waypoint sections in DMM/DDD
+- Import/export backscatter line products with optional GMRT download after import
+
 ### GeoTIFF Visualization
 - Display elevation data with color mapping
 - Toggle between elevation and slope visualization
@@ -90,9 +107,10 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - EEZ overlay reloads on pan/zoom and supports paused-hover name lookup
 
 ### GeoJSON metadata (and sidecar JSON)
-- **Calibration**: GeoJSON holds line geometry and `line_num` / `line_name` only. The FeatureCollection **`properties`** may include **`geotiff_path`** so a saved raster can be reopened on import. **Survey speed**, **turn time (min)**, **heading line offset**, and **export name** live in **`{export_name}_params.json`** next to the GeoJSON (not in the `.geojson`). On import, that sidecar is optional; if it is absent, the app uses defaults and may repopulate the heading offset from the pitch line after load.
+- **Calibration**: GeoJSON holds line geometry and `line_num` / `line_name` only. The FeatureCollection **`properties`** may include **`geotiff_path`** so a saved raster can be reopened on import. **Survey speed**, **turn time (min)**, **lead-in (m)**, **heading line offset**, and **export name** live in **`{export_name}_params.json`** next to the GeoJSON (not in the `.geojson`). On import, that sidecar is optional; if it is absent, the app uses defaults and may repopulate the heading offset from the pitch line after load.
 - **Accuracy**: GeoJSON exports include **`survey_speed`**; saved raster path is stored in **`{export_name}_params.json`** as **`geotiff_path`**.
 - **Line** GeoJSON exports can include **`survey_speed`** and **`geotiff_path`** (collection and/or feature properties as applicable).
+- **Backscatter** exports include line GeoJSON and optional normalization area polygon GeoJSON (`{name}_area.geojson`) plus `{name}_params.json` with backscatter planning and filter settings; import restores these when present.
 - **Performance** GeoJSON uses feature properties such as **`line_num`** (1–4 for swath legs, 11–14 for BIST extensions where applicable) and may include speed-related keys; full test parameters are also in **`{name}_performance_params.json`** (including **`swell_direction_deg`**, restored on import when the sidecar is present).
 - Whenever a saved **GeoTIFF** path is present in the imported files, SAT Planner tries to open it; if the file is missing, import continues with a warning.
 
@@ -222,10 +240,10 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 
 1. Load a GeoTIFF (recommended)
 2. Click "Draw a Pitch Line" and click start/end points on the map
-3. Configure Turn Time (min) in Calibration Info - default: 5 minutes
+3. Configure `Lead-In (m)` in Calibration Survey Info (default: `0`) and Turn Time (min) (default: `5`)
 4. Click "Add Heading Lines" to generate heading calibration lines (warning shown if offset > 2x shallowest depth)
 5. Click "Draw a Roll Line" and click start/end points
-6. View comprehensive statistics showing survey time, transit time, and turn time breakdowns
+6. Use "Show Calibration Test Info" to review comprehensive statistics including lead-adjusted timing
 7. Export as needed (statistics file includes all details from dialog)
 
 ### Accuracy Survey Planning
@@ -259,6 +277,14 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 5. Edit by clicking "Edit Line Planning" and dragging waypoints
 6. View elevation profile and statistics
 7. Export the line plan
+
+### Backscatter Normalization Planning
+
+1. (Optional) Load bathymetry GeoTIFF and then load a backscatter GeoTIFF.
+2. Enable/adjust **Show Normalization Areas** criteria (slope band and optional depth/area/extent filters).
+3. In **Backscatter Line Planning**, define the normalization centerline/area and line settings (lead-in, speed, swath angle, sound velocity).
+4. Use **Show Area Stats** and **Survey Info** to review calculated metrics and waypoints (`BS1LI`, `BS1S`, `BS1E`, `BS1LO`).
+5. Use **Import Backscatter Line** / **Export Backscatter Line** to share geometry, settings, and reports.
 
 ### Download GMRT Grid Dialog
 
@@ -300,7 +326,8 @@ The application saves configuration in:
 - **Hypack LNW**: LNW format for Hypack (UTM zone computed from survey points when needed)
 - **Shapefile**: Geospatial vector format for GIS applications
 - **Statistics / *_info.txt**: Text reports with distances, timing, survey details, and waypoint sections (DMM then DDD) for Calibration, Accuracy, and Line plans. Performance exports include `*_info.txt` with the same content as **Show Performance Test Info** plus **Performance Survey** and **Export Date** headers, and write **`{name}_performance_params.json`** (separate from Accuracy `{name}_params.json`).
-- **Calibration `{name}_params.json`**: Sidecar to the calibration GeoJSON export—**`survey_speed`**, **`turn_time`**, **`line_offset`** (heading line offset), and **`export_name`**. Edit this file to tune those values and re-import the `.geojson` without regenerating geometry.
+- **Calibration `{name}_params.json`**: Sidecar to the calibration GeoJSON export—**`survey_speed`**, **`turn_time`**, **`lead_in_m`**, **`line_offset`** (heading line offset), and **`export_name`**. Edit this file to tune those values and re-import the `.geojson` without regenerating geometry.
+- **Backscatter exports**: same shared text/csv products where enabled, plus backscatter-specific outputs including `{name}_area.geojson` (normalization polygon when defined), `{name}_backscatter_stats.png`, and `{name}_params.json` (centerline/width, lead-in, line settings, and overlay/filter settings).
 - **Global Export Type gating**: Optional products can be toggled by format (`ESRI Shapefile`, `SIS ASCIIplan`, `GPX`, `Text (.csv)`, `Text (.txt)`, `Hypack (.lnw)`, `Map (.png)`, `Profiles (.png)`) for Accuracy, Calibration, Performance, and Line exports.
 - **Always exported** (regardless of Export Type toggles): `.geojson`, `*_params.json` sidecars, and `*_info.txt` reports.
 

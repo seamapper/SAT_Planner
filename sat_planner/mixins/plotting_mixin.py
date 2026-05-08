@@ -1087,11 +1087,56 @@ class PlottingMixin:
                                 fontsize=8, color='darkorange', weight='bold',
                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
+            cal_geod = pyproj.Geod(ellps="WGS84") if pyproj is not None else None
+            cal_lead_in_m = self._get_cal_lead_in_m() if hasattr(self, "_get_cal_lead_in_m") else 0.0
+            build_cal_points = getattr(self, "_build_calibration_export_points", None)
+
             # Plot pitch line if defined
             if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
                 latitudes = [p[0] for p in self.pitch_line_points]
                 longitudes = [p[1] for p in self.pitch_line_points]
                 self.ax.plot(longitudes, latitudes, color='red', linewidth=2.5, linestyle='-', marker='o', label='Pitch Line')
+                if callable(build_cal_points) and cal_lead_in_m > 0:
+                    pitch_ext = build_cal_points('pitch', self.pitch_line_points, cal_geod, cal_lead_in_m)
+                    if len(pitch_ext) >= 4:
+                        self.ax.plot(
+                            [pitch_ext[0][1], pitch_ext[1][1]],
+                            [pitch_ext[0][0], pitch_ext[1][0]],
+                            color='red',
+                            linewidth=2.0,
+                            linestyle='--',
+                            label='_nolegend_',
+                        )
+                        self.ax.plot(
+                            [pitch_ext[2][1], pitch_ext[3][1]],
+                            [pitch_ext[2][0], pitch_ext[3][0]],
+                            color='red',
+                            linewidth=2.0,
+                            linestyle='--',
+                            label='_nolegend_',
+                        )
+                        self.ax.plot(pitch_ext[0][1], pitch_ext[0][0], marker='o', color='red', markersize=5, linestyle='None', label='_nolegend_')
+                        self.ax.plot(pitch_ext[3][1], pitch_ext[3][0], marker='o', color='red', markersize=5, linestyle='None', label='_nolegend_')
+                        self.ax.annotate(
+                            'PLLI',
+                            (pitch_ext[0][1], pitch_ext[0][0]),
+                            xytext=(5, 5),
+                            textcoords='offset points',
+                            fontsize=8,
+                            color='red',
+                            weight='bold',
+                            bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                        )
+                        self.ax.annotate(
+                            'PLLO',
+                            (pitch_ext[3][1], pitch_ext[3][0]),
+                            xytext=(5, 5),
+                            textcoords='offset points',
+                            fontsize=8,
+                            color='red',
+                            weight='bold',
+                            bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                        )
 
                 # Add labels for pitch line points
                 self.ax.annotate('PLS', (longitudes[0], latitudes[0]),
@@ -1108,6 +1153,47 @@ class PlottingMixin:
                 latitudes = [p[0] for p in self.roll_line_points]
                 longitudes = [p[1] for p in self.roll_line_points]
                 self.ax.plot(longitudes, latitudes, color='purple', linewidth=2.5, linestyle='-', marker='o', label='Roll')
+                if callable(build_cal_points) and cal_lead_in_m > 0:
+                    roll_ext = build_cal_points('roll', self.roll_line_points, cal_geod, cal_lead_in_m)
+                    if len(roll_ext) >= 4:
+                        self.ax.plot(
+                            [roll_ext[0][1], roll_ext[1][1]],
+                            [roll_ext[0][0], roll_ext[1][0]],
+                            color='purple',
+                            linewidth=2.0,
+                            linestyle='--',
+                            label='_nolegend_',
+                        )
+                        self.ax.plot(
+                            [roll_ext[2][1], roll_ext[3][1]],
+                            [roll_ext[2][0], roll_ext[3][0]],
+                            color='purple',
+                            linewidth=2.0,
+                            linestyle='--',
+                            label='_nolegend_',
+                        )
+                        self.ax.plot(roll_ext[0][1], roll_ext[0][0], marker='o', color='purple', markersize=5, linestyle='None', label='_nolegend_')
+                        self.ax.plot(roll_ext[3][1], roll_ext[3][0], marker='o', color='purple', markersize=5, linestyle='None', label='_nolegend_')
+                        self.ax.annotate(
+                            'RLLI',
+                            (roll_ext[0][1], roll_ext[0][0]),
+                            xytext=(5, 5),
+                            textcoords='offset points',
+                            fontsize=8,
+                            color='purple',
+                            weight='bold',
+                            bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                        )
+                        self.ax.annotate(
+                            'RLLO',
+                            (roll_ext[3][1], roll_ext[3][0]),
+                            xytext=(5, 5),
+                            textcoords='offset points',
+                            fontsize=8,
+                            color='purple',
+                            weight='bold',
+                            bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                        )
 
                 # Add labels for roll line points
                 self.ax.annotate('RLS', (longitudes[0], latitudes[0]),
@@ -1125,17 +1211,42 @@ class PlottingMixin:
                     latitudes = [p[0] for p in line]
                     longitudes = [p[1] for p in line]
                     label = 'Heading1' if i == 0 else 'Heading2'
-                    self.ax.plot(longitudes, latitudes, color='deeppink', linewidth=2, linestyle='--', marker='x', label=label)
+                    heading_color = 'hotpink' if i == 0 else 'deeppink'
+                    self.ax.plot(longitudes, latitudes, color=heading_color, linewidth=2, linestyle='-', marker='x', label=label)
+                    if callable(build_cal_points) and cal_lead_in_m > 0:
+                        heading_key = 'heading1' if i == 0 else 'heading2'
+                        heading_ext = build_cal_points(heading_key, line, cal_geod, cal_lead_in_m)
+                        if len(heading_ext) >= 3:
+                            self.ax.plot(
+                                [heading_ext[0][1], heading_ext[1][1]],
+                                [heading_ext[0][0], heading_ext[1][0]],
+                                color=heading_color,
+                                linewidth=1.8,
+                                linestyle='--',
+                                label='_nolegend_',
+                            )
+                            li_label = 'H1LI' if i == 0 else 'H2LI'
+                            self.ax.plot(heading_ext[0][1], heading_ext[0][0], marker='x', color=heading_color, markersize=6, linestyle='None', label='_nolegend_')
+                            self.ax.annotate(
+                                li_label,
+                                (heading_ext[0][1], heading_ext[0][0]),
+                                xytext=(5, 5),
+                                textcoords='offset points',
+                                fontsize=8,
+                                color=heading_color,
+                                weight='bold',
+                                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                            )
 
                     # Add labels for heading line points
                     prefix = 'H1' if i == 0 else 'H2'
                     self.ax.annotate(f'{prefix}S', (longitudes[0], latitudes[0]),
                                     xytext=(5, 5), textcoords='offset points',
-                                    fontsize=8, color='deeppink', weight='bold',
+                                    fontsize=8, color=heading_color, weight='bold',
                                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
                     self.ax.annotate(f'{prefix}E', (longitudes[1], latitudes[1]),
                                     xytext=(5, 5), textcoords='offset points',
-                                    fontsize=8, color='deeppink', weight='bold',
+                                    fontsize=8, color=heading_color, weight='bold',
                                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
             # Plot performance test lines if present

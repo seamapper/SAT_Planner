@@ -1088,13 +1088,26 @@ class MapInteractionMixin:
     def _zoom_to_any_lines(self):
         # Collect all points from pitch line and heading lines
         points = []
+        cal_geod = pyproj.Geod(ellps="WGS84") if pyproj is not None else None
+        cal_lead_in_m = self._get_cal_lead_in_m() if hasattr(self, "_get_cal_lead_in_m") else 0.0
+        build_cal_points = getattr(self, "_build_calibration_export_points", None)
         if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
-            points.extend(self.pitch_line_points)
+            if callable(build_cal_points) and cal_lead_in_m > 0:
+                points.extend(build_cal_points('pitch', self.pitch_line_points, cal_geod, cal_lead_in_m))
+            else:
+                points.extend(self.pitch_line_points)
         if hasattr(self, 'heading_lines') and len(self.heading_lines) == 2:
-            for line in self.heading_lines:
-                points.extend(line)
+            for idx, line in enumerate(self.heading_lines):
+                if callable(build_cal_points) and cal_lead_in_m > 0 and len(line) == 2:
+                    key = 'heading1' if idx == 0 else 'heading2'
+                    points.extend(build_cal_points(key, line, cal_geod, cal_lead_in_m))
+                else:
+                    points.extend(line)
         if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
-            points.extend(self.roll_line_points)
+            if callable(build_cal_points) and cal_lead_in_m > 0:
+                points.extend(build_cal_points('roll', self.roll_line_points, cal_geod, cal_lead_in_m))
+            else:
+                points.extend(self.roll_line_points)
         if not points:
             self._show_message("info","Zoom to Lines", "No lines to zoom to.")
             return
