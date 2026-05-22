@@ -1074,8 +1074,8 @@ class CalibrationMixin:
         export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
         export_text_txt = self._export_type_enabled("text_txt") if hasattr(self, "_export_type_enabled") else True
         export_hypack = self._export_type_enabled("hypack_lnw") if hasattr(self, "_export_type_enabled") else True
-        export_map_png = self._export_type_enabled("map_png") if hasattr(self, "_export_type_enabled") else True
-        export_profiles_png = self._export_type_enabled("profiles_png") if hasattr(self, "_export_type_enabled") else True
+        export_map_png = self._export_map_png_enabled() if hasattr(self, "_export_map_png_enabled") else True
+        export_profiles_png = self._export_profiles_png_enabled() if hasattr(self, "_export_profiles_png_enabled") else True
         fiona = None
         LineString = None
         mapping = None
@@ -1280,7 +1280,9 @@ class CalibrationMixin:
             if export_map_png:
                 if hasattr(self, "_hide_map_hover_tooltip_for_export"):
                     self._hide_map_hover_tooltip_for_export()
-                self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+                self._save_export_map_png(
+                    map_png_path, dpi=300, bbox_inches='tight', facecolor='white'
+                )
             pitch_profile_png_path = None
             pitch_profile_csv_path = None
             roll_profile_png_path = None
@@ -1291,7 +1293,9 @@ class CalibrationMixin:
                         self._draw_pitch_line_profile()
                     if export_profiles_png:
                         pitch_profile_png_path = os.path.join(export_dir, f"{export_name}_pitch_profile.png")
-                        self.profile_fig.savefig(pitch_profile_png_path, dpi=300, bbox_inches="tight", facecolor="white")
+                        self._save_export_profile_png(
+                            pitch_profile_png_path, dpi=300, bbox_inches="tight", facecolor="white"
+                        )
                     p0, p1 = self.pitch_line_points
                     prof_p = self._profile_arrays_along_segment_endpoints(p0[0], p0[1], p1[0], p1[1]) if export_text_csv else (None, None, None)
                     if export_text_csv and prof_p[0] is not None:
@@ -1304,7 +1308,9 @@ class CalibrationMixin:
                         self._draw_roll_line_profile()
                     if export_profiles_png:
                         roll_profile_png_path = os.path.join(export_dir, f"{export_name}_roll_profile.png")
-                        self.profile_fig.savefig(roll_profile_png_path, dpi=300, bbox_inches="tight", facecolor="white")
+                        self._save_export_profile_png(
+                            roll_profile_png_path, dpi=300, bbox_inches="tight", facecolor="white"
+                        )
                     r0, r1 = self.roll_line_points
                     prof_r = self._profile_arrays_along_segment_endpoints(r0[0], r0[1], r1[0], r1[1]) if export_text_csv else (None, None, None)
                     if export_text_csv and prof_r[0] is not None:
@@ -1337,13 +1343,16 @@ class CalibrationMixin:
             if json_metadata_path:
                 success_msg += f"- {os.path.basename(json_metadata_path)}\n"
             if export_map_png:
-                success_msg += f"- {os.path.basename(map_png_path)}\n"
+                for bn in self._map_png_export_basenames(map_png_path):
+                    success_msg += f"- {bn}\n"
             if pitch_profile_png_path:
-                success_msg += f"- {os.path.basename(pitch_profile_png_path)}\n"
+                for bn in self._profile_png_export_basenames(pitch_profile_png_path):
+                    success_msg += f"- {bn}\n"
             if pitch_profile_csv_path and os.path.isfile(pitch_profile_csv_path):
                 success_msg += f"- {os.path.basename(pitch_profile_csv_path)}\n"
             if roll_profile_png_path:
-                success_msg += f"- {os.path.basename(roll_profile_png_path)}\n"
+                for bn in self._profile_png_export_basenames(roll_profile_png_path):
+                    success_msg += f"- {bn}\n"
             if roll_profile_csv_path and os.path.isfile(roll_profile_csv_path):
                 success_msg += f"- {os.path.basename(roll_profile_csv_path)}\n"
             success_msg += f"in directory: {export_dir}"

@@ -1611,6 +1611,8 @@ class PlottingMixin:
             self.show_backscatter_var = False
             self.backscatter_box_draw_mode = False
             self.backscatter_box_edit_width_mode = False
+            if hasattr(self, "_stop_backscatter_move_waypoints_mode"):
+                self._stop_backscatter_move_waypoints_mode(redraw=False)
             self.backscatter_box_stage = 0
             self.backscatter_box_centerline = None
             self.backscatter_box_width_point = None

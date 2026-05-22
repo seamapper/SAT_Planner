@@ -26,8 +26,8 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **Real-time Statistics**: Calculate survey distances, times, and comprehensive statistics
 - **Elevation Profiles**: View elevation and slope profiles for drawn lines
 - **Activity Log**: Collapsible side panel below the map (expand/collapse strip)
-- **Export Capabilities**: Export survey plans in CSV, Shapefile, GeoJSON, asciiplan, LNW, PNG, and companion text/statistics formats (varies by tab)
-- **Export Type Control**: Global `Export Type` dialog (next to `About This Program`) to toggle optional export products by format; selections persist between sessions
+- **Export Capabilities**: Export survey plans in CSV, Shapefile, GeoJSON, asciiplan, LNW, PNG (high and/or low resolution), and companion text/statistics formats (varies by tab)
+- **Export Types** dialog (button on import/export panels): Toggle optional export products by format; choices are saved in `~/.cal_ref_planner_config.json` under `export_type_options`
 - **Survey Import**: Import calibration, accuracy, performance, and line plans from DDD, DMS, DMM, LNW, CSV, and GeoJSON (performance import uses an assignment dialog when geometry is ambiguous)
 - **EEZ Overlay**: EEZ layer with opacity control (default 80%) and hover `GEONAME` tooltip lookup
 - **Visualization Shapefile Toggle**: `Add Shapefile` button switches to `Remove Shapefile` after loading, allowing quick removal of visualization overlays
@@ -92,9 +92,11 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Optional **Load Backscatter GeoTIFF** and **Show Backscatter Grid** overlay (resampled to current bathymetry grid/extent)
 - **Show Normalization Areas** overlay based on slope-band filtering with configurable color/opacity
 - Optional filters for depth range, minimum connected area, minimum feature width/height, and percentile clipping
-- **Backscatter Line Planning** supports centerline with lead-in/lead-out and area width planning; map labels include `BS1LI`, `BS1S`, `BS1E`, `BS1LO`
-- **Show Area Stats** and **Survey Info** include line/area metrics and waypoint sections in DMM/DDD
-- Import/export backscatter line products with optional GMRT download after import
+- **Backscatter Line Planning** (group **Line/Area Info**): **Select Area/Line**, **Move Waypoints** (drag centerline endpoints `BS1S`/`BS1E` while preserving area half-width), **Clear Area/Line**, **Edit Area Width**, **Show Area Stats**; **Box Width (m)** field (debounced) syncs with geometry and can set normalization width (`half_width = width / 2`)
+- Centerline with lead-in/lead-out and area width planning; map labels include `BS1LI`, `BS1S`, `BS1E`, `BS1LO`
+- **Show Area Stats** and **Survey Info** / `*_info.txt` include line/area metrics, **Normalization Area Width** (full width = `2 × half_width_m`), and waypoint sections in DMM/DDD
+- Import/export backscatter line products (respects **Export Types** toggles, including map/profile PNG high and low); exports include `{name}_backscatter_stats.png` (+ optional `*_low` copy) when map PNG export is enabled
+- Optional GMRT download after import
 
 ### GeoTIFF Visualization
 - Display elevation data with color mapping
@@ -132,8 +134,8 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - fiona
 
 ### Optional
-- **Pillow (PIL)** – for Imagery Basemap and NOAA ENC Charts overlays
-- **requests** – for GMRT bathymetry download (dialog and on import) – for GMRT bathymetry download when using “Download GMRT” on import
+- **Pillow (PIL)** – Imagery Basemap and NOAA ENC Charts overlays; preferred path for resizing exported `*_low.png` email copies
+- **requests** – GMRT bathymetry download (dialog and optional download on import)
 
 ## Project structure
 
@@ -142,7 +144,7 @@ The application is organized as a package plus a launcher:
 - **`SAT_Planner_PyQt.py`** – Entry point; creates the main window and runs the app (`python SAT_Planner_PyQt.py`).
 - **`sat_planner/`** – Core package:
   - **`constants.py`** – Version, config path, geospatial library availability.
-  - **`export_utils.py`** – Shared export writers: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points (used by Calibration, Accuracy, Performance, Line planning).
+  - **`export_utils.py`** – Shared export writers: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points; PNG helpers (`save_export_png`, `*_low.png` email copies).
   - **`performance_import_dialog.py`** – Assignment dialog for mapping imported segments to Performance swath lines 1–4 and optional BIST 1–4.
   - **`utils_geo.py`** – Coordinate helpers (e.g. decimal degrees to DDM).
   - **`utils_ui.py`** – UI helpers (message boxes, confirmations).
@@ -160,14 +162,14 @@ The application is organized as a package plus a launcher:
     - **ProfilesMixin** – Crossline, pitch, line-planning, and performance elevation profiles (performance: line 1 + BIST colors aligned with map).
     - **MapInteractionMixin** – Click, scroll, pan, zoom, pick center/pitch/roll.
     - **ExportImportMixin** – Save/load parameters, export accuracy survey files, export performance survey files.
-    - **ConfigMixin** – Last-used directories, config load/save.
+    - **ConfigMixin** – Last-used directories, config load/save, persisted **Export Types** options (with migration from legacy `map_png` / `profiles_png` keys).
 
 ## Installation
 
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `SAT_Planner_v2026.14.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
+- `SAT_Planner_v2026.27.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
 - `SAT_Planner.app` (macOS) — if available
 
 No installation required - just run the executable or app bundle.
@@ -235,7 +237,7 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 4. **Configure Parameters**: Set survey parameters in the appropriate tab
 5. **Generate/Plan**: Create survey lines based on parameters or draw interactively
 6. **View Statistics / test info**: Open **Calibration Survey Info**, **Accuracy Survey Info**, **Show Performance Test Info** (Performance tab), or **Survey Info** (Line tab)
-7. **Export**: Save survey plans using the Export buttons
+7. **Export**: Save survey plans using the Export buttons; use **Export Types** first if you want to limit optional formats (shapefile, text, Hypack, GPX, PNG resolutions, etc.)
 
 ### Calibration Survey Planning
 
@@ -285,7 +287,8 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 2. Enable/adjust **Show Normalization Areas** criteria (slope band and optional depth/area/extent filters).
 3. In **Backscatter Line Planning**, define the normalization centerline/area and line settings (lead-in, speed, swath angle, sound velocity).
 4. Use **Show Area Stats** and **Survey Info** to review calculated metrics and waypoints (`BS1LI`, `BS1S`, `BS1E`, `BS1LO`).
-5. Use **Import Backscatter Line** / **Export Backscatter Line** to share geometry, settings, and reports.
+5. Adjust **Box Width (m)** or use **Edit Area Width** / **Move Waypoints** as needed.
+6. Use **Import Backscatter Line** / **Export Backscatter Line** to share geometry, settings, and reports (optional products follow **Export Types**).
 
 ### Download GMRT Grid Dialog
 
@@ -315,22 +318,42 @@ Downloads are always GeoTIFF. The dialog uses its own config: `~/.gmrtgrab_sat_p
 ## Configuration
 
 The application saves configuration in:
-- `~/.cal_ref_planner_config.json` (user preferences)
-- Last used directories
-- Survey parameters
+- `~/.cal_ref_planner_config.json` (user preferences), including:
+  - Last used directories
+  - **`export_type_options`**: per-format export toggles (`esri_shapefile`, `sis_asciiplan`, `gpx`, `text_csv`, `text_txt`, `hypack_lnw`, `map_png_high`, `map_png_low`, `profiles_png_high`, `profiles_png_low`; all default **on**)
+  - Other saved UI/planning preferences as applicable
 
 ## Export Formats
 
-- **CSV (DDD/DMM/DMS)**: Survey lines with coordinates and metadata (row format: line number, line name, point label, lat, lon)
-- **TXT (DDD/DMM/DMS)**: Same coordinate formats as plain text
-- **SIS asciiplan**: ASCII plan format for SIS
-- **Hypack LNW**: LNW format for Hypack (UTM zone computed from survey points when needed)
-- **Shapefile**: Geospatial vector format for GIS applications
-- **Statistics / *_info.txt**: Text reports with distances, timing, survey details, and waypoint sections (DMM then DDD) for Calibration, Accuracy, and Line plans. Performance exports include `*_info.txt` with the same content as **Show Performance Test Info** plus **Performance Survey** and **Export Date** headers, and write **`{name}_performance_params.json`** (separate from Accuracy `{name}_params.json`).
-- **Calibration `{name}_params.json`**: Sidecar to the calibration GeoJSON export—**`survey_speed`**, **`turn_time`**, **`lead_in_m`**, **`line_offset`** (heading line offset), and **`export_name`**. Edit this file to tune those values and re-import the `.geojson` without regenerating geometry.
-- **Backscatter exports**: same shared text/csv products where enabled, plus backscatter-specific outputs including `{name}_area.geojson` (normalization polygon when defined), `{name}_backscatter_stats.png`, and `{name}_params.json` (centerline/width, lead-in, line settings, and overlay/filter settings).
-- **Global Export Type gating**: Optional products can be toggled by format (`ESRI Shapefile`, `SIS ASCIIplan`, `GPX`, `Text (.csv)`, `Text (.txt)`, `Hypack (.lnw)`, `Map (.png)`, `Profiles (.png)`) for Accuracy, Calibration, Performance, and Line exports.
-- **Always exported** (regardless of Export Type toggles): `.geojson`, `*_params.json` sidecars, and `*_info.txt` reports.
+### Always exported
+Regardless of **Export Types** settings (Accuracy, Calibration, Performance, Line, and Backscatter):
+- **GeoJSON** (and backscatter `{name}_area.geojson` when a normalization polygon exists)
+- **`{name}_params.json`** sidecars (tab-specific fields; Performance uses `{name}_performance_params.json`)
+- **`*_info.txt`** statistics / survey-info reports
+
+### Optional (controlled by Export Types)
+Open **Export Types** on the tab’s import/export panel to enable or disable:
+
+| Toggle | Product |
+|--------|---------|
+| ESRI Shapefile | `.shp` (+ sidecars) |
+| SIS ASCIIplan | asciiplan file |
+| GPX | `.gpx` (and per-test GPX where applicable) |
+| Text (.csv) | DDD, DMM, DMS CSV |
+| Text (.txt) | DDD, DMM, DMS TXT |
+| Hypack (.lnw) | LNW (UTM zone from survey points) |
+| Map PNG — high resolution | `{name}_map.png` at 300 dpi |
+| Map PNG — low resolution (email) | `{name}_map_low.png` (longest side ≤ 1280 px; uses Pillow when available) |
+| Profiles PNG — high resolution | Profile PNG(s) at 300 dpi (naming varies by tab, e.g. `{name}_profile.png`, `{name}_profiles.png`, `{name}_pitch_profile.png`, crossline/main-line profiles on Accuracy) |
+| Profiles PNG — low resolution (email) | Matching `*_low.png` copies |
+
+Backscatter **map** PNG toggles also control `{name}_backscatter_stats.png` (+ optional `*_backscatter_stats_low.png`). Legacy configs that only stored `map_png` / `profiles_png` are migrated to set both high and low to the former value.
+
+### Other export notes
+- **CSV (DDD/DMM/DMS)**: Row format: line number, line name, point label, lat, lon (decimal degrees in file; DMM/DMS writers convert as needed)
+- **Calibration `{name}_params.json`**: **`survey_speed`**, **`turn_time`**, **`lead_in_m`**, **`line_offset`**, **`export_name`** — edit and re-import `.geojson` without changing geometry
+- **Accuracy `{name}_params.json`**: Includes **`geotiff_path`** and survey parameters
+- **Backscatter `{name}_params.json`**: Centerline, half-width, lead-in, line settings, filter/overlay settings, and related paths
 
 ## Navigation
 
@@ -373,7 +396,8 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
-- **v2026.23**: Added persistent **Export Type** controls and applied format gating across Accuracy, Calibration, Performance, and Line exports. `Add Shapefile` now toggles to `Remove Shapefile` after load. Accuracy `*_info.txt` now reuses Accuracy Survey Info content (with export-specific degree-symbol cleanup). Performance tab UI updates: new **Performance Plot Control** groupbox, consolidated **Total Test Time** display (`min` + `hr`), and consolidated **Line Length** display (`m`, `km`, `nm`). Line export now writes `*_params.json` (line survey speed, GeoTIFF path, visualization shapefile paths).
+- **v2026.27**: **Export Types** PNG options split into map/profile **high** and **low (email)** toggles (all default on). Exported PNGs write `*_low.png` companions (1280 px max dimension; Pillow preferred). **Calibration lead-in (m)** end-to-end (UI, map dashed segments, waypoints, timing, `{name}_params.json`, import/export). **Backscatter** UI: **Move Waypoints**, **Box Width (m)**, **Line/Area Info** layout, normalization area width in Survey Info / `*_info.txt`; backscatter export respects Export Types.
+- **v2026.23**: Added persistent **Export Types** controls and applied format gating across Accuracy, Calibration, Performance, and Line exports. `Add Shapefile` now toggles to `Remove Shapefile` after load. Accuracy `*_info.txt` now reuses Accuracy Survey Info content (with export-specific degree-symbol cleanup). Performance tab UI updates: new **Performance Plot Control** groupbox, consolidated **Total Test Time** display (`min` + `hr`), and consolidated **Line Length** display (`m`, `km`, `nm`). Line export now writes `*_params.json` (line survey speed, GeoTIFF path, visualization shapefile paths).
 - **v2026.22**: Accuracy Survey Info now shows **Survey Plan** and **Export Date** at the top and reports crossline full-profile extrema (minimum/maximum depth and slope). Accuracy export/import stores GeoTIFF path in **`{name}_params.json`** (not Accuracy GeoJSON) and restores it from sidecar metadata on import (with GeoJSON fallback for older files). Performance export default basename now uses **swell direction** (`Performance_<swell_direction>deg_<speed>_kts`). Performance `*_info.txt` now mirrors **Show Performance Test Info** content and includes **Performance Survey** + **Export Date** headers.
 - **v2026.20**: README: document **calibration** export/import split—**`{name}_params.json`** holds survey speed, turn time, heading line offset, and export name; **calibration GeoJSON** is geometry plus line labels (and optional **`geotiff_path`** on the FeatureCollection). Clarified GeoJSON metadata behavior for Accuracy, Line, and Performance.
 - **v2026.15**: **Performance (swath) survey planning** tab: four headings relative to swell, swath lines plus optional **RX noise BIST** extensions; **Plot Performance Lines**, zoom/remove, **Show Performance Test Info**; debounced **auto-plot** after parameter edits and after performance pick-center; profile for **line 1 + BIST** with map-matched colors; **Performance Import/Export** (same export family as Accuracy, assignment dialog on ambiguous import, optional GMRT on import); default swell direction **0°**; accuracy vs performance **central point** markers fixed so accuracy center shows only when an accuracy plan is present; UI labels (**Plot Performance Lines**, button layout). Added `performance_import_dialog.py` and **PerformanceMixin**; README updated for Performance workflow.

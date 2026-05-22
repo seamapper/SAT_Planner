@@ -271,3 +271,125 @@ def write_lnw(path, lines, *, encoding='utf-8'):
     except OSError:
         return False
     return True
+
+
+EMAIL_LOW_PNG_MAX_DIMENSION_PX = 1280
+
+
+def low_resolution_png_path(path):
+    """Return path for email-friendly copy with ``_low`` before the extension."""
+    root, ext = os.path.splitext(path)
+    if not ext:
+        ext = ".png"
+    if root.endswith("_low"):
+        return path
+    return f"{root}_low{ext}"
+
+
+def _write_low_resolution_png_from_file(path, *, low_max_dimension_px=EMAIL_LOW_PNG_MAX_DIMENSION_PX):
+    """Resize an existing PNG to ``*_low.png``; returns low path or None on failure."""
+    low_path = low_resolution_png_path(path)
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        with Image.open(path) as im:
+            im = im.convert("RGB")
+            w, h = im.size
+            longest = max(w, h)
+            if longest > low_max_dimension_px:
+                scale = low_max_dimension_px / float(longest)
+                new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+                im = im.resize(new_size, Image.Resampling.LANCZOS)
+            im.save(low_path, format="PNG", optimize=True)
+        return low_path
+    except Exception:
+        return None
+
+
+def _figure_save_kwargs(*, dpi=300, bbox_inches="tight", facecolor="white"):
+    save_kwargs = {"dpi": dpi}
+    if bbox_inches is not None:
+        save_kwargs["bbox_inches"] = bbox_inches
+    if facecolor is not None:
+        save_kwargs["facecolor"] = facecolor
+    return save_kwargs
+
+
+def save_export_png(
+    fig,
+    path,
+    *,
+    save_high=True,
+    save_low=True,
+    dpi=300,
+    bbox_inches="tight",
+    facecolor="white",
+    low_max_dimension_px=EMAIL_LOW_PNG_MAX_DIMENSION_PX,
+    low_dpi=96,
+):
+    """Save figure PNG(s) per high/low toggles. Returns ``(high_path_or_none, low_path_or_none)``."""
+    if not save_high and not save_low:
+        return None, None
+    save_kwargs = _figure_save_kwargs(dpi=dpi, bbox_inches=bbox_inches, facecolor=facecolor)
+    high_path = path if save_high else None
+    low_path = low_resolution_png_path(path) if save_low else None
+    if save_high:
+        fig.savefig(path, **save_kwargs)
+    if save_low:
+        if save_high and os.path.isfile(path):
+            written = _write_low_resolution_png_from_file(path, low_max_dimension_px=low_max_dimension_px)
+            if written is None:
+                low_kwargs = dict(save_kwargs)
+                low_kwargs["dpi"] = low_dpi
+                fig.savefig(low_path, **low_kwargs)
+        else:
+            low_kwargs = dict(save_kwargs)
+            low_kwargs["dpi"] = low_dpi
+            fig.savefig(low_path, **low_kwargs)
+    return high_path, low_path
+
+
+def save_figure_png_with_low_res(
+    fig,
+    path,
+    *,
+    dpi=300,
+    bbox_inches="tight",
+    facecolor="white",
+    low_max_dimension_px=EMAIL_LOW_PNG_MAX_DIMENSION_PX,
+    low_dpi=96,
+):
+    """Save figure at full resolution and create an email-friendly ``*_low.png`` copy."""
+    _, low_path = save_export_png(
+        fig,
+        path,
+        save_high=True,
+        save_low=True,
+        dpi=dpi,
+        bbox_inches=bbox_inches,
+        facecolor=facecolor,
+        low_max_dimension_px=low_max_dimension_px,
+        low_dpi=low_dpi,
+    )
+    return low_path
+
+
+def save_existing_png_with_low_res(path, *, low_max_dimension_px=EMAIL_LOW_PNG_MAX_DIMENSION_PX):
+    """Create ``*_low.png`` from an existing PNG (e.g. after a custom savefig)."""
+    return _write_low_resolution_png_from_file(path, low_max_dimension_px=low_max_dimension_px)
+
+
+def png_export_basenames(path, *, include_high=True, include_low=True):
+    """Basenames for exported PNGs when the files exist."""
+    names = []
+    if not path:
+        return names
+    if include_high and os.path.isfile(path):
+        names.append(os.path.basename(path))
+    if include_low:
+        low_path = low_resolution_png_path(path)
+        if os.path.isfile(low_path):
+            names.append(os.path.basename(low_path))
+    return names

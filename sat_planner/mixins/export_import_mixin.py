@@ -31,7 +31,53 @@ class ExportImportMixin:
         options = getattr(self, "export_type_options", {}) or {}
         if key in options:
             return bool(options[key])
+        legacy_png = {
+            "map_png_high": "map_png",
+            "map_png_low": "map_png",
+            "profiles_png_high": "profiles_png",
+            "profiles_png_low": "profiles_png",
+        }
+        if key in legacy_png and legacy_png[key] in options:
+            return bool(options[legacy_png[key]])
         return bool(defaults.get(key, True))
+
+    def _export_map_png_enabled(self):
+        return self._export_type_enabled("map_png_high") or self._export_type_enabled("map_png_low")
+
+    def _export_profiles_png_enabled(self):
+        return self._export_type_enabled("profiles_png_high") or self._export_type_enabled("profiles_png_low")
+
+    def _save_export_map_png(self, path, **kwargs):
+        return export_utils.save_export_png(
+            self.figure,
+            path,
+            save_high=self._export_type_enabled("map_png_high"),
+            save_low=self._export_type_enabled("map_png_low"),
+            **kwargs,
+        )
+
+    def _save_export_profile_png(self, path, **kwargs):
+        return export_utils.save_export_png(
+            self.profile_fig,
+            path,
+            save_high=self._export_type_enabled("profiles_png_high"),
+            save_low=self._export_type_enabled("profiles_png_low"),
+            **kwargs,
+        )
+
+    def _map_png_export_basenames(self, path):
+        return export_utils.png_export_basenames(
+            path,
+            include_high=self._export_type_enabled("map_png_high"),
+            include_low=self._export_type_enabled("map_png_low"),
+        )
+
+    def _profile_png_export_basenames(self, path):
+        return export_utils.png_export_basenames(
+            path,
+            include_high=self._export_type_enabled("profiles_png_high"),
+            include_low=self._export_type_enabled("profiles_png_low"),
+        )
 
     def _save_survey_parameters(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -233,8 +279,8 @@ class ExportImportMixin:
             export_text_csv = self._export_type_enabled("text_csv")
             export_text_txt = self._export_type_enabled("text_txt")
             export_hypack = self._export_type_enabled("hypack_lnw")
-            export_map_png = self._export_type_enabled("map_png")
-            export_profiles_png = self._export_type_enabled("profiles_png")
+            export_map_png = self._export_map_png_enabled()
+            export_profiles_png = self._export_profiles_png_enabled()
             if export_shapefile and mapping is None:
                 raise ImportError("shapely.geometry.mapping is required for shapefile export")
 
@@ -430,7 +476,9 @@ class ExportImportMixin:
             if export_map_png:
                 if hasattr(self, "_hide_map_hover_tooltip_for_export"):
                     self._hide_map_hover_tooltip_for_export()
-                self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+                self._save_export_map_png(
+                    map_png_path, dpi=300, bbox_inches='tight', facecolor='white'
+                )
             
             # --- Export Profile Plots as PNG (crossline + each main line) ---
             if export_profiles_png and hasattr(self, 'profile_fig') and self.profile_fig is not None and hasattr(self, "_draw_segment_profile"):
@@ -441,7 +489,9 @@ class ExportImportMixin:
                 if include_crossline and self.cross_line_data and len(self.cross_line_data) == 2:
                     self._draw_segment_profile(self.cross_line_data, "Crossline Elevation Profile", "darkorchid")
                     crossline_profile_png_path = os.path.join(export_dir, f"{export_name}_profile_crossline.png")
-                    self.profile_fig.savefig(crossline_profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+                    self._save_export_profile_png(
+                        crossline_profile_png_path, dpi=300, bbox_inches='tight', facecolor='white'
+                    )
                     profile_png_paths.append(crossline_profile_png_path)
 
                 # Main line profiles
@@ -454,7 +504,9 @@ class ExportImportMixin:
                         export_dir,
                         f"{export_name}_profile_main_line_{line_num:02d}.png"
                     )
-                    self.profile_fig.savefig(line_profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+                    self._save_export_profile_png(
+                        line_profile_png_path, dpi=300, bbox_inches='tight', facecolor='white'
+                    )
                     profile_png_paths.append(line_profile_png_path)
 
                 # Restore previously selected profile for user continuity
@@ -609,7 +661,8 @@ class ExportImportMixin:
                 success_files.append(f"- {os.path.basename(sis_file_path)}")
             success_files.append(f"- {os.path.basename(stats_file_path)}")
             if export_map_png:
-                success_files.append(f"- {os.path.basename(map_png_path)}")
+                for bn in self._map_png_export_basenames(map_png_path):
+                    success_files.append(f"- {bn}")
             
             # Add metadata JSON if it was created
             try:
@@ -620,7 +673,8 @@ class ExportImportMixin:
             
             # Add profile PNGs if they were created
             for profile_png_path in profile_png_paths:
-                success_files.append(f"- {os.path.basename(profile_png_path)}")
+                for bn in self._profile_png_export_basenames(profile_png_path):
+                    success_files.append(f"- {bn}")
             if profile_csv_path and os.path.isfile(profile_csv_path):
                 success_files.append(f"- {os.path.basename(profile_csv_path)}")
 
@@ -642,8 +696,8 @@ class ExportImportMixin:
         export_text_csv = self._export_type_enabled("text_csv")
         export_text_txt = self._export_type_enabled("text_txt")
         export_hypack = self._export_type_enabled("hypack_lnw")
-        export_map_png = self._export_type_enabled("map_png")
-        export_profiles_png = self._export_type_enabled("profiles_png")
+        export_map_png = self._export_map_png_enabled()
+        export_profiles_png = self._export_profiles_png_enabled()
         if export_shapefile and mapping is None:
             self._show_message("warning", "Export Error", "Shapely is required for shapefile export.")
             return
@@ -912,11 +966,15 @@ class ExportImportMixin:
             if export_map_png:
                 if hasattr(self, "_hide_map_hover_tooltip_for_export"):
                     self._hide_map_hover_tooltip_for_export()
-                self.figure.savefig(map_png_path, dpi=300, bbox_inches="tight", facecolor="white")
+                self._save_export_map_png(
+                    map_png_path, dpi=300, bbox_inches="tight", facecolor="white"
+                )
 
             profile_png_path = os.path.join(export_dir, f"{export_name}_profile.png")
             if export_profiles_png and hasattr(self, "profile_fig") and self.profile_fig is not None:
-                self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches="tight", facecolor="white")
+                self._save_export_profile_png(
+                    profile_png_path, dpi=300, bbox_inches="tight", facecolor="white"
+                )
 
             msg_lines = [f"- {os.path.basename(geojson_file_path)}"]
             if export_text_csv:
@@ -947,10 +1005,12 @@ class ExportImportMixin:
                 msg_lines.append(f"- {os.path.basename(sis_file_path)}")
             msg_lines.append(f"- {os.path.basename(stats_file_path)}")
             if export_map_png:
-                msg_lines.append(f"- {os.path.basename(map_png_path)}")
+                for bn in self._map_png_export_basenames(map_png_path):
+                    msg_lines.append(f"- {bn}")
             msg_lines.append(f"- {os.path.basename(json_metadata_path)}")
             if export_profiles_png and hasattr(self, "profile_fig") and self.profile_fig is not None:
-                msg_lines.append(f"- {os.path.basename(profile_png_path)}")
+                for bn in self._profile_png_export_basenames(profile_png_path):
+                    msg_lines.append(f"- {bn}")
             log_msg = "Performance survey exported successfully to:\n" + "\n".join(msg_lines) + f"\nin directory: {export_dir}"
             if hasattr(self, "set_performance_activity_text"):
                 self.set_performance_activity_text(log_msg, append=False)

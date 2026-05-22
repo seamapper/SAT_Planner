@@ -245,12 +245,26 @@ class GeoTIFFMixin:
                 if ping_time_seconds > 0.0:
                     centerline_ping_count = centerline_time_seconds / ping_time_seconds
 
+            area_half_width_m = None
+            area_width_m = None
+            try:
+                half_w = getattr(self, "backscatter_box_half_width_m", None)
+                if half_w is not None:
+                    area_half_width_m = float(half_w)
+                    if area_half_width_m > 0:
+                        area_width_m = 2.0 * area_half_width_m
+            except (TypeError, ValueError):
+                area_half_width_m = None
+                area_width_m = None
+
             return {
                 "total_distance_m": float(total_distance),
                 "total_distance_km": float(total_distance / 1000.0),
                 "total_distance_nm": float(total_distance / 1852.0),
                 "heading": float(fwd_az % 360.0),
                 "reciprocal_heading": float(back_az % 360.0),
+                "area_half_width_m": area_half_width_m,
+                "area_width_m": area_width_m,
                 "lead_in_m": float(lead_in_m),
                 "lead_out_m": float(lead_out_m),
                 "speed_knots": float(speed_knots),
@@ -279,6 +293,12 @@ class GeoTIFFMixin:
             f"({stats['total_distance_km']:.3f} km, {stats['total_distance_nm']:.3f} nm)\n"
         )
         stats_text += f"Heading: {stats['heading']:.1f}° (Reciprocal {stats['reciprocal_heading']:.1f}°)\n"
+        if stats.get("area_width_m") is not None:
+            aw = float(stats["area_width_m"])
+            stats_text += (
+                f"Normalization Area Width: {aw:.1f} m "
+                f"({aw / 1000.0:.3f} km, {aw / 1852.0:.3f} nm)\n"
+            )
         stats_text += (
             f"Lead-in/out Length: {stats['lead_in_m']:.1f} m / {stats['lead_out_m']:.1f} m "
             f"({stats['lead_in_m']/1852.0:.3f} / {stats['lead_out_m']/1852.0:.3f} nm)\n"
@@ -687,6 +707,8 @@ class GeoTIFFMixin:
             if hasattr(self, "_draw_current_profile"):
                 self._draw_current_profile()
             self._update_backscatter_export_name_default()
+            self._sync_backscatter_box_width_entry()
+            self._update_backscatter_area_button_states()
             if getattr(self, "backscatter_download_gmrt_checkbox", None) and self.backscatter_download_gmrt_checkbox.isChecked():
                 self._download_and_load_gmrt_after_backscatter_import()
         except Exception as e:
@@ -729,8 +751,8 @@ class GeoTIFFMixin:
             export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
             export_text_txt = self._export_type_enabled("text_txt") if hasattr(self, "_export_type_enabled") else True
             export_hypack = self._export_type_enabled("hypack_lnw") if hasattr(self, "_export_type_enabled") else True
-            export_map_png = self._export_type_enabled("map_png") if hasattr(self, "_export_type_enabled") else True
-            export_profiles_png = self._export_type_enabled("profiles_png") if hasattr(self, "_export_type_enabled") else True
+            export_map_png = self._export_map_png_enabled() if hasattr(self, "_export_map_png_enabled") else True
+            export_profiles_png = self._export_profiles_png_enabled() if hasattr(self, "_export_profiles_png_enabled") else True
 
             csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
             ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
@@ -833,17 +855,36 @@ class GeoTIFFMixin:
 
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
             if export_map_png and hasattr(self, "figure"):
-                self.figure.savefig(map_png_path, dpi=300)
+                self._save_export_map_png(
+                    map_png_path, dpi=300, bbox_inches=None, facecolor=None
+                )
             profile_png_path = os.path.join(export_dir, f"{export_name}_profiles.png")
             if export_profiles_png and hasattr(self, "profile_fig"):
-                self.profile_fig.savefig(profile_png_path, dpi=300)
+                self._save_export_profile_png(
+                    profile_png_path, dpi=300, bbox_inches=None, facecolor=None
+                )
 
             if getattr(self, "backscatter_box_stats", None) is None:
                 self.backscatter_box_stats = self._compute_backscatter_box_stats()
             self._show_backscatter_stats_dialog()
             stats_png_path = os.path.join(export_dir, f"{export_name}_backscatter_stats.png")
-            if hasattr(self, "backscatter_stats_canvas") and self.backscatter_stats_canvas is not None:
-                self._save_backscatter_stats_png_without_hover(stats_png_path, dpi=300)
+            if export_map_png and hasattr(self, "backscatter_stats_canvas") and self.backscatter_stats_canvas is not None:
+                save_stats_high = (
+                    self._export_type_enabled("map_png_high")
+                    if hasattr(self, "_export_type_enabled")
+                    else True
+                )
+                save_stats_low = (
+                    self._export_type_enabled("map_png_low")
+                    if hasattr(self, "_export_type_enabled")
+                    else True
+                )
+                self._save_backscatter_stats_png_without_hover(
+                    stats_png_path,
+                    dpi=300,
+                    save_high=save_stats_high,
+                    save_low=save_stats_low,
+                )
 
             params_json_path = os.path.join(export_dir, f"{export_name}_params.json")
             payload = {
@@ -2248,6 +2289,24 @@ class GeoTIFFMixin:
         except Exception:
             pass
 
+    def _sync_backscatter_box_width_entry(self):
+        """Update Box Width (m) field from saved area half-width without triggering apply."""
+        if not hasattr(self, "backscatter_box_width_entry"):
+            return
+        self._backscatter_syncing_box_width_entry = True
+        try:
+            half_w = getattr(self, "backscatter_box_half_width_m", None)
+            if half_w is not None:
+                half_w = float(half_w)
+                if half_w > 0.0:
+                    self.backscatter_box_width_entry.setText(f"{2.0 * half_w:g}")
+                    return
+            self.backscatter_box_width_entry.clear()
+        except (TypeError, ValueError):
+            self.backscatter_box_width_entry.clear()
+        finally:
+            self._backscatter_syncing_box_width_entry = False
+
     def _on_backscatter_line_info_text_changed(self, *_args):
         """Debounce line-info typing, then apply and redraw centerline if needed."""
         if not hasattr(self, "_backscatter_line_info_debounce_timer"):
@@ -2295,13 +2354,29 @@ class GeoTIFFMixin:
                         self.backscatter_sv_mps = sv_mps
                 except ValueError:
                     pass
+        if hasattr(self, "backscatter_box_width_entry") and not getattr(
+            self, "_backscatter_syncing_box_width_entry", False
+        ):
+            raw_width = self.backscatter_box_width_entry.text().strip()
+            if raw_width:
+                try:
+                    box_width_m = float(raw_width)
+                    if box_width_m > 0.0:
+                        self.backscatter_box_half_width_m = box_width_m / 2.0
+                except ValueError:
+                    pass
         centerline = getattr(self, "backscatter_box_centerline", None)
         if not centerline or centerline[0] is None or centerline[1] is None:
             return
         try:
             xlim = self.ax.get_xlim()
             ylim = self.ax.get_ylim()
-            self._plot_survey_plan(preserve_view_limits=True)
+            if self._backscatter_has_complete_area():
+                self._refresh_backscatter_geometry_from_centerline()
+                if getattr(self, "backscatter_box_move_waypoints_mode", False):
+                    self._create_backscatter_move_waypoint_handles()
+            else:
+                self._plot_survey_plan(preserve_view_limits=True)
             if xlim and ylim:
                 self.ax.set_xlim(xlim)
                 self.ax.set_ylim(ylim)
@@ -2310,8 +2385,6 @@ class GeoTIFFMixin:
             pass
         if hasattr(self, "_draw_current_profile"):
             self._draw_current_profile()
-        if hasattr(self, "_update_backscatter_export_name_default"):
-            self._update_backscatter_export_name_default()
         if hasattr(self, "_update_backscatter_export_name_default"):
             self._update_backscatter_export_name_default()
 
@@ -2650,10 +2723,248 @@ class GeoTIFFMixin:
         except Exception:
             pass
 
+    def _backscatter_has_complete_area(self):
+        """True when centerline and area half-width are defined."""
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        if not centerline or len(centerline) != 2 or centerline[0] is None or centerline[1] is None:
+            return False
+        try:
+            half_w = float(getattr(self, "backscatter_box_half_width_m", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return False
+        return half_w > 0.0
+
+    def _update_backscatter_area_button_states(self):
+        """Enable area edit buttons when a saved backscatter area exists."""
+        ready = self._backscatter_has_complete_area()
+        if hasattr(self, "backscatter_move_waypoints_btn"):
+            self.backscatter_move_waypoints_btn.setEnabled(ready)
+        if hasattr(self, "backscatter_edit_width_btn"):
+            has_centerline = bool(
+                getattr(self, "backscatter_box_centerline", None)
+                and len(getattr(self, "backscatter_box_centerline", []) or []) == 2
+                and self.backscatter_box_centerline[0] is not None
+                and self.backscatter_box_centerline[1] is not None
+            )
+            self.backscatter_edit_width_btn.setEnabled(has_centerline)
+
+    def _stop_backscatter_move_waypoints_mode(self, *, redraw=True):
+        """Exit move-waypoints mode and remove drag handles."""
+        self.backscatter_box_move_waypoints_mode = False
+        self.dragging_backscatter_move_handle = None
+        if hasattr(self, "backscatter_move_pick_cid") and self.backscatter_move_pick_cid is not None:
+            try:
+                self.canvas.mpl_disconnect(self.backscatter_move_pick_cid)
+            except Exception:
+                pass
+            self.backscatter_move_pick_cid = None
+        if hasattr(self, "backscatter_move_motion_cid") and self.backscatter_move_motion_cid is not None:
+            try:
+                self.canvas.mpl_disconnect(self.backscatter_move_motion_cid)
+            except Exception:
+                pass
+            self.backscatter_move_motion_cid = None
+        if hasattr(self, "backscatter_move_release_cid") and self.backscatter_move_release_cid is not None:
+            try:
+                self.canvas.mpl_disconnect(self.backscatter_move_release_cid)
+            except Exception:
+                pass
+            self.backscatter_move_release_cid = None
+        for attr in ("backscatter_move_start_handle", "backscatter_move_end_handle"):
+            handle = getattr(self, attr, None)
+            if handle is not None:
+                try:
+                    handle.remove()
+                except Exception:
+                    pass
+                setattr(self, attr, None)
+        if hasattr(self, "backscatter_move_edit_line") and self.backscatter_move_edit_line is not None:
+            try:
+                self.backscatter_move_edit_line.remove()
+            except Exception:
+                pass
+            self.backscatter_move_edit_line = None
+        if hasattr(self, "backscatter_move_waypoints_btn"):
+            self.backscatter_move_waypoints_btn.blockSignals(True)
+            self.backscatter_move_waypoints_btn.setChecked(False)
+            self.backscatter_move_waypoints_btn.setText("Move Waypoints")
+            self.backscatter_move_waypoints_btn.setStyleSheet("")
+            self.backscatter_move_waypoints_btn.blockSignals(False)
+        if redraw:
+            try:
+                self._plot_survey_plan(preserve_view_limits=True)
+            except Exception:
+                self.canvas.draw_idle()
+            if hasattr(self, "_draw_current_profile"):
+                self._draw_current_profile()
+
+    def _refresh_backscatter_geometry_from_centerline(self):
+        """Rebuild area polygon from centerline using saved half-width; replot lead-in/out line."""
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        if not self._backscatter_has_complete_area():
+            return
+        (a_lat, a_lon), (b_lat, b_lon) = centerline
+        half_width_m = float(self.backscatter_box_half_width_m)
+        vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, b_lat, b_lon, half_width_m)
+        if not vertices or len(vertices) != 4:
+            return
+        self.backscatter_box_vertices = vertices
+        self.backscatter_box_stats = self._compute_backscatter_box_stats()
+        self._plot_survey_plan(preserve_view_limits=True)
+        if hasattr(self, "_draw_current_profile"):
+            self._draw_current_profile()
+        if hasattr(self, "_update_backscatter_export_name_default"):
+            self._update_backscatter_export_name_default()
+        self._sync_backscatter_box_width_entry()
+        self._update_backscatter_area_button_states()
+
+    def _create_backscatter_move_waypoint_handles(self):
+        """Place draggable handles on centerline start/end (BS1S / BS1E)."""
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        if not centerline or len(centerline) != 2 or centerline[0] is None or centerline[1] is None:
+            return
+        (start_lat, start_lon), (end_lat, end_lon) = centerline
+        self.backscatter_move_start_handle = self.ax.scatter(
+            [start_lon], [start_lat],
+            color="cyan", s=100, marker="o",
+            edgecolors="black", linewidth=2,
+            zorder=45, picker=5,
+        )
+        self.backscatter_move_end_handle = self.ax.scatter(
+            [end_lon], [end_lat],
+            color="deepskyblue", s=100, marker="o",
+            edgecolors="black", linewidth=2,
+            zorder=45, picker=5,
+        )
+        self.canvas.draw_idle()
+
+    def _on_backscatter_move_waypoints_toggled(self, checked):
+        """Enable dragging centerline endpoints; preserve area width on release."""
+        if checked:
+            if not self._backscatter_has_complete_area():
+                self.backscatter_box_move_waypoints_mode = False
+                if hasattr(self, "backscatter_move_waypoints_btn"):
+                    self.backscatter_move_waypoints_btn.blockSignals(True)
+                    self.backscatter_move_waypoints_btn.setChecked(False)
+                    self.backscatter_move_waypoints_btn.blockSignals(False)
+                self._show_message(
+                    "info",
+                    "Move Waypoints",
+                    "Select an area/line with width first, then move centerline endpoints.",
+                )
+                return
+            self.backscatter_box_move_waypoints_mode = True
+            self.backscatter_box_draw_mode = False
+            self.backscatter_box_edit_width_mode = False
+            self.backscatter_box_stage = 0
+            if hasattr(self, "backscatter_draw_box_btn"):
+                self.backscatter_draw_box_btn.blockSignals(True)
+                self.backscatter_draw_box_btn.setChecked(False)
+                self.backscatter_draw_box_btn.blockSignals(False)
+            if hasattr(self, "backscatter_edit_width_btn"):
+                self.backscatter_edit_width_btn.blockSignals(True)
+                self.backscatter_edit_width_btn.setChecked(False)
+                self.backscatter_edit_width_btn.blockSignals(False)
+            if hasattr(self, "_clear_backscatter_draw_tooltip"):
+                self._clear_backscatter_draw_tooltip()
+            if hasattr(self, "backscatter_move_waypoints_btn"):
+                self.backscatter_move_waypoints_btn.setText("Click to Stop Moving Waypoints")
+                self.backscatter_move_waypoints_btn.setStyleSheet(
+                    "QPushButton { color: rgb(255, 165, 0); font-weight: bold; }"
+                )
+            self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+            self._plot_survey_plan(preserve_view_limits=True)
+            self._create_backscatter_move_waypoint_handles()
+            self.backscatter_move_pick_cid = self.canvas.mpl_connect(
+                "pick_event", self._on_backscatter_move_handle_pick
+            )
+            self.backscatter_move_motion_cid = self.canvas.mpl_connect(
+                "motion_notify_event", self._on_backscatter_move_handle_motion
+            )
+            self.backscatter_move_release_cid = self.canvas.mpl_connect(
+                "button_release_event", self._on_backscatter_move_handle_release
+            )
+        else:
+            self._stop_backscatter_move_waypoints_mode(redraw=True)
+
+    def _on_backscatter_move_handle_pick(self, event):
+        if not getattr(self, "backscatter_box_move_waypoints_mode", False):
+            return
+        if event.mouseevent.button != 1:
+            return
+        if event.artist == getattr(self, "backscatter_move_start_handle", None):
+            self.dragging_backscatter_move_handle = "start"
+        elif event.artist == getattr(self, "backscatter_move_end_handle", None):
+            self.dragging_backscatter_move_handle = "end"
+
+    def _on_backscatter_move_handle_motion(self, event):
+        if not getattr(self, "backscatter_box_move_waypoints_mode", False):
+            return
+        if not getattr(self, "dragging_backscatter_move_handle", None):
+            return
+        if event.inaxes != self.ax or event.xdata is None or event.ydata is None:
+            return
+        centerline = list(getattr(self, "backscatter_box_centerline", None) or [])
+        if len(centerline) != 2:
+            return
+        if self.dragging_backscatter_move_handle == "start":
+            centerline[0] = (event.ydata, event.xdata)
+            if getattr(self, "backscatter_move_start_handle", None) is not None:
+                self.backscatter_move_start_handle.set_offsets([[event.xdata, event.ydata]])
+        elif self.dragging_backscatter_move_handle == "end":
+            centerline[1] = (event.ydata, event.xdata)
+            if getattr(self, "backscatter_move_end_handle", None) is not None:
+                self.backscatter_move_end_handle.set_offsets([[event.xdata, event.ydata]])
+        self.backscatter_box_centerline = (centerline[0], centerline[1])
+        (a_lat, a_lon), (b_lat, b_lon) = self.backscatter_box_centerline
+        if hasattr(self, "backscatter_move_edit_line") and self.backscatter_move_edit_line is not None:
+            self.backscatter_move_edit_line.set_data([a_lon, b_lon], [a_lat, b_lat])
+        else:
+            self.backscatter_move_edit_line, = self.ax.plot(
+                [a_lon, b_lon], [a_lat, b_lat],
+                color="orange", linewidth=2, linestyle="-", zorder=44,
+            )
+        half_width_m = float(getattr(self, "backscatter_box_half_width_m", 0.0) or 0.0)
+        if half_width_m > 0 and hasattr(self, "_backscatter_oriented_box_vertices"):
+            vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, b_lat, b_lon, half_width_m)
+            if vertices and hasattr(self, "_update_backscatter_box_patch"):
+                self._update_backscatter_box_patch(vertices)
+        self.canvas.draw_idle()
+
+    def _on_backscatter_move_handle_release(self, event):
+        if not getattr(self, "backscatter_box_move_waypoints_mode", False):
+            return
+        if not getattr(self, "dragging_backscatter_move_handle", None):
+            return
+        self.dragging_backscatter_move_handle = None
+        if hasattr(self, "backscatter_move_edit_line") and self.backscatter_move_edit_line is not None:
+            try:
+                self.backscatter_move_edit_line.remove()
+            except Exception:
+                pass
+            self.backscatter_move_edit_line = None
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        if centerline and len(centerline) == 2 and centerline[0] and centerline[1]:
+            (a_lat, a_lon), (b_lat, b_lon) = centerline
+            axis_len_m = self._approx_map_distance_m(a_lat, a_lon, b_lat, b_lon)
+            if not np.isfinite(axis_len_m) or axis_len_m <= 0.05:
+                self._show_message(
+                    "warning",
+                    "Move Waypoints",
+                    "Centerline length is too small. Move endpoints farther apart.",
+                )
+                self._refresh_backscatter_geometry_from_centerline()
+            else:
+                self._refresh_backscatter_geometry_from_centerline()
+        if getattr(self, "backscatter_box_move_waypoints_mode", False):
+            self._create_backscatter_move_waypoint_handles()
+
     def _on_backscatter_draw_box_toggled(self, checked):
         """Enable/disable map box drawing mode for backscatter statistics."""
         self.backscatter_box_draw_mode = bool(checked)
         if self.backscatter_box_draw_mode:
+            if getattr(self, "backscatter_box_move_waypoints_mode", False):
+                self._stop_backscatter_move_waypoints_mode(redraw=False)
             self.backscatter_box_edit_width_mode = False
             if hasattr(self, "backscatter_edit_width_btn"):
                 self.backscatter_edit_width_btn.blockSignals(True)
@@ -2726,6 +3037,8 @@ class GeoTIFFMixin:
         """Enable/disable width edit mode for an existing backscatter area centerline."""
         self.backscatter_box_edit_width_mode = bool(checked)
         if self.backscatter_box_edit_width_mode:
+            if getattr(self, "backscatter_box_move_waypoints_mode", False):
+                self._stop_backscatter_move_waypoints_mode(redraw=False)
             centerline = getattr(self, "backscatter_box_centerline", None)
             if not centerline or centerline[0] is None or centerline[1] is None:
                 self.backscatter_box_edit_width_mode = False
@@ -2825,6 +3138,8 @@ class GeoTIFFMixin:
 
     def _on_backscatter_clear_box_clicked(self):
         """Remove backscatter stats box overlay and clear cached statistics."""
+        if getattr(self, "backscatter_box_move_waypoints_mode", False):
+            self._stop_backscatter_move_waypoints_mode(redraw=False)
         self.backscatter_box_draw_mode = False
         self.backscatter_box_edit_width_mode = False
         self.backscatter_box_stage = 0
@@ -2876,6 +3191,9 @@ class GeoTIFFMixin:
             self.canvas.draw_idle()
         if hasattr(self, "_draw_current_profile"):
             self._draw_current_profile()
+        if hasattr(self, "backscatter_box_width_entry"):
+            self.backscatter_box_width_entry.clear()
+        self._update_backscatter_area_button_states()
 
     def _update_backscatter_box_patch(self, vertices):
         """Create/update temporary cyan oriented rectangle while drawing."""
@@ -2969,6 +3287,8 @@ class GeoTIFFMixin:
             self._draw_current_profile()
         if hasattr(self, "_update_backscatter_export_name_default"):
             self._update_backscatter_export_name_default()
+        self._sync_backscatter_box_width_entry()
+        self._update_backscatter_area_button_states()
         self._show_backscatter_stats_dialog()
 
     def _compute_backscatter_box_stats(self):
@@ -3446,8 +3766,10 @@ class GeoTIFFMixin:
         self.backscatter_stats_dialog.raise_()
         self.backscatter_stats_dialog.activateWindow()
 
-    def _save_backscatter_stats_png_without_hover(self, path, dpi=300):
+    def _save_backscatter_stats_png_without_hover(self, path, dpi=300, *, save_high=True, save_low=True):
         """Write stats figure to PNG without hover readout boxes (matplotlib text artists)."""
+        if not save_high and not save_low:
+            return
         canvas = getattr(self, "backscatter_stats_canvas", None)
         if canvas is None:
             return
@@ -3467,7 +3789,14 @@ class GeoTIFFMixin:
         try:
             fig = canvas.figure
             canvas.draw()
-            fig.savefig(path, dpi=dpi)
+            if save_high:
+                fig.savefig(path, dpi=dpi)
+            if save_low:
+                if save_high and os.path.isfile(path):
+                    export_utils.save_existing_png_with_low_res(path)
+                else:
+                    low_path = export_utils.low_resolution_png_path(path)
+                    fig.savefig(low_path, dpi=96)
         finally:
             for entry in prev_vis:
                 if entry is not None:

@@ -185,6 +185,8 @@ class MapInteractionMixin:
         # Ignore middle button (button 2) - let it be handled by pan handlers
         if event.button == 2:
             return
+        if getattr(self, "backscatter_box_move_waypoints_mode", False):
+            return
         # Backscatter oriented box drawing must win over Line tab handlers when user explicitly enabled draw mode.
         if getattr(self, "backscatter_box_draw_mode", False):
             clicked_lon, clicked_lat = self._main_map_click_lonlat(event)

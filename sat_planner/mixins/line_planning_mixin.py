@@ -415,8 +415,8 @@ class LinePlanningMixin:
             export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
             export_text_txt = self._export_type_enabled("text_txt") if hasattr(self, "_export_type_enabled") else True
             export_hypack = self._export_type_enabled("hypack_lnw") if hasattr(self, "_export_type_enabled") else True
-            export_map_png = self._export_type_enabled("map_png") if hasattr(self, "_export_type_enabled") else True
-            export_profiles_png = self._export_type_enabled("profiles_png") if hasattr(self, "_export_type_enabled") else True
+            export_map_png = self._export_map_png_enabled() if hasattr(self, "_export_map_png_enabled") else True
+            export_profiles_png = self._export_profiles_png_enabled() if hasattr(self, "_export_profiles_png_enabled") else True
 
             # --- Build common rows and write DDD/DMM/DMS CSV and TXT via export_utils ---
             line_planning_rows = [(1, export_name, i + 1, lat, lon) for i, (lat, lon) in enumerate(self.line_planning_points)]
@@ -485,12 +485,16 @@ class LinePlanningMixin:
             if export_map_png:
                 if hasattr(self, "_hide_map_hover_tooltip_for_export"):
                     self._hide_map_hover_tooltip_for_export()
-                self.figure.savefig(map_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+                self._save_export_map_png(
+                    map_png_path, dpi=300, bbox_inches='tight', facecolor='white'
+                )
             profile_png_path = None
             profile_csv_path = None
             if export_profiles_png and hasattr(self, 'profile_fig') and self.profile_fig is not None:
                 profile_png_path = os.path.join(export_dir, f"{export_name}_profile.png")
-                self.profile_fig.savefig(profile_png_path, dpi=300, bbox_inches='tight', facecolor='white')
+                self._save_export_profile_png(
+                    profile_png_path, dpi=300, bbox_inches='tight', facecolor='white'
+                )
             prof_export = self._line_plan_profile_arrays() if export_text_csv else None
             if export_text_csv and prof_export is not None:
                 d_exp, e_exp, s_exp, wp_d_exp = prof_export
@@ -586,9 +590,11 @@ class LinePlanningMixin:
             if gpx_lineplan_written:
                 success_msg += f"- {os.path.basename(gpx_lineplan_path)}\n"
             if export_map_png:
-                success_msg += f"- {os.path.basename(map_png_path)}\n"
+                for bn in self._map_png_export_basenames(map_png_path):
+                    success_msg += f"- {bn}\n"
             if profile_png_path:
-                success_msg += f"- {os.path.basename(profile_png_path)}\n"
+                for bn in self._profile_png_export_basenames(profile_png_path):
+                    success_msg += f"- {bn}\n"
             if profile_csv_path:
                 success_msg += f"- {os.path.basename(profile_csv_path)}\n"
             success_msg += f"- {os.path.basename(stats_file_path)}\n"

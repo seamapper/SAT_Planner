@@ -24,8 +24,10 @@ class ConfigMixin:
             "text_csv": True,
             "text_txt": True,
             "hypack_lnw": True,
-            "map_png": True,
-            "profiles_png": True,
+            "map_png_high": True,
+            "map_png_low": True,
+            "profiles_png_high": True,
+            "profiles_png_low": True,
         }
 
     def _load_last_used_dir(self):
@@ -279,9 +281,20 @@ class ConfigMixin:
                     config = json.load(f)
                 saved = config.get("export_type_options", {})
                 if isinstance(saved, dict):
+                    migrated = dict(saved)
+                    if "map_png" in migrated:
+                        if "map_png_high" not in migrated:
+                            migrated["map_png_high"] = bool(migrated["map_png"])
+                        if "map_png_low" not in migrated:
+                            migrated["map_png_low"] = bool(migrated["map_png"])
+                    if "profiles_png" in migrated:
+                        if "profiles_png_high" not in migrated:
+                            migrated["profiles_png_high"] = bool(migrated["profiles_png"])
+                        if "profiles_png_low" not in migrated:
+                            migrated["profiles_png_low"] = bool(migrated["profiles_png"])
                     for key in defaults:
-                        if key in saved:
-                            self.export_type_options[key] = bool(saved[key])
+                        if key in migrated:
+                            self.export_type_options[key] = bool(migrated[key])
         except Exception:
             self.export_type_options = dict(self._default_export_type_options())
 

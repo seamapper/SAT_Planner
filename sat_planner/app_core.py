@@ -160,7 +160,15 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_percent_clip_max = 0.5
         self.backscatter_box_draw_mode = False
         self.backscatter_box_edit_width_mode = False
+        self.backscatter_box_move_waypoints_mode = False
         self.backscatter_box_stage = 0  # 0: first point, 1: second point, 2: width click
+        self.backscatter_move_start_handle = None
+        self.backscatter_move_end_handle = None
+        self.dragging_backscatter_move_handle = None
+        self.backscatter_move_edit_line = None
+        self.backscatter_move_pick_cid = None
+        self.backscatter_move_motion_cid = None
+        self.backscatter_move_release_cid = None
         self.backscatter_box_centerline = None  # ((lat1, lon1), (lat2, lon2))
         self.backscatter_box_width_point = None  # (lat, lon) width-side click used for deterministic rectified axis direction
         self.backscatter_box_vertices = None  # [(lon,lat)x4]
@@ -467,6 +475,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.backscatter_draw_box_btn.setEnabled(False)
             if hasattr(self, 'backscatter_edit_width_btn'):
                 self.backscatter_edit_width_btn.setEnabled(False)
+            if hasattr(self, 'backscatter_move_waypoints_btn'):
+                self.backscatter_move_waypoints_btn.setEnabled(False)
             if hasattr(self, 'backscatter_show_info_btn'):
                 self.backscatter_show_info_btn.setEnabled(False)
             if hasattr(self, 'backscatter_import_btn'):
@@ -493,6 +503,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.backscatter_swath_ang_entry.setEnabled(False)
             if hasattr(self, 'backscatter_sv_entry'):
                 self.backscatter_sv_entry.setEnabled(False)
+            if hasattr(self, 'backscatter_box_width_entry'):
+                self.backscatter_box_width_entry.setEnabled(False)
 
         # Bind parameter changes to update the plot
         self._updating_from_code = False  # Flag to prevent recursion
@@ -674,7 +686,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         """Show export type options dialog."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Export Type Options")
-        dialog.setMinimumWidth(360)
+        dialog.setMinimumWidth(420)
         layout = QVBoxLayout(dialog)
 
         options = getattr(self, "export_type_options", self._default_export_type_options())
@@ -685,8 +697,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             ("text_csv", "Text (.csv)"),
             ("text_txt", "Text (.txt)"),
             ("hypack_lnw", "Hypack (.lnw)"),
-            ("map_png", "Map (.png)"),
-            ("profiles_png", "Profiles (.png)"),
+            ("map_png_high", "Map PNG — high resolution"),
+            ("map_png_low", "Map PNG — low resolution (email)"),
+            ("profiles_png_high", "Profiles PNG — high resolution"),
+            ("profiles_png_low", "Profiles PNG — low resolution (email)"),
         ]
         checkboxes = {}
         for key, label in checkbox_specs:
@@ -2023,27 +2037,37 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_draw_box_btn.setToolTip("Select an area on the map to compute backscatter statistics.")
         self.backscatter_draw_box_btn.toggled.connect(self._on_backscatter_draw_box_toggled)
         backscatter_area_row_top.addWidget(self.backscatter_draw_box_btn, 1)
-        self.backscatter_show_stats_btn = QPushButton("Show Area Stats")
-        self.backscatter_show_stats_btn.setToolTip("Open the Backscatter Statistics window for the current box.")
-        self.backscatter_show_stats_btn.clicked.connect(self._on_backscatter_show_stats_clicked)
-        backscatter_area_row_top.addWidget(self.backscatter_show_stats_btn, 1)
+        self.backscatter_move_waypoints_btn = QPushButton("Move Waypoints")
+        self.backscatter_move_waypoints_btn.setCheckable(True)
+        self.backscatter_move_waypoints_btn.setToolTip(
+            "Drag the centerline start (BS1S) and end (BS1E) points. Area width is preserved; lead-in/out update on release."
+        )
+        self.backscatter_move_waypoints_btn.toggled.connect(self._on_backscatter_move_waypoints_toggled)
+        backscatter_area_row_top.addWidget(self.backscatter_move_waypoints_btn, 1)
         backscatter_area_planning_layout.addLayout(backscatter_area_row_top)
 
-        backscatter_area_row_bottom = QHBoxLayout()
+        backscatter_area_row_middle = QHBoxLayout()
         self.backscatter_clear_box_btn = QPushButton("Clear Area/Line")
         self.backscatter_clear_box_btn.setToolTip("Clear the selected area and reset backscatter statistics.")
         self.backscatter_clear_box_btn.clicked.connect(self._on_backscatter_clear_box_clicked)
-        backscatter_area_row_bottom.addWidget(self.backscatter_clear_box_btn, 1)
+        backscatter_area_row_middle.addWidget(self.backscatter_clear_box_btn, 1)
         self.backscatter_edit_width_btn = QPushButton("Edit Area Width")
         self.backscatter_edit_width_btn.setCheckable(True)
         self.backscatter_edit_width_btn.setToolTip("Redefine the area width from the existing centerline.")
         self.backscatter_edit_width_btn.toggled.connect(self._on_backscatter_edit_width_toggled)
-        backscatter_area_row_bottom.addWidget(self.backscatter_edit_width_btn, 1)
-        backscatter_area_planning_layout.addLayout(backscatter_area_row_bottom)
+        backscatter_area_row_middle.addWidget(self.backscatter_edit_width_btn, 1)
+        backscatter_area_planning_layout.addLayout(backscatter_area_row_middle)
+
+        backscatter_area_row_stats = QHBoxLayout()
+        self.backscatter_show_stats_btn = QPushButton("Show Area Stats")
+        self.backscatter_show_stats_btn.setToolTip("Open the Backscatter Statistics window for the current box.")
+        self.backscatter_show_stats_btn.clicked.connect(self._on_backscatter_show_stats_clicked)
+        backscatter_area_row_stats.addWidget(self.backscatter_show_stats_btn, 1)
+        backscatter_area_planning_layout.addLayout(backscatter_area_row_stats)
 
         backscatter_line_planning_layout.addWidget(backscatter_area_planning_group)
 
-        backscatter_line_info_group = QGroupBox("Line Info")
+        backscatter_line_info_group = QGroupBox("Line/Area Info")
         backscatter_line_info_layout = QGridLayout(backscatter_line_info_group)
         backscatter_line_info_layout.setContentsMargins(9, 9, 9, 9)
         backscatter_line_info_layout.setSpacing(6)
@@ -2069,9 +2093,17 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_sv_entry.setToolTip("Sound velocity in meters per second.")
         self.backscatter_sv_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
         backscatter_line_info_layout.addWidget(self.backscatter_sv_entry, 1, 3)
+        backscatter_line_info_layout.addWidget(QLabel("Box Width (m)"), 2, 0)
+        self.backscatter_box_width_entry = QLineEdit()
+        self.backscatter_box_width_entry.setToolTip(
+            "Full width of the normalization area (perpendicular to the centerline). "
+            "Updated when you draw the area; edit to resize the box on the map."
+        )
+        self.backscatter_box_width_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
+        backscatter_line_info_layout.addWidget(self.backscatter_box_width_entry, 2, 1)
         self.backscatter_show_info_btn = QPushButton("Show Survey Info")
         self.backscatter_show_info_btn.clicked.connect(self._show_backscatter_line_information)
-        backscatter_line_info_layout.addWidget(self.backscatter_show_info_btn, 2, 0, 1, 4)
+        backscatter_line_info_layout.addWidget(self.backscatter_show_info_btn, 3, 0, 1, 4)
         backscatter_line_planning_layout.addWidget(backscatter_line_info_group)
 
         backscatter_line_plot_control_group = QGroupBox("Line Plot Control")
