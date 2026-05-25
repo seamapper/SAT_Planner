@@ -19,6 +19,7 @@ class ConfigMixin:
     def _default_export_type_options(self):
         return {
             "esri_shapefile": True,
+            "gpkg": False,
             "sis_asciiplan": True,
             "gpx": True,
             "text_csv": True,

@@ -410,6 +410,7 @@ class LinePlanningMixin:
             export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
         try:
             export_shapefile = self._export_type_enabled("esri_shapefile") if hasattr(self, "_export_type_enabled") else True
+            export_gpkg = self._export_type_enabled("gpkg") if hasattr(self, "_export_type_enabled") else False
             export_sis = self._export_type_enabled("sis_asciiplan") if hasattr(self, "_export_type_enabled") else True
             export_gpx = self._export_type_enabled("gpx") if hasattr(self, "_export_type_enabled") else True
             export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
@@ -437,13 +438,16 @@ class LinePlanningMixin:
                 export_utils.write_dms_txt(dms_txt_file_path, line_planning_rows)
 
             shapefile_path = None
-            if export_shapefile and LineString and fiona and _shapely_mapping:
+            if (export_shapefile or export_gpkg) and LineString and fiona and _shapely_mapping:
                 schema = {'geometry': 'LineString', 'properties': {'name': 'str'}}
                 crs_epsg = 'EPSG:4326'
                 shapely_line = LineString([(lon, lat) for lat, lon in self.line_planning_points])
                 shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
-                with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
-                    collection.writerecords([{'geometry': _shapely_mapping(shapely_line), 'properties': {'name': export_name}}])
+                features = [{'geometry': _shapely_mapping(shapely_line), 'properties': {'name': export_name}}]
+                if export_shapefile:
+                    with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
+                        collection.writerecords(features)
+                self._write_gpkg_if_enabled(shapefile_path, schema, features, crs=crs_epsg)
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
             if LineString and _shapely_mapping:
                 shapely_line = LineString([(lon, lat) for lat, lon in self.line_planning_points])
@@ -637,6 +641,7 @@ class LinePlanningMixin:
             log_func=lambda msg, append=True: self.set_line_info_text(msg, append=append),
             default_directory=getattr(self, "last_line_import_dir", None),
             split_topo_depths=split_topo_depths,
+            gmrt_button=getattr(self, "line_import_btn", None),
         )
 
     def _parse_gpx_file_as_polyline(self, file_path):
@@ -676,11 +681,16 @@ class LinePlanningMixin:
         return points if len(points) >= 2 else None
 
     def _import_drawn_line(self):
+        # If a GMRT download kicked off by a previous import is still in flight,
+        # the import button is showing "Downloading GMRT" -- a click means "cancel".
+        if hasattr(self, "_gmrt_is_downloading") and self._gmrt_is_downloading():
+            self._gmrt_cancel_active_download()
+            return
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Line Plan File to Import", self.last_line_import_dir,
-            "Known Line Plan Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx);;"
+            "Known Line Plan Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx *.shp *.gpkg);;"
             "Decimal Degrees (*_DDD.txt);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
-            "Hypack LNW (*.lnw);;Decimal Degree CSV (*_DDD.csv);;DMM CSV (*_DMM.csv);;DMS CSV (*_DMS.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;GPX (*.gpx);;All files (*.*)")
+            "Hypack LNW (*.lnw);;Shapefile (*.shp);;GeoPackage (*.gpkg);;Decimal Degree CSV (*_DDD.csv);;DMM CSV (*_DMM.csv);;DMS CSV (*_DMS.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;GPX (*.gpx);;All files (*.*)")
         if not file_path:
             return
         import_dir = os.path.dirname(file_path)
@@ -741,6 +751,11 @@ class LinePlanningMixin:
                     file_processed = True
             elif file_ext == '.gpx':
                 points = self._parse_gpx_file_as_polyline(file_path)
+                if points is not None:
+                    self.line_planning_points = points
+                    file_processed = True
+            elif file_ext in ('.shp', '.gpkg') and hasattr(self, '_parse_vector_file_as_polyline'):
+                points = self._parse_vector_file_as_polyline(file_path)
                 if points is not None:
                     self.line_planning_points = points
                     file_processed = True
@@ -841,6 +856,10 @@ class LinePlanningMixin:
                 self.line_export_name_entry.setText(file_basename)
             self._update_line_planning_button_states()
             self._plot_survey_plan(preserve_view_limits=True)
+            if (getattr(self, "line_planning_points", None)
+                    and len(self.line_planning_points) >= 2
+                    and hasattr(self, "_zoom_to_line")):
+                self._zoom_to_line()
             try:
                 self._last_user_xlim = self.ax.get_xlim()
                 self._last_user_ylim = self.ax.get_ylim()

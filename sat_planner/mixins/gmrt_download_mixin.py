@@ -18,9 +18,21 @@ except ImportError:
 
 GMRT_GRIDSERVER_URL = "https://www.gmrt.org/services/GridServer"
 
+# Sentinel emitted via ``GMRTDownloadWorker.finished`` when the user cancels
+# the download (distinct from a real server / network failure so the UI can
+# show "cancelled by user" instead of an error popup).
+GMRT_CANCEL_SENTINEL = "__gmrt_cancelled_by_user__"
+
 
 class GMRTDownloadWorker(QThread):
-    """Worker thread to download a GeoTIFF from GMRT GridServer and save to a file."""
+    """Worker thread to download a GeoTIFF from GMRT GridServer and save to a file.
+
+    Supports cooperative cancellation via :meth:`cancel`: the cancel flag is
+    polled between chunk reads, so the worker terminates within a single
+    chunk (~8 KiB worth of network read) of the request. Any partial file is
+    removed and ``finished`` is emitted with ``GMRT_CANCEL_SENTINEL`` as the
+    error message so the receiver can distinguish cancellation from failure.
+    """
     finished = pyqtSignal(bool, str)  # success, path_or_error_message
 
     def __init__(self, params, save_path):
@@ -28,6 +40,19 @@ class GMRTDownloadWorker(QThread):
         self.params = dict(params)
         self.params['format'] = 'geotiff'
         self.save_path = save_path
+        self._cancelled = False
+
+    def cancel(self):
+        """Request cooperative cancellation. Safe to call from the GUI thread."""
+        self._cancelled = True
+
+    def _cleanup_partial_file(self):
+        """Delete an incomplete download (best effort, ignored on failure)."""
+        try:
+            if self.save_path and os.path.exists(self.save_path):
+                os.remove(self.save_path)
+        except OSError:
+            pass
 
     def run(self):
         try:
@@ -35,14 +60,25 @@ class GMRTDownloadWorker(QThread):
                 self.finished.emit(False, "requests library is required. Install with: pip install requests")
                 return
             with requests.get(GMRT_GRIDSERVER_URL, params=self.params, stream=True, timeout=120) as r:
+                if self._cancelled:
+                    self._cleanup_partial_file()
+                    self.finished.emit(False, GMRT_CANCEL_SENTINEL)
+                    return
                 if r.status_code != 200:
                     msg = r.text[:200] if r.text else f"HTTP {r.status_code}"
                     self.finished.emit(False, f"GMRT server error: {msg}")
                     return
                 with open(self.save_path, 'wb') as f:
                     for chunk in r.iter_content(chunk_size=8192):
+                        if self._cancelled:
+                            # Stop writing and discard the partial file.
+                            break
                         if chunk:
                             f.write(chunk)
+                if self._cancelled:
+                    self._cleanup_partial_file()
+                    self.finished.emit(False, GMRT_CANCEL_SENTINEL)
+                    return
                 if os.path.getsize(self.save_path) == 0:
                     try:
                         os.remove(self.save_path)
@@ -56,6 +92,10 @@ class GMRTDownloadWorker(QThread):
         except requests.exceptions.ConnectionError:
             self.finished.emit(False, "Could not connect to GMRT server.")
         except Exception as e:
+            if self._cancelled:
+                self._cleanup_partial_file()
+                self.finished.emit(False, GMRT_CANCEL_SENTINEL)
+                return
             self.finished.emit(False, str(e))
 
 
@@ -64,6 +104,77 @@ class GMRTDownloadMixin:
     Mixin for downloading GMRT bathymetry GeoTIFFs and loading them.
     Use _download_gmrt_and_load(west, east, south, north, ...) after computing extent from survey lines.
     """
+
+    # ------------------------------------------------------------------
+    # Import-button "Downloading GMRT" busy state
+    # ------------------------------------------------------------------
+    # During an active GMRT download the per-tab import button is repainted
+    # in orange and its label is changed to "Downloading GMRT - Click to
+    # Cancel". The button stays *enabled*: clicking it while a download is
+    # in flight cancels that download. To make this work without rewiring
+    # Qt signals, each per-tab import handler checks ``_gmrt_is_downloading()``
+    # at its very first line and, if true, routes to
+    # ``_gmrt_cancel_active_download()`` instead of starting a new import.
+
+    _GMRT_BUSY_BUTTON_TEXT = "Downloading GMRT - Click to Cancel"
+    _GMRT_BUSY_BUTTON_STYLE = "QPushButton { color: #FF8C00; font-weight: bold; }"
+
+    def _gmrt_is_downloading(self):
+        """True while a GMRT download worker is active (between start and finish)."""
+        return bool(getattr(self, "_gmrt_download_in_progress", False))
+
+    def _gmrt_set_button_downloading(self, button):
+        """Switch ``button`` into the orange 'Downloading GMRT' state.
+
+        Saves the button's current label and stylesheet so they can be put
+        back exactly by ``_gmrt_restore_button``. Safe to call with
+        ``button is None`` (used by callers that don't have a button, e.g.
+        the standalone GMRT dialog)."""
+        self._gmrt_active_button = button
+        if button is None:
+            return
+        try:
+            self._gmrt_active_button_orig_text = button.text()
+            self._gmrt_active_button_orig_style = button.styleSheet()
+            button.setText(self._GMRT_BUSY_BUTTON_TEXT)
+            button.setStyleSheet(self._GMRT_BUSY_BUTTON_STYLE)
+            # Keep enabled so a second click can cancel.
+            button.setEnabled(True)
+        except Exception:
+            # Best-effort UI: never break the download because of styling.
+            pass
+
+    def _gmrt_restore_button(self):
+        """Restore the previously-busy button to its original text / style."""
+        button = getattr(self, "_gmrt_active_button", None)
+        if button is not None:
+            try:
+                if hasattr(self, "_gmrt_active_button_orig_text"):
+                    button.setText(self._gmrt_active_button_orig_text)
+                if hasattr(self, "_gmrt_active_button_orig_style"):
+                    button.setStyleSheet(self._gmrt_active_button_orig_style)
+                button.setEnabled(True)
+            except Exception:
+                pass
+        self._gmrt_active_button = None
+        self._gmrt_active_button_orig_text = None
+        self._gmrt_active_button_orig_style = None
+
+    def _gmrt_cancel_active_download(self):
+        """Request cancellation of the currently active GMRT download.
+
+        Triggered when the user clicks the orange 'Downloading GMRT' button.
+        Restoration of the button (and any logging) happens in
+        ``_on_gmrt_download_finished`` once the worker emits ``finished``
+        with ``GMRT_CANCEL_SENTINEL``.
+        """
+        worker = getattr(self, "_gmrt_download_worker", None)
+        if worker is None:
+            return
+        try:
+            worker.cancel()
+        except Exception:
+            pass
 
     def _download_gmrt_and_load(
         self,
@@ -77,6 +188,7 @@ class GMRTDownloadMixin:
         log_func=None,
         default_directory=None,
         split_topo_depths=False,
+        gmrt_button=None,
     ):
         """
         Prompt for save path, download GMRT GeoTIFF for the given bounds, then load it.
@@ -160,31 +272,58 @@ class GMRTDownloadMixin:
             )
         )
         self._gmrt_download_worker = worker
+        # Mark the host busy *before* starting the worker so that a click
+        # arriving immediately after start() (extremely unlikely but possible)
+        # is correctly interpreted as a cancel by the import handlers.
+        self._gmrt_download_in_progress = True
+        self._gmrt_set_button_downloading(gmrt_button)
         worker.start()
 
     def _on_gmrt_download_finished(self, success, path_or_error, log_func, split_topo_depths=False):
-        if success:
-            log_func("GMRT grid downloaded.", append=True)
-            path_to_load = self._maybe_split_gmrt_grid(path_or_error, split_topo_depths, log_func)
-            if path_to_load is None:
-                # Split was requested but produced no bathymetry; files have been removed and
-                # the user has been warned. Do not load anything.
-                self._gmrt_download_worker = None
+        try:
+            if (not success) and path_or_error == GMRT_CANCEL_SENTINEL:
+                # User clicked the orange "Downloading GMRT" button to cancel.
+                log_func("GMRT download cancelled by user.", append=True)
+                self._show_message(
+                    "info",
+                    "GMRT Download",
+                    "Download was cancelled by user.",
+                )
                 return
-            log_func("Loading GeoTIFF...", append=True)
-            if hasattr(self, "_load_geotiff_from_path"):
-                self._load_geotiff_from_path(path_to_load)
-            log_func("GMRT grid loaded.", append=True)
-            # If this was a calibration-import GMRT download, set suggested export name from pitch line (offset + heading), same as when drawing
-            if (hasattr(self, "param_notebook") and self.param_notebook.currentIndex() == 0
-                    and hasattr(self, "cal_export_name_entry") and not self.cal_export_name_entry.text().strip()
-                    and hasattr(self, "_update_cal_line_offset_from_pitch_line") and hasattr(self, "_update_cal_export_name_from_pitch_line")):
-                self._update_cal_line_offset_from_pitch_line()
-                self._update_cal_export_name_from_pitch_line()
-        else:
-            self._show_message("error", "GMRT Download", path_or_error)
-            log_func(f"GMRT download failed: {path_or_error}", append=True)
-        self._gmrt_download_worker = None
+            if success:
+                log_func("GMRT grid downloaded.", append=True)
+                path_to_load = self._maybe_split_gmrt_grid(path_or_error, split_topo_depths, log_func)
+                if path_to_load is None:
+                    # Split was requested but produced no bathymetry; files have been removed and
+                    # the user has been warned. Do not load anything.
+                    return
+                log_func("Loading GeoTIFF...", append=True)
+                if hasattr(self, "_load_geotiff_from_path"):
+                    self._load_geotiff_from_path(path_to_load)
+                log_func("GMRT grid loaded.", append=True)
+                # On the Calibration tab, refresh pitch-line depth stats from
+                # the freshly loaded GeoTIFF. ``_update_cal_line_offset_from_pitch_line``
+                # is safe to call when the heading-line offset is locked to
+                # an imported value -- it refreshes the depth labels but
+                # leaves the offset entry alone. We also recompose the
+                # export name when it's still blank (the typical drawing-
+                # style import flow); when the import already populated the
+                # name from a locked offset, leave that alone.
+                if (hasattr(self, "param_notebook") and self.param_notebook.currentIndex() == 0
+                        and hasattr(self, "_update_cal_line_offset_from_pitch_line")):
+                    self._update_cal_line_offset_from_pitch_line()
+                    if (hasattr(self, "cal_export_name_entry")
+                            and not self.cal_export_name_entry.text().strip()
+                            and hasattr(self, "_update_cal_export_name_from_pitch_line")):
+                        self._update_cal_export_name_from_pitch_line()
+            else:
+                self._show_message("error", "GMRT Download", path_or_error)
+                log_func(f"GMRT download failed: {path_or_error}", append=True)
+        finally:
+            # Always clear the busy state, no matter which branch we took.
+            self._gmrt_download_worker = None
+            self._gmrt_download_in_progress = False
+            self._gmrt_restore_button()
 
     def _maybe_split_gmrt_grid(self, downloaded_path, split_topo_depths, log_func):
         """Apply optional topo/bathy split to a freshly downloaded GMRT GeoTIFF.

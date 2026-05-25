@@ -9,7 +9,7 @@ import re
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QSpinBox, QComboBox)
 
-from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj
+from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, fiona, pyproj
 
 
 # Match the common "UTM<zone><N|S>" tag in filenames, e.g. Survey_UTM18N.lnw,
@@ -578,6 +578,339 @@ class SurveyParsersMixin:
         except Exception as e:
             self._show_message("error", "Import Error", f"Failed to parse LNW file: {e}")
             return None
+
+    # ------------------------------------------------------------------
+    # Shapefile / GeoPackage parsing
+    # ------------------------------------------------------------------
+    # Both formats are read through Fiona, so a single low-level reader
+    # handles them. Each feature's geometry is reprojected to EPSG:4326
+    # (WGS84 lat/lon) so callers can hand the result straight into the
+    # plan-specific UI without further CRS work.
+    #
+    # Three public helpers are exposed:
+    #   _parse_vector_file_as_line_list(path)
+    #       -> [[(lat1, lon1), (lat2, lon2)], ...] using the first/last
+    #          point of every LineString in file order. Used by
+    #          Calibration, Accuracy, and Performance (each of which
+    #          then routes the lines through its existing line-
+    #          assignment dialog).
+    #
+    #   _parse_vector_file_as_polyline(path)
+    #       -> [(lat, lon), ...] from the first LineString in the file.
+    #          Used by Line Planning.
+    #
+    #   _parse_vector_file_as_polyline_or_polygon(path)
+    #       -> [(lat, lon), ...] from the first LineString, or, if none
+    #          exists, from the outer ring of the first Polygon. Used
+    #          by Backscatter so users can drop in either a centerline
+    #          or an area polygon.
+    #
+    # All three return None on hard failure (after showing a message),
+    # or an empty list when the file is structurally fine but contains
+    # no usable geometry. The caller's existing "must have >= 2 points"
+    # warnings then fire normally.
+
+    @staticmethod
+    def _shapefile_supported_extensions():
+        """File extensions handled by the shapefile/GPKG parsers."""
+        return (".shp", ".gpkg")
+
+    def _open_vector_features(self, file_path):
+        """Open a shapefile/GeoPackage and yield (geom_in_wgs84_dict,) tuples.
+
+        Returns a list of geometry dicts in EPSG:4326 (WGS84) ordered as they
+        appear in the source. Returns ``None`` on hard failure (with a user
+        message already shown). For GeoPackage files containing multiple
+        layers the first layer is read; that matches Fiona's default and
+        keeps the API simple. If a user needs another layer they can drop
+        it into the first slot or open it in GIS software first.
+        """
+        if not GEOSPATIAL_LIBS_AVAILABLE or fiona is None:
+            self._show_message(
+                "error",
+                "Import Error",
+                "Geospatial libraries (fiona) not available. Cannot import shapefile/GeoPackage.",
+            )
+            return None
+        try:
+            from fiona.transform import transform_geom
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Failed to import fiona.transform: {e}")
+            return None
+
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == ".shp":
+            # Quick sanity-check the bundle. A bare .shp without .shx/.dbf is
+            # unusable and Fiona's error is opaque; this gives a clearer one.
+            base = os.path.splitext(file_path)[0]
+            missing = [s for s in (".shx", ".dbf") if not os.path.exists(base + s)]
+            if missing:
+                self._show_message(
+                    "error",
+                    "Import Error",
+                    "Shapefile is missing required sidecar file(s): "
+                    + ", ".join(missing)
+                    + ".\nA shapefile is a bundle of .shp + .shx + .dbf (and ideally .prj). "
+                    "Make sure all parts are in the same folder.",
+                )
+                return None
+
+        try:
+            geoms_out = []
+            with fiona.open(file_path, "r") as source:
+                source_crs = source.crs_wkt or source.crs
+                if not source_crs:
+                    self._show_message(
+                        "warning",
+                        "Import Warning",
+                        "No CRS metadata found in the file (missing .prj?). "
+                        "Coordinates will be assumed to already be WGS84 lon/lat.",
+                    )
+                for feature in source:
+                    geom = None
+                    if hasattr(feature, "get"):
+                        try:
+                            geom = feature.get("geometry")
+                        except Exception:
+                            geom = None
+                    if geom is None:
+                        try:
+                            geom = feature["geometry"]
+                        except Exception:
+                            geom = getattr(feature, "geometry", None)
+                    if geom is None:
+                        continue
+                    if hasattr(geom, "__geo_interface__"):
+                        geom = geom.__geo_interface__
+                    elif not isinstance(geom, dict):
+                        try:
+                            geom = dict(geom)
+                        except Exception:
+                            continue
+                    if source_crs:
+                        try:
+                            geom = transform_geom(source_crs, "EPSG:4326", geom)
+                        except Exception as e:
+                            print(f"Warning: failed to reproject feature: {e}")
+                            continue
+                    # Fiona >= 1.9 returns ``fiona.Geometry`` objects (not plain
+                    # dicts) from both feature access and ``transform_geom``.
+                    # Normalize to a GeoJSON-style dict so downstream consumers
+                    # can use ``geom["type"]`` / ``geom["coordinates"]`` without
+                    # caring which Fiona version produced the value.
+                    if not isinstance(geom, dict):
+                        if hasattr(geom, "__geo_interface__"):
+                            geom = geom.__geo_interface__
+                        else:
+                            try:
+                                geom = dict(geom)
+                            except Exception:
+                                continue
+                    geoms_out.append(geom)
+            return geoms_out
+        except FileNotFoundError:
+            self._show_message("error", "Import Error", f"File not found: {file_path}")
+            return None
+        except Exception as e:
+            self._show_message("error", "Import Error", f"Failed to read shapefile/GeoPackage: {e}")
+            return None
+
+    @staticmethod
+    def _normalize_geom_type(geom_type):
+        """Normalize a GeoJSON / Fiona geometry-type string for matching.
+
+        Strips trailing Z / M / ZM / 25D markers and removes whitespace so
+        all of these compare equal to ``LINESTRING``:
+        ``LineString``, ``LineStringZ``, ``LineString Z``, ``LineString25D``,
+        ``LineString 25D``, ``3D LineString``.
+        """
+        t = (geom_type or "").upper().replace(" ", "")
+        if t.startswith("3D"):
+            t = t[2:]
+        if t.endswith("ZM"):
+            t = t[:-2]
+        elif t.endswith("25D"):
+            t = t[:-3]
+        elif t.endswith("Z") or t.endswith("M"):
+            t = t[:-1]
+        return t
+
+    # Kept under the old name for any external callers that may still rely
+    # on it; new code should call ``_normalize_geom_type``.
+    _strip_dimensional_suffix = _normalize_geom_type
+
+    @staticmethod
+    def _as_geom_dict(geom):
+        """Coerce a Fiona Geometry / shapely object / dict-like into a plain dict."""
+        if geom is None:
+            return None
+        if isinstance(geom, dict):
+            return geom
+        if hasattr(geom, "__geo_interface__"):
+            try:
+                return geom.__geo_interface__
+            except Exception:
+                return None
+        try:
+            return dict(geom)
+        except Exception:
+            return None
+
+    @classmethod
+    def _iter_linestrings_from_geom(cls, geom):
+        """Yield each contained LineString coord list (in lon/lat order).
+        Handles LineString, MultiLineString, and GeometryCollection, regardless
+        of whether the input is a plain dict or a Fiona/shapely geometry object.
+        """
+        geom = cls._as_geom_dict(geom)
+        if not isinstance(geom, dict):
+            return
+        gt = cls._normalize_geom_type(geom.get("type"))
+        coords = geom.get("coordinates")
+        if gt == "LINESTRING":
+            if isinstance(coords, list) and len(coords) >= 2:
+                yield coords
+        elif gt == "MULTILINESTRING":
+            if isinstance(coords, list):
+                for line_coords in coords:
+                    if isinstance(line_coords, list) and len(line_coords) >= 2:
+                        yield line_coords
+        elif gt == "GEOMETRYCOLLECTION":
+            for sub in geom.get("geometries", []) or []:
+                yield from cls._iter_linestrings_from_geom(sub)
+
+    @classmethod
+    def _iter_polygon_outer_rings(cls, geom):
+        """Yield outer-ring coord lists for Polygon / MultiPolygon (lon/lat order)."""
+        geom = cls._as_geom_dict(geom)
+        if not isinstance(geom, dict):
+            return
+        gt = cls._normalize_geom_type(geom.get("type"))
+        coords = geom.get("coordinates")
+        if gt == "POLYGON":
+            if isinstance(coords, list) and len(coords) >= 1 and isinstance(coords[0], list) and len(coords[0]) >= 3:
+                yield coords[0]
+        elif gt == "MULTIPOLYGON":
+            if isinstance(coords, list):
+                for poly_coords in coords:
+                    if (
+                        isinstance(poly_coords, list)
+                        and len(poly_coords) >= 1
+                        and isinstance(poly_coords[0], list)
+                        and len(poly_coords[0]) >= 3
+                    ):
+                        yield poly_coords[0]
+        elif gt == "GEOMETRYCOLLECTION":
+            for sub in geom.get("geometries", []) or []:
+                yield from cls._iter_polygon_outer_rings(sub)
+
+    @staticmethod
+    def _coords_lonlat_to_latlon_pairs(coords):
+        """Convert a list of (lon, lat[, z]) tuples to [(lat, lon), ...]."""
+        out = []
+        for c in coords or []:
+            if not isinstance(c, (list, tuple)) or len(c) < 2:
+                continue
+            try:
+                lon = float(c[0])
+                lat = float(c[1])
+            except (TypeError, ValueError):
+                continue
+            out.append((lat, lon))
+        return out
+
+    @classmethod
+    def _summarize_geom_types(cls, geoms):
+        """Return a comma-separated summary of geometry types in ``geoms``,
+        suitable for embedding in user-visible error messages."""
+        types_seen = {}
+        for g in geoms or []:
+            g = cls._as_geom_dict(g)
+            if isinstance(g, dict):
+                t = str(g.get("type") or "(unknown)")
+            else:
+                t = type(g).__name__
+            types_seen[t] = types_seen.get(t, 0) + 1
+        if not types_seen:
+            return "no features"
+        return ", ".join(f"{n}x {t}" for t, n in types_seen.items())
+
+    def _parse_vector_file_as_line_list(self, file_path):
+        """Parse a shapefile/GeoPackage as a list of survey-line endpoint pairs.
+
+        Returns ``[[(lat1, lon1), (lat2, lon2)], ...]`` using the first and
+        last vertex of every LineString in the source (matching how LNW/
+        DDD/DMM/DMS imports already shape line data). Returns ``None`` on
+        hard failure and ``[]`` when the file has no LineString features.
+        """
+        geoms = self._open_vector_features(file_path)
+        if geoms is None:
+            return None
+        imported_lines = []
+        for geom in geoms:
+            for line_coords in self._iter_linestrings_from_geom(geom):
+                pts = self._coords_lonlat_to_latlon_pairs(line_coords)
+                if len(pts) >= 2:
+                    imported_lines.append([pts[0], pts[-1]])
+        if not imported_lines:
+            self._show_message(
+                "error",
+                "Import Error",
+                "No LineString geometry found in the selected shapefile/GeoPackage. "
+                f"Found: {self._summarize_geom_types(geoms)}.",
+            )
+            return None
+        return imported_lines
+
+    def _parse_vector_file_as_polyline(self, file_path):
+        """Parse the first LineString of a shapefile/GeoPackage as a polyline.
+
+        Returns ``[(lat, lon), ...]`` (preserving every vertex) for the
+        first LineString found, or ``None`` on hard failure. Returns ``[]``
+        when no LineStrings are present.
+        """
+        geoms = self._open_vector_features(file_path)
+        if geoms is None:
+            return None
+        for geom in geoms:
+            for line_coords in self._iter_linestrings_from_geom(geom):
+                pts = self._coords_lonlat_to_latlon_pairs(line_coords)
+                if len(pts) >= 2:
+                    return pts
+        self._show_message(
+            "error",
+            "Import Error",
+            "No LineString geometry found in the selected shapefile/GeoPackage. "
+            f"Found: {self._summarize_geom_types(geoms)}.",
+        )
+        return None
+
+    def _parse_vector_file_as_polyline_or_polygon(self, file_path):
+        """Like ``_parse_vector_file_as_polyline``, but if no LineStrings are
+        present falls back to the outer ring of the first Polygon /
+        MultiPolygon. Used by Backscatter, which can accept either a
+        centerline-style polyline or an area polygon as its source geometry.
+        """
+        geoms = self._open_vector_features(file_path)
+        if geoms is None:
+            return None
+        for geom in geoms:
+            for line_coords in self._iter_linestrings_from_geom(geom):
+                pts = self._coords_lonlat_to_latlon_pairs(line_coords)
+                if len(pts) >= 2:
+                    return pts
+        for geom in geoms:
+            for ring_coords in self._iter_polygon_outer_rings(geom):
+                pts = self._coords_lonlat_to_latlon_pairs(ring_coords)
+                if len(pts) >= 2:
+                    return pts
+        self._show_message(
+            "error",
+            "Import Error",
+            "No LineString or Polygon geometry found in the selected shapefile/GeoPackage. "
+            f"Found: {self._summarize_geom_types(geoms)}.",
+        )
+        return None
 
     def _compute_utm_zone_from_points(self, points):
         """From a list of (lat, lon) in WGS84, return (utm_zone, hemisphere) for LNW export.

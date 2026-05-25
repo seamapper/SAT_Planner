@@ -423,6 +423,10 @@ class CalibrationMixin:
         self.pick_pitch_line_mode = not self.pick_pitch_line_mode
         if self.pick_pitch_line_mode:
             self.pitch_line_points = []
+            # User is drawing a brand-new pitch line, so any prior import-
+            # locked offset value no longer makes sense -- fall back to
+            # depth-driven recommendation mode.
+            self._cal_line_offset_locked_to_import = False
             self.pick_pitch_line_btn.setText("Drawing Pitch Line: Click Start Point")
             if hasattr(self, 'calibration_frame'):
                 self.calibration_frame.setFocus()
@@ -506,6 +510,9 @@ class CalibrationMixin:
             self.dragging_pitch_line_handle = None
 
             self._plot_survey_plan()
+            # Editing the pitch line returns the offset to depth-driven
+            # recommendation mode, releasing any prior import-locked value.
+            self._cal_line_offset_locked_to_import = False
             self._update_cal_line_offset_from_pitch_line()
             if hasattr(self, "_draw_current_profile"):
                 self._draw_current_profile()
@@ -659,6 +666,9 @@ class CalibrationMixin:
                                                        edgecolors='black', linewidth=2,
                                                        zorder=10, picker=5)
 
+            # Dragging the pitch line handles returns the offset to depth-
+            # driven recommendation mode, releasing any prior import lock.
+            self._cal_line_offset_locked_to_import = False
             self._update_cal_line_offset_from_pitch_line()
             if hasattr(self, "_draw_current_profile"):
                 self._draw_current_profile()
@@ -999,6 +1009,7 @@ class CalibrationMixin:
             self.cal_line_offset_entry.clear()
         if hasattr(self, 'cal_export_name_entry'):
             self.cal_export_name_entry.clear()
+        self._cal_line_offset_locked_to_import = False
 
         self._update_pitch_line_button_states()
         self._update_roll_line_button_states()
@@ -1069,6 +1080,7 @@ class CalibrationMixin:
 
     def _export_cal_survey_files(self):
         export_shapefile = self._export_type_enabled("esri_shapefile") if hasattr(self, "_export_type_enabled") else True
+        export_gpkg = self._export_type_enabled("gpkg") if hasattr(self, "_export_type_enabled") else False
         export_sis = self._export_type_enabled("sis_asciiplan") if hasattr(self, "_export_type_enabled") else True
         export_gpx = self._export_type_enabled("gpx") if hasattr(self, "_export_type_enabled") else True
         export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
@@ -1079,13 +1091,13 @@ class CalibrationMixin:
         fiona = None
         LineString = None
         mapping = None
-        if export_shapefile:
+        if export_shapefile or export_gpkg:
             try:
                 import fiona
                 from shapely.geometry import LineString
                 from shapely.geometry import mapping
             except ImportError:
-                self._show_message("warning","Missing Libraries", "fiona and shapely are required for shapefile export.")
+                self._show_message("warning","Missing Libraries", "fiona and shapely are required for shapefile/GeoPackage export.")
                 return
         lines = []
         line_num = 1
@@ -1152,15 +1164,17 @@ class CalibrationMixin:
                 export_utils.write_dms_txt(dms_txt_file_path, cal_rows)
 
             shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
-            if export_shapefile:
+            if (export_shapefile or export_gpkg) and fiona is not None and LineString is not None and mapping is not None:
                 schema = {'geometry': 'LineString', 'properties': {'line_num': 'int', 'line_name': 'str'}}
                 crs_epsg = 'EPSG:4326'
                 features = []
                 for num, name, pts in export_lines:
                     shapely_line = LineString([(p[1], p[0]) for p in pts])
                     features.append({'geometry': mapping(shapely_line), 'properties': {'line_num': num, 'line_name': name}})
-                with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
-                    collection.writerecords(features)
+                if export_shapefile:
+                    with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
+                        collection.writerecords(features)
+                self._write_gpkg_if_enabled(shapefile_path, schema, features, crs=crs_epsg)
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
             _cal_geotiff = (
                 self.current_geotiff_path
@@ -1439,12 +1453,17 @@ class CalibrationMixin:
         return imported_lines, suggested
 
     def _import_cal_survey_files(self):
-        """Import calibration survey lines from CSV, GeoJSON, GPX, LNW, DMS, DMM, or DDD text file."""
+        """Import calibration survey lines from CSV, GeoJSON, GPX, LNW, DMS, DMM, DDD text file, or shapefile/GeoPackage."""
+        # If a GMRT download kicked off by a previous import is still in flight,
+        # the import button is showing "Downloading GMRT" -- a click means "cancel".
+        if hasattr(self, "_gmrt_is_downloading") and self._gmrt_is_downloading():
+            self._gmrt_cancel_active_download()
+            return
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Survey File to Import",
             self.last_cal_import_dir,
-            "Known Calibration Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx *.lnw);;GPX files (*.gpx);;Hypack LNW files (*.lnw);;Degrees Minutes Seconds Text files (*_DMS.txt);;Degrees Decimal Minutes Text files (*_DMM.txt);;Decimal Degrees Text files (*_DDD.txt);;Decimal Degree CSV files (*_DDD.csv);;DMM CSV files (*_DMM.csv);;DMS CSV files (*_DMS.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json)"
+            "Known Calibration Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx *.lnw *.shp *.gpkg);;GPX files (*.gpx);;Hypack LNW files (*.lnw);;Shapefile (*.shp);;GeoPackage (*.gpkg);;Degrees Minutes Seconds Text files (*_DMS.txt);;Degrees Decimal Minutes Text files (*_DMM.txt);;Decimal Degrees Text files (*_DDD.txt);;Decimal Degree CSV files (*_DDD.csv);;DMM CSV files (*_DMM.csv);;DMS CSV files (*_DMS.csv);;CSV files (*.csv);;GeoJSON files (*.geojson);;JSON files (*.json)"
         )
         if not file_path:
             return
@@ -1505,7 +1524,40 @@ class CalibrationMixin:
                                 self.heading_lines.append([])
                         self.heading_lines[1] = imported_lines[line_idx]
                 file_processed = True
-            
+
+            # Handle *.shp / *.gpkg (Shapefile or GeoPackage)
+            if not file_processed and file_ext in ('.shp', '.gpkg'):
+                imported_lines = self._parse_vector_file_as_line_list(file_path)
+                if imported_lines is None:
+                    return
+                if len(imported_lines) != 4:
+                    self._show_message("error", "Calibration Import",
+                                     f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
+                    return
+                suggested = _suggest_calibration_assignments_from_geometry(imported_lines)
+                dialog = LineAssignmentDialog(self, imported_lines, suggested)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                assignments = dialog.get_assignments()
+                self.pitch_line_points = []
+                self.roll_line_points = []
+                self.heading_lines = []
+                for line_idx, assignment_type in assignments.items():
+                    if assignment_type == 'pitch':
+                        self.pitch_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'roll':
+                        self.roll_line_points = imported_lines[line_idx]
+                    elif assignment_type == 'heading1':
+                        if len(self.heading_lines) < 1:
+                            self.heading_lines.append([])
+                        self.heading_lines[0] = imported_lines[line_idx]
+                    elif assignment_type == 'heading2':
+                        if len(self.heading_lines) < 2:
+                            while len(self.heading_lines) < 2:
+                                self.heading_lines.append([])
+                        self.heading_lines[1] = imported_lines[line_idx]
+                file_processed = True
+
             # Handle *_DMS.txt format (Degrees Minutes Seconds)
             if not file_processed and file_basename.lower().endswith('_dms.txt'):
                 imported_lines = self._parse_dms_txt_file(file_path)
@@ -1803,12 +1855,34 @@ class CalibrationMixin:
                     self._load_geotiff_from_path(imported_geojson_geotiff_path)
                 else:
                     self.set_cal_info_text(f"Saved GeoTIFF not found: {imported_geojson_geotiff_path}. Continuing without GeoTIFF.", append=True)
-            # Always refresh Pitch Line Info fields from current pitch line + GeoTIFF data.
-            # If metadata supplied a line offset, keep that value after refreshing the labels.
+            # Resolve the heading-line offset to display.
+            #
+            # Order of preference for an *imported* calibration plan:
+            #   1) ``line_offset`` from the ``*_params.json`` sidecar, if present.
+            #   2) Geometric perpendicular distance from the imported pitch
+            #      line to the imported heading lines (the actual offset
+            #      embedded in the imported geometry).
+            #   3) GeoTIFF-derived median depth along the pitch line (the
+            #      "recommended" offset shown when drawing a new plan).
+            #
+            # Cases (1) and (2) lock the field so a later GeoTIFF / GMRT
+            # load won't overwrite it with the depth-based recommendation;
+            # the lock releases as soon as the user edits or picks a new
+            # pitch line, at which point depth-based behavior resumes.
+            self._cal_line_offset_locked_to_import = False
             if hasattr(self, '_update_cal_line_offset_from_pitch_line'):
                 self._update_cal_line_offset_from_pitch_line()
                 if imported_line_offset is not None:
-                    self.cal_line_offset_entry.setText(str(imported_line_offset))
+                    self._apply_imported_cal_line_offset(imported_line_offset)
+                else:
+                    geom_offset = self._estimate_cal_line_offset_from_imported_geometry()
+                    if geom_offset is not None:
+                        self._apply_imported_cal_line_offset(geom_offset)
+                        if hasattr(self, "set_cal_info_text"):
+                            self.set_cal_info_text(
+                                f"Heading Line Offset taken from imported geometry: {geom_offset:.2f} m.",
+                                append=True,
+                            )
             # Suggested export name: from params, else from loaded GeoTIFF, else defer if GMRT download, else pitch-line or generic
             if not params or not isinstance(params, dict) or not params.get('export_name'):
                 self._set_cal_export_name_after_import()
@@ -1892,6 +1966,7 @@ class CalibrationMixin:
             log_func=lambda msg, append=True: self.set_cal_info_text(msg, append=append),
             default_directory=getattr(self, "last_cal_import_dir", None),
             split_topo_depths=split_topo_depths,
+            gmrt_button=getattr(self, "cal_import_survey_btn", None),
         )
 
     def _calculate_calibration_survey_statistics(self):
@@ -2448,20 +2523,95 @@ class CalibrationMixin:
             self.roll_min_slope_label.setText("-")
             self.roll_max_slope_label.setText("-")
 
+    def _estimate_cal_line_offset_from_imported_geometry(self):
+        """Return the perpendicular distance, in meters, from the imported
+        heading lines to the imported pitch line, or ``None`` if it can't be
+        computed (missing geometry, no pyproj, etc.).
+
+        For an *imported* calibration plan the heading lines are already in
+        place at their original offset; that offset is what the user expects
+        to see in the Heading Line Offset field, not a fresh GeoTIFF-derived
+        recommendation. The result is the average perpendicular distance
+        across all present heading lines (typically two, symmetric about the
+        pitch line, so the average just smooths small numerical asymmetry).
+        """
+        if not hasattr(self, "pitch_line_points") or len(self.pitch_line_points) != 2:
+            return None
+        if not hasattr(self, "heading_lines"):
+            return None
+        headings = [
+            h for h in self.heading_lines
+            if isinstance(h, (list, tuple)) and len(h) == 2
+        ]
+        if not headings:
+            return None
+        if pyproj is None:
+            return None
+        try:
+            import math
+            geod = pyproj.Geod(ellps="WGS84")
+            (p1_lat, p1_lon), (p2_lat, p2_lon) = self.pitch_line_points
+            pm_lat = (p1_lat + p2_lat) / 2.0
+            pm_lon = (p1_lon + p2_lon) / 2.0
+            az_pitch, _, _ = geod.inv(p1_lon, p1_lat, p2_lon, p2_lat)
+            distances = []
+            for h in headings:
+                (h1_lat, h1_lon), (h2_lat, h2_lon) = h
+                hm_lat = (h1_lat + h2_lat) / 2.0
+                hm_lon = (h1_lon + h2_lon) / 2.0
+                az_to_hm, _, dist_to_hm = geod.inv(pm_lon, pm_lat, hm_lon, hm_lat)
+                # Wrap signed delta into (-180, 180].
+                delta_deg = (az_to_hm - az_pitch + 540.0) % 360.0 - 180.0
+                perp = abs(dist_to_hm * math.sin(math.radians(delta_deg)))
+                if perp > 0:
+                    distances.append(perp)
+        except Exception:
+            return None
+        if not distances:
+            return None
+        return sum(distances) / len(distances)
+
+    def _apply_imported_cal_line_offset(self, offset_m):
+        """Set the heading-line offset entry from an imported value and lock
+        it so subsequent GeoTIFF-depth-driven updates don't overwrite it.
+        ``offset_m`` may be int, float, or a numeric string."""
+        if offset_m is None:
+            return
+        try:
+            value = float(offset_m)
+        except (TypeError, ValueError):
+            return
+        if hasattr(self, "cal_line_offset_entry"):
+            self.cal_line_offset_entry.setText(f"{value:.2f}")
+        self._cal_line_offset_locked_to_import = True
+
+    def _clear_imported_cal_line_offset_lock(self):
+        """Release the heading-line-offset lock so GeoTIFF depth-based
+        recommendations can drive the field again. Called when the user
+        starts a new survey or edits/picks the pitch line."""
+        self._cal_line_offset_locked_to_import = False
+
     def _update_cal_line_offset_from_pitch_line(self):
-        """Calculate heading line offset from median depth along pitch line."""
+        """Calculate heading line offset from median depth along pitch line.
+
+        If the offset is currently locked to an imported value
+        (``_cal_line_offset_locked_to_import``), the depth-stats labels are
+        still refreshed but the offset entry is left alone."""
         if (
             self.geotiff_data_array is None
             or self.geotiff_extent is None
             or not hasattr(self, "pitch_line_points")
             or len(self.pitch_line_points) != 2
         ):
-            self.cal_line_offset_entry.clear()
+            if not getattr(self, "_cal_line_offset_locked_to_import", False):
+                self.cal_line_offset_entry.clear()
             return
         pd = self._pitch_line_depth_stats_abs_m()
+        locked = getattr(self, "_cal_line_offset_locked_to_import", False)
         if pd is not None:
             offset_value = pd["median"]
-            self.cal_line_offset_entry.setText(f"{offset_value:.2f}")
+            if not locked:
+                self.cal_line_offset_entry.setText(f"{offset_value:.2f}")
             if hasattr(self, "pitch_shallowest_depth_label"):
                 self.pitch_shallowest_depth_label.setText(f"{pd['shallowest']:.2f}")
             if hasattr(self, "pitch_max_depth_label"):
@@ -2487,7 +2637,8 @@ class CalibrationMixin:
                     append=False,
                 )
         else:
-            self.cal_line_offset_entry.setText("-")
+            if not locked:
+                self.cal_line_offset_entry.setText("-")
             if hasattr(self, "pitch_shallowest_depth_label"):
                 self.pitch_shallowest_depth_label.setText("-")
             if hasattr(self, "pitch_max_depth_label"):
@@ -2500,7 +2651,7 @@ class CalibrationMixin:
                 self.pitch_min_slope_label.setText("-")
             if hasattr(self, "pitch_max_slope_label"):
                 self.pitch_max_slope_label.setText("-")
-            if hasattr(self, "set_cal_info_text"):
+            if hasattr(self, "set_cal_info_text") and not locked:
                 self.set_cal_info_text(
                     "Heading Line Offset: Could not calculate (no valid elevation data along pitch line).",
                     append=False,
@@ -2585,14 +2736,26 @@ class CalibrationMixin:
             self.set_cal_info_text("Heading lines have been added north and south of the pitch line.")
 
     def _set_cal_export_name_after_import(self):
-        """Set suggested calibration export name after import using same convention as drawing: Calibration_{offset}m_{heading}deg from pitch line."""
+        """Set suggested calibration export name after import using same
+        convention as drawing: ``Calibration_{offset}m_{heading}deg`` from
+        the pitch line. When the offset is locked to an imported value the
+        depth-driven refresh is skipped so we don't blow the locked offset
+        away (see ``_update_cal_line_offset_from_pitch_line``)."""
         if not hasattr(self, 'cal_export_name_entry'):
             return
-        # If Download GMRT is checked, leave empty; GMRT load completion will set name from pitch line (offset + heading) after GeoTIFF loads
         if getattr(self, 'cal_download_gmrt_checkbox', None) and self.cal_download_gmrt_checkbox.isChecked():
+            # Normally we defer the export-name composition until GMRT
+            # finishes (the post-download callback will run it with depth
+            # data). But if the offset was already locked to an imported
+            # value, we can compose the name now -- the locked offset
+            # survives the post-download refresh, so doing it early just
+            # gives the user immediate feedback rather than a momentary
+            # blank field.
+            if getattr(self, "_cal_line_offset_locked_to_import", False):
+                self._update_cal_export_name_from_pitch_line()
             return
-        # Use same naming as drawn survey: depth (offset) from pitch line + orientation (heading) from pitch line
-        self._update_cal_line_offset_from_pitch_line()  # fill offset from GeoTIFF if loaded
+        if not getattr(self, "_cal_line_offset_locked_to_import", False):
+            self._update_cal_line_offset_from_pitch_line()
         self._update_cal_export_name_from_pitch_line()
         if not self.cal_export_name_entry.text().strip():
             self.cal_export_name_entry.setText(f"Cal_import_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}")

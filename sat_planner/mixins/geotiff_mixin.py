@@ -410,13 +410,20 @@ class GeoTIFFMixin:
             log_func=lambda msg, append=True: self.set_line_info_text(msg, append=append) if hasattr(self, "set_line_info_text") else None,
             default_directory=getattr(self, "last_backscatter_import_dir", None),
             split_topo_depths=split_topo_depths,
+            gmrt_button=getattr(self, "backscatter_import_btn", None),
         )
 
     def _import_backscatter_line(self):
         """Import backscatter line/area from supported survey files + optional params sidecar."""
+        # If a GMRT download kicked off by a previous import is still in flight,
+        # the import button is showing "Downloading GMRT" -- a click means "cancel".
+        if hasattr(self, "_gmrt_is_downloading") and self._gmrt_is_downloading():
+            self._gmrt_cancel_active_download()
+            return
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Backscatter Line File to Import", self.last_backscatter_import_dir,
-            "Known Line Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx);;"
+            "Known Line Files (*_DMS.txt *_DMM.txt *_DDD.txt *.lnw *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx *.shp *.gpkg);;"
+            "Shapefile (*.shp);;GeoPackage (*.gpkg);;"
             "All files (*.*)"
         )
         if not file_path:
@@ -464,6 +471,11 @@ class GeoTIFFMixin:
                         for coord in geom.get("coordinates", []):
                             if len(coord) >= 2:
                                 points.append((coord[1], coord[0]))
+            elif ext in (".shp", ".gpkg") and hasattr(self, "_parse_vector_file_as_polyline_or_polygon"):
+                parsed = self._parse_vector_file_as_polyline_or_polygon(file_path)
+                if parsed is None:
+                    return
+                points = parsed
             if len(points) < 2:
                 self._show_message("warning", "Import Warning", "Imported backscatter line must contain at least 2 points.")
                 return
@@ -750,6 +762,7 @@ class GeoTIFFMixin:
                 rows.append((1, "BackscatterLine", point_name, lat, lon))
 
             export_shapefile = self._export_type_enabled("esri_shapefile") if hasattr(self, "_export_type_enabled") else True
+            export_gpkg = self._export_type_enabled("gpkg") if hasattr(self, "_export_type_enabled") else False
             export_sis = self._export_type_enabled("sis_asciiplan") if hasattr(self, "_export_type_enabled") else True
             export_gpx = self._export_type_enabled("gpx") if hasattr(self, "_export_type_enabled") else True
             export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
@@ -828,32 +841,41 @@ class GeoTIFFMixin:
                 export_utils.write_gpx(gpx_file_path, [("BackscatterLine", line_points)])
 
             shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
-            if export_shapefile and LineString is not None:
+            if (export_shapefile or export_gpkg) and LineString is not None:
                 try:
                     from shapely.geometry import mapping
                     import fiona
                     schema = {"geometry": "LineString", "properties": {"line_num": "int", "line_name": "str"}}
-                    with fiona.open(shapefile_path, "w", driver="ESRI Shapefile", crs="EPSG:4326", schema=schema) as collection:
-                        collection.write({
-                            "geometry": mapping(LineString([(lon, lat) for lat, lon in line_points])),
-                            "properties": {"line_num": 1, "line_name": "BackscatterLine"},
-                        })
+                    features = [{
+                        "geometry": mapping(LineString([(lon, lat) for lat, lon in line_points])),
+                        "properties": {"line_num": 1, "line_name": "BackscatterLine"},
+                    }]
+                    if export_shapefile:
+                        with fiona.open(shapefile_path, "w", driver="ESRI Shapefile", crs="EPSG:4326", schema=schema) as collection:
+                            collection.writerecords(features)
+                    else:
+                        shapefile_path = None
+                    self._write_gpkg_if_enabled(os.path.join(export_dir, f"{export_name}.shp"), schema, features, crs="EPSG:4326")
                 except Exception:
                     shapefile_path = None
 
-            # Export normalization area polygon (if present) as separate shapefile.
+            # Export normalization area polygon (if present) as separate shapefile / GeoPackage.
             area_shapefile_path = None
-            if export_shapefile and LineString is not None and len(area_vertices) == 4:
+            if (export_shapefile or export_gpkg) and LineString is not None and len(area_vertices) == 4:
                 try:
                     from shapely.geometry import mapping, Polygon
                     import fiona
                     area_schema = {"geometry": "Polygon", "properties": {"name": "str"}}
-                    area_shapefile_path = os.path.join(export_dir, f"{export_name}_area.shp")
-                    with fiona.open(area_shapefile_path, "w", driver="ESRI Shapefile", crs="EPSG:4326", schema=area_schema) as collection:
-                        collection.write({
-                            "geometry": mapping(Polygon([(float(lon), float(lat)) for lon, lat in area_vertices])),
-                            "properties": {"name": "BackscatterNormalizationArea"},
-                        })
+                    area_shp_target = os.path.join(export_dir, f"{export_name}_area.shp")
+                    area_features = [{
+                        "geometry": mapping(Polygon([(float(lon), float(lat)) for lon, lat in area_vertices])),
+                        "properties": {"name": "BackscatterNormalizationArea"},
+                    }]
+                    if export_shapefile:
+                        area_shapefile_path = area_shp_target
+                        with fiona.open(area_shapefile_path, "w", driver="ESRI Shapefile", crs="EPSG:4326", schema=area_schema) as collection:
+                            collection.writerecords(area_features)
+                    self._write_gpkg_if_enabled(area_shp_target, area_schema, area_features, crs="EPSG:4326")
                 except Exception:
                     area_shapefile_path = None
 

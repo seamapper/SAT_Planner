@@ -454,6 +454,7 @@ class ReferenceMixin:
             log_func=lambda msg, append=True: self.set_ref_info_text(msg, append=append),
             default_directory=getattr(self, "last_ref_import_dir", None),
             split_topo_depths=split_topo_depths,
+            gmrt_button=getattr(self, "import_survey_btn", None),
         )
 
     def _compute_crossline_lead_from_import(self):
@@ -808,6 +809,11 @@ class ReferenceMixin:
                 self._load_geotiff_from_path(imported_params_geotiff_path)
             else:
                 self.set_ref_info_text(f"Saved GeoTIFF not found: {imported_params_geotiff_path}. Continuing without GeoTIFF.", append=True)
+        # Migrate legacy auto-generated export names (Accuracy_<spacing>m_<heading>deg)
+        # to the new depth-based form. Done after the GeoTIFF load so the depth
+        # can be sampled from the grid for older surveys whose *_params.json
+        # did not store ``central_point_depth_m``.
+        self._regenerate_auto_accuracy_export_name()
         if imported_params_shapefile_paths is not None and hasattr(self, '_load_visualization_shapefile_paths'):
             shapefile_load_result = self._load_visualization_shapefile_paths(
                 imported_params_shapefile_paths,
@@ -835,6 +841,13 @@ class ReferenceMixin:
         else:
             self.accuracy_central_point_coords = (None, None)
         self._plot_survey_plan(preserve_view_limits=True)
+        if (self.survey_lines_data or self.cross_line_data) and hasattr(self, "_zoom_to_plan"):
+            self._zoom_to_plan()
+            try:
+                self._last_user_xlim = self.ax.get_xlim()
+                self._last_user_ylim = self.ax.get_ylim()
+            except Exception:
+                pass
         imported_items = []
         if self.survey_lines_data:
             imported_items.append(f"{len(self.survey_lines_data)} survey line(s)")
@@ -854,13 +867,18 @@ class ReferenceMixin:
 
     def _import_survey_files(self):
         """Import reference planning survey lines from CSV, GeoJSON, GPX, or DDD/DMS/DMM/LNW text files."""
+        # If a GMRT download kicked off by a previous import is still in flight,
+        # the import button is showing "Downloading GMRT" -- a click means "cancel".
+        if hasattr(self, "_gmrt_is_downloading") and self._gmrt_is_downloading():
+            self._gmrt_cancel_active_download()
+            return
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Survey File to Import",
             self.last_ref_import_dir,
-            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx *.lnw);;"
+            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx *.lnw *.shp *.gpkg);;"
             "GPX files (*.gpx);;"
-            "Hypack LNW files (*.lnw);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
+            "Hypack LNW files (*.lnw);;Shapefile (*.shp);;GeoPackage (*.gpkg);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
             "Decimal Degrees (*_DDD.txt);;Decimal Degree CSV (*_DDD.csv);;DMM CSV (*_DMM.csv);;DMS CSV (*_DMS.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json)"
         )
         if not file_path:
@@ -949,6 +967,16 @@ class ReferenceMixin:
                             idx = ref_num + 1  # 2=Accuracy Line 1
                             if 2 <= idx < dialog.comboboxes[line_idx].count():
                                 dialog.comboboxes[line_idx].setCurrentIndex(idx)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self._apply_ref_assignments(dialog.get_assignments(), imported_lines)
+                file_processed = True
+
+            if not file_processed and file_ext in ('.shp', '.gpkg'):
+                imported_lines = self._parse_vector_file_as_line_list(file_path)
+                if imported_lines is None:
+                    return
+                dialog = ReferenceLineAssignmentDialog(self, imported_lines)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return
                 self._apply_ref_assignments(dialog.get_assignments(), imported_lines)
@@ -1266,6 +1294,12 @@ class ReferenceMixin:
                     self._load_geotiff_from_path(geotiff_path_to_load)
                 else:
                     self.set_ref_info_text(f"Saved GeoTIFF not found: {geotiff_path_to_load}. Continuing without GeoTIFF.", append=True)
+            # Migrate legacy auto-generated export names
+            # (Accuracy_<spacing>m_<heading>deg) to the new depth-based form.
+            # Done after the GeoTIFF load so the depth can be sampled from the
+            # grid for older surveys whose *_params.json did not store
+            # ``central_point_depth_m``.
+            self._regenerate_auto_accuracy_export_name()
             if imported_params_shapefile_paths is not None and hasattr(self, '_load_visualization_shapefile_paths'):
                 shapefile_load_result = self._load_visualization_shapefile_paths(
                     imported_params_shapefile_paths,
@@ -1296,6 +1330,8 @@ class ReferenceMixin:
 
             # Update plot and sync dynamic-resolution/user-view state to the current imported-plan view.
             self._plot_survey_plan(preserve_view_limits=True)
+            if (self.survey_lines_data or self.cross_line_data) and hasattr(self, "_zoom_to_plan"):
+                self._zoom_to_plan()
             try:
                 self._last_user_xlim = self.ax.get_xlim()
                 self._last_user_ylim = self.ax.get_ylim()
@@ -1395,9 +1431,8 @@ class ReferenceMixin:
         if hasattr(self, 'export_name_entry'):
             self.export_name_entry.clear()
             try:
-                dist = int(float(self.dist_between_lines_entry.text())) if self.dist_between_lines_entry.text() else 0
                 heading = int(float(self.heading_entry.text())) if self.heading_entry.text() else 0
-                export_name = f"Accuracy_{dist}m_{heading}deg"
+                export_name = f"Accuracy_0m_{heading}deg"
             except Exception:
                 export_name = "Accuracy_0m_0deg"
             self.export_name_entry.setText(export_name)
@@ -2023,12 +2058,96 @@ class ReferenceMixin:
     def _on_line_length_or_speed_change(self, *args):
         pass
 
+    # Auto-generated Accuracy export name pattern, e.g. "Accuracy_117m_45deg".
+    # Used to detect imported names that should be regenerated under the new
+    # depth-based scheme rather than preserved verbatim. Custom names that do not
+    # match this pattern are left untouched.
+    _AUTO_ACCURACY_EXPORT_NAME_RE = re.compile(r"^Accuracy_\d+m_\d+deg$", re.IGNORECASE)
+
     def _update_export_name(self):
         try:
-            dist = int(float(self.dist_between_lines_entry.text()))
             heading = int(float(self.heading_entry.text()))
-            export_name = f"Accuracy_{dist}m_{heading}deg"
-            self.export_name_entry.clear()
-            self.export_name_entry.setText(export_name)
+        except (ValueError, TypeError):
+            return
+
+        depth_val = None
+        picked = getattr(self, "_depth_at_picked_point", None)
+        if picked is not None:
+            try:
+                depth_val = float(picked)
+            except (TypeError, ValueError):
+                depth_val = None
+        if depth_val is None and hasattr(self, "central_pt_depth_value_label"):
+            label_text = (self.central_pt_depth_value_label.text() or "").strip()
+            try:
+                depth_val = float(label_text)
+            except (TypeError, ValueError):
+                depth_val = None
+        depth_int = int(abs(depth_val)) if depth_val is not None else 0
+
+        export_name = f"Accuracy_{depth_int}m_{heading}deg"
+        self.export_name_entry.clear()
+        self.export_name_entry.setText(export_name)
+
+    def _regenerate_auto_accuracy_export_name(self):
+        """If the current Export Name is blank or matches the auto-generated
+        ``Accuracy_<int>m_<int>deg`` pattern, rebuild it from the current depth
+        and heading. User-customized names are left untouched.
+        Intended to be called at the end of an Accuracy import, after depth,
+        heading, and (when available) the GeoTIFF have been restored from the
+        saved params, so legacy saved names that encoded line spacing get
+        migrated to the new depth-based form.
+
+        If ``_depth_at_picked_point`` is not set (older surveys saved without
+        ``central_point_depth_m`` in ``*_params.json``), this method also tries
+        to sample the depth from the currently loaded GeoTIFF at the imported
+        central lat/lon. The sampled value is cached on the instance and shown
+        in the ``Central Pt Depth (m)`` label.
+        """
+        if not hasattr(self, "export_name_entry"):
+            return
+        current = (self.export_name_entry.text() or "").strip()
+        if current and not self._AUTO_ACCURACY_EXPORT_NAME_RE.match(current):
+            return
+
+        self._ensure_depth_at_central_point_from_geotiff()
+        self._update_export_name()
+
+    def _ensure_depth_at_central_point_from_geotiff(self):
+        """Populate ``_depth_at_picked_point`` from the loaded GeoTIFF at the
+        Accuracy central lat/lon when it is not already set.
+
+        Safe no-op if no GeoTIFF is loaded, no central coords are entered, or
+        the sampled value is NaN/positive elevation (i.e. not bathymetry)."""
+        if getattr(self, "_depth_at_picked_point", None) is not None:
+            return
+        if not hasattr(self, "_get_depth_at_point"):
+            return
+        if getattr(self, "geotiff_data_array", None) is None:
+            return
+        try:
+            lat_text = (self.central_lat_entry.text() or "").strip()
+            lon_text = (self.central_lon_entry.text() or "").strip()
+            if not lat_text or not lon_text:
+                return
+            lat = float(lat_text)
+            lon = float(lon_text)
+        except (AttributeError, ValueError, TypeError):
+            return
+        try:
+            z = self._get_depth_at_point(lat, lon)
         except Exception:
-            pass
+            return
+        try:
+            zf = float(z)
+        except (TypeError, ValueError):
+            return
+        if not np.isfinite(zf) or zf > 0:
+            # Above water or invalid -> do not record as depth.
+            return
+        depth_m = abs(zf)
+        if depth_m <= 0:
+            return
+        self._depth_at_picked_point = depth_m
+        if hasattr(self, "central_pt_depth_value_label"):
+            self.central_pt_depth_value_label.setText(f"{depth_m:.1f}")

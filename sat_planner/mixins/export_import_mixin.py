@@ -22,6 +22,49 @@ except ImportError:
 class ExportImportMixin:
     """Mixin for save/load survey parameters and export survey files."""
 
+    def _gpkg_path_for_shapefile(self, shapefile_path):
+        """Return the .gpkg companion path for a given shapefile path."""
+        if not shapefile_path:
+            return None
+        base, _ = os.path.splitext(shapefile_path)
+        return base + ".gpkg"
+
+    def _write_gpkg_if_enabled(self, shapefile_path, schema, features, *, crs="EPSG:4326", layer_name=None):
+        """Write the same features that were exported to a shapefile to a GeoPackage.
+
+        No-op (returns ``None``) when:
+          * the ``gpkg`` export option is disabled,
+          * ``fiona`` is not available, or
+          * ``features`` is empty.
+
+        Errors during write are swallowed (with a console message) so they
+        never break the main shapefile export. Layer name defaults to the
+        file basename, matching Fiona's default behavior.
+        """
+        if not self._export_type_enabled("gpkg"):
+            return None
+        if fiona is None:
+            return None
+        if not features:
+            return None
+        gpkg_path = self._gpkg_path_for_shapefile(shapefile_path)
+        if not gpkg_path:
+            return None
+        try:
+            if os.path.exists(gpkg_path):
+                # Fiona append-mode for GPKG is fiddly; the simplest contract
+                # is "exporting overwrites prior runs", matching shapefile.
+                os.remove(gpkg_path)
+            kwargs = {"driver": "GPKG", "crs": crs, "schema": schema}
+            if layer_name:
+                kwargs["layer"] = layer_name
+            with fiona.open(gpkg_path, "w", **kwargs) as collection:
+                collection.writerecords(features)
+            return gpkg_path
+        except Exception as e:
+            print(f"Warning: failed to write GeoPackage {gpkg_path}: {e}")
+            return None
+
     def _export_type_enabled(self, key):
         defaults = (
             self._default_export_type_options()
@@ -97,10 +140,16 @@ class ExportImportMixin:
         # Use the export name from the form, with .json extension
         export_name = values['export_name']
         if not export_name:
-            # Fallback to default naming if export name is empty
-            dist_between_lines = int(values['dist_between_lines'])
+            # Fallback to default naming if export name is empty: depth at center
+            # (m) + main line heading (deg). Depth comes from Pick Center or an
+            # imported survey's params; falls back to 0 when not available.
             heading_int = int(values['heading'])
-            export_name = f"Accuracy_{dist_between_lines}m_{heading_int}deg"
+            picked_depth = getattr(self, '_depth_at_picked_point', None)
+            try:
+                depth_int = int(abs(float(picked_depth))) if picked_depth is not None else 0
+            except (TypeError, ValueError):
+                depth_int = 0
+            export_name = f"Accuracy_{depth_int}m_{heading_int}deg"
         filename = f"{export_name}_params.json"
         file_path = os.path.join(save_dir, filename)
 
@@ -274,6 +323,7 @@ class ExportImportMixin:
             profile_csv_path = None
             profile_png_paths = []
             export_shapefile = self._export_type_enabled("esri_shapefile")
+            export_gpkg = self._export_type_enabled("gpkg")
             export_sis = self._export_type_enabled("sis_asciiplan")
             export_gpx = self._export_type_enabled("gpx")
             export_text_csv = self._export_type_enabled("text_csv")
@@ -281,8 +331,8 @@ class ExportImportMixin:
             export_hypack = self._export_type_enabled("hypack_lnw")
             export_map_png = self._export_map_png_enabled()
             export_profiles_png = self._export_profiles_png_enabled()
-            if export_shapefile and mapping is None:
-                raise ImportError("shapely.geometry.mapping is required for shapefile export")
+            if (export_shapefile or export_gpkg) and mapping is None:
+                raise ImportError("shapely.geometry.mapping is required for shapefile/GeoPackage export")
 
             # --- Build common rows (line_num, line_name, point_label, lat, lon) for reference survey ---
             ref_rows = []
@@ -313,9 +363,9 @@ class ExportImportMixin:
                 export_utils.write_dms_txt(dms_txt_file_path, ref_rows)
                 export_utils.write_ddd_txt(txt_file_path, ref_rows)
 
-            # --- Export to ESRI Shapefile (.shp) ---
+            # --- Export to ESRI Shapefile (.shp) and/or GeoPackage (.gpkg) ---
             shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
-            if export_shapefile:
+            if export_shapefile or export_gpkg:
                 schema = {
                     'geometry': 'LineString',
                     'properties': {'line_num': 'int', 'line_name': 'str'},
@@ -336,8 +386,10 @@ class ExportImportMixin:
                         'geometry': mapping(shapely_cross_line),
                         'properties': {'line_num': 0, 'line_name': 'Crossline'},
                     })
-                with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
-                    collection.writerecords(features)
+                if export_shapefile:
+                    with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
+                        collection.writerecords(features)
+                self._write_gpkg_if_enabled(shapefile_path, schema, features, crs=crs_epsg)
 
             # --- Export to GeoJSON ---
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
@@ -691,6 +743,7 @@ class ExportImportMixin:
             self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot export.")
             return
         export_shapefile = self._export_type_enabled("esri_shapefile")
+        export_gpkg = self._export_type_enabled("gpkg")
         export_sis = self._export_type_enabled("sis_asciiplan")
         export_gpx = self._export_type_enabled("gpx")
         export_text_csv = self._export_type_enabled("text_csv")
@@ -698,8 +751,8 @@ class ExportImportMixin:
         export_hypack = self._export_type_enabled("hypack_lnw")
         export_map_png = self._export_map_png_enabled()
         export_profiles_png = self._export_profiles_png_enabled()
-        if export_shapefile and mapping is None:
-            self._show_message("warning", "Export Error", "Shapely is required for shapefile export.")
+        if (export_shapefile or export_gpkg) and mapping is None:
+            self._show_message("warning", "Export Error", "Shapely is required for shapefile/GeoPackage export.")
             return
 
         lines = getattr(self, "performance_test_lines_data", None) or []
@@ -765,7 +818,7 @@ class ExportImportMixin:
                 export_utils.write_ddd_txt(txt_file_path, perf_rows)
 
             shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
-            if export_shapefile:
+            if export_shapefile or export_gpkg:
                 schema = {"geometry": "LineString", "properties": {"line_num": "int", "line_name": "str"}}
                 crs_epsg = "EPSG:4326"
                 features = []
@@ -784,8 +837,10 @@ class ExportImportMixin:
                             "geometry": mapping(shapely_line),
                             "properties": {"line_num": 10 + bn, "line_name": f"BISTLine{bn}"},
                         })
-                with fiona.open(shapefile_path, "w", driver="ESRI Shapefile", crs=crs_epsg, schema=schema) as collection:
-                    collection.writerecords(features)
+                if export_shapefile:
+                    with fiona.open(shapefile_path, "w", driver="ESRI Shapefile", crs=crs_epsg, schema=schema) as collection:
+                        collection.writerecords(features)
+                self._write_gpkg_if_enabled(shapefile_path, schema, features, crs=crs_epsg)
 
             geojson_features = []
             geotiff_path = self.current_geotiff_path if hasattr(self, "current_geotiff_path") and self.current_geotiff_path else None

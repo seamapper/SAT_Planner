@@ -693,7 +693,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         options = getattr(self, "export_type_options", self._default_export_type_options())
         checkbox_specs = [
-            ("esri_shapefile", "ESRI Shapefile"),
+            ("esri_shapefile", "ESRI Shapefile (.shp)"),
+            ("gpkg", "GeoPackage (.gpkg)"),
             ("sis_asciiplan", "SIS ASCIIplan"),
             ("gpx", "GPX"),
             ("text_csv", "Text (.csv)"),
@@ -1352,9 +1353,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
         self.export_name_entry = QLineEdit()
         try:
-            dist = int(float(self.dist_between_lines_entry.text() or "0"))
             heading = int(float(self.heading_entry.text() or "0"))
-            export_name = f"Accuracy_{dist}m_{heading}deg"
+            export_name = f"Accuracy_0m_{heading}deg"
         except Exception:
             export_name = "Accuracy_0m_0deg"
         self.export_name_entry.setText(export_name)

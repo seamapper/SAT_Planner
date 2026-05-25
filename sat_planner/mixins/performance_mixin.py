@@ -1032,6 +1032,7 @@ class PerformanceMixin:
             log_func=lambda msg, append=True: self.set_performance_activity_text(msg, append=append),
             default_directory=getattr(self, "last_perf_import_dir", None),
             split_topo_depths=split_topo_depths,
+            gmrt_button=getattr(self, "performance_import_survey_btn", None),
         )
 
     def _perf_import_post_import(self, file_path):
@@ -1163,6 +1164,9 @@ class PerformanceMixin:
         if hasattr(self, "_update_performance_ping_time"):
             self._update_performance_ping_time()
         self._plot_survey_plan(preserve_view_limits=True)
+        if (len(getattr(self, "performance_test_lines_data", []) or []) == 4
+                and hasattr(self, "_zoom_to_performance_lines")):
+            self._zoom_to_performance_lines()
         try:
             self._last_user_xlim = self.ax.get_xlim()
             self._last_user_ylim = self.ax.get_ylim()
@@ -1185,6 +1189,11 @@ class PerformanceMixin:
 
     def _import_performance_survey(self):
         """Import performance plan from the same file types as Accuracy; assign lines when needed."""
+        # If a GMRT download kicked off by a previous import is still in flight,
+        # the import button is showing "Downloading GMRT" -- a click means "cancel".
+        if hasattr(self, "_gmrt_is_downloading") and self._gmrt_is_downloading():
+            self._gmrt_cancel_active_download()
+            return
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded.")
             return
@@ -1193,8 +1202,8 @@ class PerformanceMixin:
             self,
             "Select Performance Survey File to Import",
             getattr(self, "last_perf_import_dir", os.path.expanduser("~")),
-            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx *.lnw);;"
-            "Hypack LNW files (*.lnw);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
+            "Known Survey Files (*_DMS.txt *_DMM.txt *_DDD.txt *_DDD.csv *_DMM.csv *_DMS.csv *.csv *.geojson *.json *.gpx *.lnw *.shp *.gpkg);;"
+            "Hypack LNW files (*.lnw);;Shapefile (*.shp);;GeoPackage (*.gpkg);;Degrees Minutes Seconds (*_DMS.txt);;Degrees Decimal Minutes (*_DMM.txt);;"
             "Decimal Degrees (*_DDD.txt);;Decimal Degree CSV (*_DDD.csv);;DMM CSV (*_DMM.csv);;DMS CSV (*_DMS.csv);;CSV (*.csv);;GeoJSON (*.geojson);;JSON (*.json);;GPX (*.gpx)",
         )
         if not file_path:
@@ -1248,6 +1257,16 @@ class PerformanceMixin:
 
             if not file_processed and file_basename.lower().endswith("_ddd.txt"):
                 imported_lines = self._parse_ddd_txt_file(file_path)
+                if imported_lines is None:
+                    return
+                dialog = PerformanceLineAssignmentDialog(self, imported_lines)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    return
+                self._apply_performance_assignments(dialog.get_assignments(), imported_lines)
+                file_processed = True
+
+            if not file_processed and file_ext in (".shp", ".gpkg"):
+                imported_lines = self._parse_vector_file_as_line_list(file_path)
                 if imported_lines is None:
                     return
                 dialog = PerformanceLineAssignmentDialog(self, imported_lines)

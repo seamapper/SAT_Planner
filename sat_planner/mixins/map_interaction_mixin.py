@@ -558,8 +558,8 @@ class MapInteractionMixin:
                             self.bisect_lead_entry.blockSignals(True)
                             self.bisect_lead_entry.setText(f"{bisect_lead:.2f}")
                             self.bisect_lead_entry.blockSignals(False)
-                            # Set Export Name to 'Accuracy_' + int(distance between lines) + 'm_' + int(heading) + 'deg'
-                            export_name_to_set = f"Accuracy_{int(calculated_dist_between_lines)}m_{int(float(self.heading_entry.text()))}deg"
+                            # Set Export Name to 'Accuracy_' + int(depth at center) + 'm_' + int(heading) + 'deg'
+                            export_name_to_set = f"Accuracy_{int(abs(z_value))}m_{int(float(self.heading_entry.text()))}deg"
                         else:
                             self._show_message("warning","Input Warning",
                                                    "Calculated Distance Between Lines is not positive. Not setting Distance automatically.")
