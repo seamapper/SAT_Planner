@@ -1464,8 +1464,8 @@ class CalibrationMixin:
 
             # Handle *.lnw format (Hypack LNW)
             if file_ext == '.lnw':
-                # Show UTM zone dialog
-                utm_dialog = UTMZoneDialog(self)
+                # Show UTM zone dialog (auto-fill zone/hemisphere from filename when possible)
+                utm_dialog = UTMZoneDialog.for_file(self, file_path)
                 if utm_dialog.exec() != QDialog.DialogCode.Accepted:
                     return  # User cancelled
                 
@@ -1474,6 +1474,10 @@ class CalibrationMixin:
                 imported_lines = self._parse_lnw_file(file_path, utm_zone, hemisphere)
                 if imported_lines is None:
                     return  # Error already shown
+                if len(imported_lines) != 4:
+                    self._show_message("error", "Calibration Import",
+                                     f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
+                    return
                 suggested = _suggest_calibration_assignments_from_geometry(imported_lines)
                 dialog = LineAssignmentDialog(self, imported_lines, suggested)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
@@ -1877,6 +1881,9 @@ class CalibrationMixin:
         east = mid_lon + buffer_deg
         south = mid_lat - buffer_deg
         north = mid_lat + buffer_deg
+        split_topo_depths = True
+        if hasattr(self, 'cal_split_topo_depths_checkbox'):
+            split_topo_depths = bool(self.cal_split_topo_depths_checkbox.isChecked())
         self._download_gmrt_and_load(
             west, east, south, north,
             resolution=100,
@@ -1884,6 +1891,7 @@ class CalibrationMixin:
             default_filename_prefix="GMRT_Bathy",
             log_func=lambda msg, append=True: self.set_cal_info_text(msg, append=append),
             default_directory=getattr(self, "last_cal_import_dir", None),
+            split_topo_depths=split_topo_depths,
         )
 
     def _calculate_calibration_survey_statistics(self):

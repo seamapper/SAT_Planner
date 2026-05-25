@@ -9,6 +9,8 @@ import datetime
 from PyQt6.QtWidgets import QFileDialog
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from ..gmrt_split import split_topo_bathy
+
 try:
     import requests
 except ImportError:
@@ -74,6 +76,7 @@ class GMRTDownloadMixin:
         default_filename_prefix="GMRT_Bathy",
         log_func=None,
         default_directory=None,
+        split_topo_depths=False,
     ):
         """
         Prompt for save path, download GMRT GeoTIFF for the given bounds, then load it.
@@ -87,6 +90,11 @@ class GMRTDownloadMixin:
                       set_cal_info_text, set_ref_info_text, or set_line_info_text if present.
             default_directory: Optional directory for the save dialog (e.g. directory of imported survey file).
                               If None, uses last_geotiff_dir or user home.
+            split_topo_depths: When True, after a successful download the GeoTIFF is split into
+                              a topography file (values >= 0) and a bathymetry file (values < 0);
+                              SAT Planner loads only the bathymetry file. When False, the combined
+                              GeoTIFF is loaded as-is. If the bathymetry partition is empty the
+                              downloaded files are deleted and the user is warned.
         """
         if requests is None:
             self._show_message(
@@ -148,17 +156,24 @@ class GMRTDownloadMixin:
         worker = GMRTDownloadWorker(params, save_path)
         worker.finished.connect(
             lambda success, path_or_error: self._on_gmrt_download_finished(
-                success, path_or_error, _log
+                success, path_or_error, _log, split_topo_depths
             )
         )
         self._gmrt_download_worker = worker
         worker.start()
 
-    def _on_gmrt_download_finished(self, success, path_or_error, log_func):
+    def _on_gmrt_download_finished(self, success, path_or_error, log_func, split_topo_depths=False):
         if success:
-            log_func("GMRT grid downloaded. Loading GeoTIFF...", append=True)
+            log_func("GMRT grid downloaded.", append=True)
+            path_to_load = self._maybe_split_gmrt_grid(path_or_error, split_topo_depths, log_func)
+            if path_to_load is None:
+                # Split was requested but produced no bathymetry; files have been removed and
+                # the user has been warned. Do not load anything.
+                self._gmrt_download_worker = None
+                return
+            log_func("Loading GeoTIFF...", append=True)
             if hasattr(self, "_load_geotiff_from_path"):
-                self._load_geotiff_from_path(path_or_error)
+                self._load_geotiff_from_path(path_to_load)
             log_func("GMRT grid loaded.", append=True)
             # If this was a calibration-import GMRT download, set suggested export name from pitch line (offset + heading), same as when drawing
             if (hasattr(self, "param_notebook") and self.param_notebook.currentIndex() == 0
@@ -170,3 +185,69 @@ class GMRTDownloadMixin:
             self._show_message("error", "GMRT Download", path_or_error)
             log_func(f"GMRT download failed: {path_or_error}", append=True)
         self._gmrt_download_worker = None
+
+    def _maybe_split_gmrt_grid(self, downloaded_path, split_topo_depths, log_func):
+        """Apply optional topo/bathy split to a freshly downloaded GMRT GeoTIFF.
+
+        Returns the path the caller should load, or None if nothing should be loaded
+        (e.g., split requested but no bathymetry in the download). When None is returned,
+        all downloaded artifacts (combined, topo, bathy) have been deleted and the user
+        has been informed.
+        """
+        if not split_topo_depths:
+            return downloaded_path
+
+        result = split_topo_bathy(
+            downloaded_path,
+            log=lambda msg: log_func(msg, append=True),
+        )
+        if result.error:
+            self._show_message(
+                "warning",
+                "GMRT Split",
+                f"{result.error}\n\nLoading the combined GeoTIFF instead.",
+            )
+            log_func(f"GMRT split failed: {result.error}", append=True)
+            return downloaded_path
+
+        if result.bathy_path is None:
+            # No bathymetry in the downloaded extent. Per user request: warn and
+            # delete everything that was downloaded so nothing is left behind.
+            removed = []
+            for path in (result.topo_path, downloaded_path):
+                if path and os.path.exists(path):
+                    try:
+                        os.remove(path)
+                        removed.append(os.path.basename(path))
+                    except OSError as exc:
+                        log_func(
+                            f"Failed to delete {os.path.basename(path)} after empty-bathy download: {exc}",
+                            append=True,
+                        )
+            if removed:
+                log_func(
+                    "Deleted downloaded GMRT grid(s) (no bathymetry): " + ", ".join(removed),
+                    append=True,
+                )
+            self._show_message(
+                "warning",
+                "GMRT Download",
+                "The downloaded GMRT grid contains no bathymetry (no values below 0 m). "
+                "The downloaded file(s) have been deleted and nothing was loaded.",
+            )
+            return None
+
+        # Split succeeded and we have a bathy file. Remove the original combined file.
+        if os.path.exists(downloaded_path):
+            try:
+                os.remove(downloaded_path)
+                log_func(
+                    f"Deleted original combined GeoTIFF after split: {os.path.basename(downloaded_path)}",
+                    append=True,
+                )
+            except OSError as exc:
+                log_func(
+                    f"Failed to delete combined GeoTIFF {os.path.basename(downloaded_path)}: {exc}",
+                    append=True,
+                )
+        return result.bathy_path

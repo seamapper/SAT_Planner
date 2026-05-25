@@ -399,6 +399,9 @@ class GeoTIFFMixin:
         east = mid_lon + buffer_deg
         south = mid_lat - buffer_deg
         north = mid_lat + buffer_deg
+        split_topo_depths = True
+        if hasattr(self, "backscatter_split_topo_depths_checkbox"):
+            split_topo_depths = bool(self.backscatter_split_topo_depths_checkbox.isChecked())
         self._download_gmrt_and_load(
             west, east, south, north,
             resolution=100,
@@ -406,6 +409,7 @@ class GeoTIFFMixin:
             default_filename_prefix="GMRT_Bathy",
             log_func=lambda msg, append=True: self.set_line_info_text(msg, append=append) if hasattr(self, "set_line_info_text") else None,
             default_directory=getattr(self, "last_backscatter_import_dir", None),
+            split_topo_depths=split_topo_depths,
         )
 
     def _import_backscatter_line(self):
@@ -434,7 +438,7 @@ class GeoTIFFMixin:
                 points = self._parse_dmm_txt_file_as_polyline(file_path) or []
             elif ext == ".lnw" and hasattr(self, "_parse_lnw_file_as_polyline"):
                 from .survey_parsers_mixin import UTMZoneDialog
-                utm_dialog = UTMZoneDialog(self)
+                utm_dialog = UTMZoneDialog.for_file(self, file_path)
                 if utm_dialog.exec() != QDialog.DialogCode.Accepted:
                     return
                 zone, hem = utm_dialog.get_utm_info()

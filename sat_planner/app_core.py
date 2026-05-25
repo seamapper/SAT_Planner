@@ -487,6 +487,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.backscatter_download_gmrt_checkbox.setEnabled(False)
             if hasattr(self, 'backscatter_gmrt_buffer_spin'):
                 self.backscatter_gmrt_buffer_spin.setEnabled(False)
+            if hasattr(self, 'backscatter_split_topo_depths_checkbox'):
+                self.backscatter_split_topo_depths_checkbox.setEnabled(False)
             if hasattr(self, 'backscatter_show_stats_btn'):
                 self.backscatter_show_stats_btn.setEnabled(False)
             if hasattr(self, 'backscatter_clear_box_btn'):
@@ -1321,6 +1323,16 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.ref_gmrt_buffer_spin.setMinimumWidth(60)
         self.ref_gmrt_buffer_spin.setToolTip("Buffer size in degrees around survey extent for GMRT download.")
         ref_gmrt_row_layout.addWidget(self.ref_gmrt_buffer_spin)
+        self.ref_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
+        self.ref_split_topo_depths_checkbox.setChecked(True)
+        self.ref_split_topo_depths_checkbox.setToolTip(
+            "When on, the downloaded GMRT GeoTIFF is split into a topography file "
+            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
+            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
+        )
+        self.ref_split_topo_depths_checkbox.setEnabled(self.ref_download_gmrt_checkbox.isChecked())
+        self.ref_download_gmrt_checkbox.toggled.connect(self.ref_split_topo_depths_checkbox.setEnabled)
+        ref_gmrt_row_layout.addWidget(self.ref_split_topo_depths_checkbox)
         ref_gmrt_row_layout.addStretch()
         ref_import_export_layout.addWidget(ref_gmrt_row)
         ref_import_export_layout.addSpacing(3)
@@ -1591,6 +1603,16 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.cal_gmrt_buffer_spin.setMinimumWidth(60)
         self.cal_gmrt_buffer_spin.setToolTip("Buffer size in degrees around survey extent for GMRT download.")
         gmrt_row_layout.addWidget(self.cal_gmrt_buffer_spin)
+        self.cal_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
+        self.cal_split_topo_depths_checkbox.setChecked(True)
+        self.cal_split_topo_depths_checkbox.setToolTip(
+            "When on, the downloaded GMRT GeoTIFF is split into a topography file "
+            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
+            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
+        )
+        self.cal_split_topo_depths_checkbox.setEnabled(self.cal_download_gmrt_checkbox.isChecked())
+        self.cal_download_gmrt_checkbox.toggled.connect(self.cal_split_topo_depths_checkbox.setEnabled)
+        gmrt_row_layout.addWidget(self.cal_split_topo_depths_checkbox)
         gmrt_row_layout.addStretch()
         cal_import_export_layout.addWidget(gmrt_row)
         cal_import_export_layout.addSpacing(3)
@@ -1755,6 +1777,16 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.line_plan_gmrt_buffer_spin.setMinimumWidth(60)
         self.line_plan_gmrt_buffer_spin.setToolTip("Buffer size in degrees around survey extent for GMRT download.")
         line_gmrt_row_layout.addWidget(self.line_plan_gmrt_buffer_spin)
+        self.line_plan_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
+        self.line_plan_split_topo_depths_checkbox.setChecked(True)
+        self.line_plan_split_topo_depths_checkbox.setToolTip(
+            "When on, the downloaded GMRT GeoTIFF is split into a topography file "
+            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
+            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
+        )
+        self.line_plan_split_topo_depths_checkbox.setEnabled(self.line_plan_download_gmrt_checkbox.isChecked())
+        self.line_plan_download_gmrt_checkbox.toggled.connect(self.line_plan_split_topo_depths_checkbox.setEnabled)
+        line_gmrt_row_layout.addWidget(self.line_plan_split_topo_depths_checkbox)
         line_gmrt_row_layout.addStretch()
         line_import_export_layout.addWidget(line_gmrt_row)
         line_import_export_layout.addSpacing(3)
@@ -2155,6 +2187,16 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_gmrt_buffer_spin.setMinimumWidth(60)
         self.backscatter_gmrt_buffer_spin.setToolTip("Buffer size in degrees around backscatter extent for GMRT download.")
         backscatter_gmrt_row_layout.addWidget(self.backscatter_gmrt_buffer_spin)
+        self.backscatter_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
+        self.backscatter_split_topo_depths_checkbox.setChecked(True)
+        self.backscatter_split_topo_depths_checkbox.setToolTip(
+            "When on, the downloaded GMRT GeoTIFF is split into a topography file "
+            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
+            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
+        )
+        self.backscatter_split_topo_depths_checkbox.setEnabled(self.backscatter_download_gmrt_checkbox.isChecked())
+        self.backscatter_download_gmrt_checkbox.toggled.connect(self.backscatter_split_topo_depths_checkbox.setEnabled)
+        backscatter_gmrt_row_layout.addWidget(self.backscatter_split_topo_depths_checkbox)
         backscatter_gmrt_row_layout.addStretch()
         backscatter_import_export_layout.addWidget(backscatter_gmrt_row)
         backscatter_import_export_layout.addSpacing(3)
@@ -2367,6 +2409,16 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.performance_gmrt_buffer_spin.setMinimumWidth(60)
         self.performance_gmrt_buffer_spin.setToolTip("Buffer size in degrees around performance plan extent for GMRT download.")
         perf_gmrt_row_layout.addWidget(self.performance_gmrt_buffer_spin)
+        self.performance_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
+        self.performance_split_topo_depths_checkbox.setChecked(True)
+        self.performance_split_topo_depths_checkbox.setToolTip(
+            "When on, the downloaded GMRT GeoTIFF is split into a topography file "
+            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
+            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
+        )
+        self.performance_split_topo_depths_checkbox.setEnabled(self.performance_download_gmrt_checkbox.isChecked())
+        self.performance_download_gmrt_checkbox.toggled.connect(self.performance_split_topo_depths_checkbox.setEnabled)
+        perf_gmrt_row_layout.addWidget(self.performance_split_topo_depths_checkbox)
         perf_gmrt_row_layout.addStretch()
         perf_import_export_layout.addWidget(perf_gmrt_row)
         perf_import_export_layout.addSpacing(3)

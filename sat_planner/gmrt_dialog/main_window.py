@@ -21,6 +21,7 @@ except ImportError:
 from .config import __version__
 from .workers import MapWorker, MosaicWorker, DownloadWorker
 from .map_widget import MapWidget
+from ..gmrt_split import split_topo_bathy, bathy_path_after_split
 
 
 def _project_root():
@@ -1185,51 +1186,23 @@ class GMRTGrabber(QWidget):
         """
         Split a GeoTIFF into topography (>=0) and bathymetry (<0) files.
         Appends _topo and _bathy to the base filename. SAT Planner uses GeoTIFF only.
+        Delegates to sat_planner.gmrt_split for the file production; deletes the
+        original combined file afterwards (existing dialog behavior).
         """
-        import os
-        base, ext = os.path.splitext(filename)
-        output_ext = ext if ext.lower() in ('.tif', '.tiff') else '.tif'
-        topo_file = base + '_topo' + output_ext
-        bathy_file = base + '_bathy' + output_ext
-        try:
-            deleted_files = []
-            if rasterio is None:
-                self.log_message("Split requires rasterio.")
-                return
-            with rasterio.open(filename) as src:
-                data = src.read(1)
-                profile = src.profile
-                topo_data = np.where(data >= 0, data, np.nan)
-                bathy_data = np.where(data < 0, data, np.nan)
-                profile.update(dtype=rasterio.float32, nodata=np.nan)
-                with rasterio.open(topo_file, 'w', **profile) as dst:
-                    dst.write(topo_data.astype(np.float32), 1)
-                with rasterio.open(bathy_file, 'w', **profile) as dst:
-                    dst.write(bathy_data.astype(np.float32), 1)
-            for f, arr, label in [(topo_file, topo_data, 'topo'), (bathy_file, bathy_data, 'bathy')]:
-                if np.isnan(arr).all() or os.path.getsize(f) == 0:
-                    try:
-                        os.remove(f)
-                        deleted_files.append(f)
-                        self.log_message(f"Deleted empty {label} GeoTIFF: {os.path.basename(f)}")
-                    except Exception as e:
-                        self.log_message(f"Failed to delete empty {label} GeoTIFF: {os.path.basename(f)}: {e}")
-            self.log_message(f"Split GeoTIFF: {os.path.basename(topo_file)}, {os.path.basename(bathy_file)}")
-            # After splitting and empty checks, delete the original if split is enabled
-            if os.path.exists(filename):
-                try:
-                    os.remove(filename)
-                    self.log_message(f"Deleted original unsplit file: {os.path.basename(filename)} after splitting.")
-                except Exception as e:
-                    self.log_message(f"Failed to delete original unsplit file: {os.path.basename(filename)}: {e}")
-        except Exception as e:
-            self.log_message(f"Error splitting grid: {str(e)}")
+        result = split_topo_bathy(filename, log=self.log_message)
+        if result.error:
+            self.log_message(result.error)
+            return
+        if os.path.exists(filename):
+            try:
+                os.remove(filename)
+                self.log_message(f"Deleted original unsplit file: {os.path.basename(filename)} after splitting.")
+            except Exception as e:
+                self.log_message(f"Failed to delete original unsplit file: {os.path.basename(filename)}: {e}")
 
     def _bathy_path_after_split(self, original_path):
         """Return the bathy path that split_grid_file would produce. Used so SAT Planner can load bathy when split is enabled."""
-        base, ext = os.path.splitext(original_path)
-        output_ext = ext if ext.lower() in ('.tif', '.tiff') else '.tif'
-        return base + '_bathy' + output_ext
+        return bathy_path_after_split(original_path)
 
     def on_single_download_finished(self, success, result):
         """Callback for single download completion"""

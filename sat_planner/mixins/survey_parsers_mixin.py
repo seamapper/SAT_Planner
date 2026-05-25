@@ -4,6 +4,7 @@ Shared by Calibration, Reference, and Line Planning import.
 Expects host to provide _show_message().
 """
 import os
+import re
 
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QSpinBox, QComboBox)
@@ -11,10 +12,44 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj
 
 
+# Match the common "UTM<zone><N|S>" tag in filenames, e.g. Survey_UTM18N.lnw,
+# survey-utm5s_2024.lnw, foo_UTM01N_bar.lnw. The hemisphere letter must not be
+# immediately followed by another letter so "UTM18North" or "UTM18Norway" still
+# match (they end with N + non-letter). 1-2 digit zone, case-insensitive.
+_UTM_FILENAME_PATTERN = re.compile(r"UTM(\d{1,2})([NS])(?![A-Za-z])", re.IGNORECASE)
+
+
+def parse_utm_zone_from_filename(file_path):
+    """Extract UTM zone and hemisphere from a filename if it follows the
+    common ``*_UTM<zone><N|S>*`` convention.
+
+    Args:
+        file_path: Full path or bare filename to inspect.
+
+    Returns:
+        (zone:int, hemisphere:str) tuple where hemisphere is "North" or "South",
+        or (None, None) if no valid match is found. Zone must be 1..60.
+    """
+    if not file_path:
+        return (None, None)
+    basename = os.path.basename(str(file_path))
+    match = _UTM_FILENAME_PATTERN.search(basename)
+    if not match:
+        return (None, None)
+    try:
+        zone = int(match.group(1))
+    except (TypeError, ValueError):
+        return (None, None)
+    if not (1 <= zone <= 60):
+        return (None, None)
+    hemisphere = "North" if match.group(2).upper() == "N" else "South"
+    return (zone, hemisphere)
+
+
 class UTMZoneDialog(QDialog):
     """Dialog for getting UTM zone and hemisphere from user."""
 
-    def __init__(self, parent):
+    def __init__(self, parent, default_zone=18, default_hemisphere="North", detected_from_filename=False):
         super().__init__(parent)
         self.setWindowTitle("UTM Zone Information")
         self.setMinimumWidth(300)
@@ -23,11 +58,28 @@ class UTMZoneDialog(QDialog):
         self.utm_zone = None
         self.hemisphere = None
 
+        try:
+            default_zone_int = int(default_zone) if default_zone is not None else 18
+        except (TypeError, ValueError):
+            default_zone_int = 18
+        if not (1 <= default_zone_int <= 60):
+            default_zone_int = 18
+        default_hemi = str(default_hemisphere or "North").strip().capitalize()
+        if default_hemi not in ("North", "South"):
+            default_hemi = "North"
+
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
         layout.setContentsMargins(15, 15, 15, 15)
 
-        instructions = QLabel("Please enter the UTM zone information for the LNW file:")
+        if detected_from_filename:
+            instructions_text = (
+                f"Detected UTM zone {default_zone_int} {default_hemi} from the file name. "
+                "Confirm or change before importing the LNW file:"
+            )
+        else:
+            instructions_text = "Please enter the UTM zone information for the LNW file:"
+        instructions = QLabel(instructions_text)
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
 
@@ -39,7 +91,7 @@ class UTMZoneDialog(QDialog):
         self.zone_spinbox = QSpinBox()
         self.zone_spinbox.setMinimum(1)
         self.zone_spinbox.setMaximum(60)
-        self.zone_spinbox.setValue(18)
+        self.zone_spinbox.setValue(default_zone_int)
         zone_layout.addWidget(self.zone_spinbox)
         zone_layout.addStretch()
         layout.addLayout(zone_layout)
@@ -51,6 +103,7 @@ class UTMZoneDialog(QDialog):
 
         self.hemisphere_combo = QComboBox()
         self.hemisphere_combo.addItems(["North", "South"])
+        self.hemisphere_combo.setCurrentText(default_hemi)
         hemisphere_layout.addWidget(self.hemisphere_combo)
         hemisphere_layout.addStretch()
         layout.addLayout(hemisphere_layout)
@@ -75,6 +128,16 @@ class UTMZoneDialog(QDialog):
 
     def get_utm_info(self):
         return (self.utm_zone, self.hemisphere)
+
+    @classmethod
+    def for_file(cls, parent, file_path):
+        """Build a UTMZoneDialog with zone/hemisphere pre-filled from the
+        filename when possible (e.g. ``Survey_UTM18N.lnw`` -> 18, North).
+        Falls back to (18, North) when the pattern is absent."""
+        zone, hemi = parse_utm_zone_from_filename(file_path)
+        if zone is None:
+            return cls(parent)
+        return cls(parent, default_zone=zone, default_hemisphere=hemi, detected_from_filename=True)
 
 
 class SurveyParsersMixin:
@@ -429,9 +492,6 @@ class SurveyParsersMixin:
                 self._show_message("error", "Import Error",
                                  "No valid lines found in LNW file.")
                 return None
-            if len(imported_lines) != 4:
-                self._show_message("warning", "Import Warning",
-                                 f"LNW file contains {len(imported_lines)} lines. Expected 4 lines for calibration survey.")
             return imported_lines
         except FileNotFoundError:
             self._show_message("error", "Import Error", f"File not found: {file_path}")

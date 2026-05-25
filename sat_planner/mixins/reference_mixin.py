@@ -443,6 +443,9 @@ class ReferenceMixin:
         east = mid_lon + buffer_deg
         south = mid_lat - buffer_deg
         north = mid_lat + buffer_deg
+        split_topo_depths = True
+        if hasattr(self, "ref_split_topo_depths_checkbox"):
+            split_topo_depths = bool(self.ref_split_topo_depths_checkbox.isChecked())
         self._download_gmrt_and_load(
             west, east, south, north,
             resolution=100,
@@ -450,6 +453,7 @@ class ReferenceMixin:
             default_filename_prefix="GMRT_Bathy",
             log_func=lambda msg, append=True: self.set_ref_info_text(msg, append=append),
             default_directory=getattr(self, "last_ref_import_dir", None),
+            split_topo_depths=split_topo_depths,
         )
 
     def _compute_crossline_lead_from_import(self):
@@ -882,7 +886,7 @@ class ReferenceMixin:
                 if UTMZoneDialog is None:
                     self._show_message("error", "Import Error", "UTM zone dialog not available.")
                     return
-                utm_dialog = UTMZoneDialog(self)
+                utm_dialog = UTMZoneDialog.for_file(self, file_path)
                 if utm_dialog.exec() != QDialog.DialogCode.Accepted:
                     return
                 utm_zone, hemisphere = utm_dialog.get_utm_info()
