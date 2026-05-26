@@ -81,7 +81,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         # Initialize figure and axes with fixed size
         self.figure = Figure(figsize=(12, 10))  # Increased size for better visibility
         self.ax = self.figure.add_subplot(111)
-        self.figure.subplots_adjust(left=0.085, right=0.95, top=0.95, bottom=0.08)
+        self.figure.subplots_adjust(left=0.085, right=0.99, top=0.95, bottom=0.08)
 
         # Set fixed plot window limits (global extent that will be maintained)
         # These will be the default limits when no GeoTIFF is loaded

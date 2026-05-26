@@ -341,7 +341,7 @@ class PlottingMixin:
 
         # Get figure dimensions to calculate figure aspect ratio
         fig_width, fig_height = self.figure.get_size_inches()
-        plot_width = fig_width * (0.95 - 0.08)  # right - left margins
+        plot_width = fig_width * (0.99 - 0.085)  # right - left margins
         plot_height = fig_height * (0.95 - 0.08)  # top - bottom margins
         figure_aspect = plot_width / plot_height
 
@@ -484,7 +484,7 @@ class PlottingMixin:
             self.figure.clear()
             self.ax = self.figure.add_subplot(111)
             # Always ensure axes fill the figure area
-            self.figure.subplots_adjust(left=0.085, right=0.95, top=0.95, bottom=0.08)
+            self.figure.subplots_adjust(left=0.085, right=0.99, top=0.95, bottom=0.08)
             self.slope_colorbar = None
             self.elevation_colorbar = None
 
@@ -1371,9 +1371,9 @@ class PlottingMixin:
 
                 # Get figure size
                 fig_width, fig_height = self.figure.get_size_inches()
-                # Use subplot_adjust margins: left=0.08, right=0.95, top=0.95, bottom=0.08
+                # Use subplot_adjust margins: left=0.085, right=0.99, top=0.95, bottom=0.08
                 # This gives us the actual plotable area
-                plot_width = fig_width * (0.95 - 0.08)  # right - left
+                plot_width = fig_width * (0.99 - 0.085)  # right - left
                 plot_height = fig_height * (0.95 - 0.08)  # top - bottom
                 figure_aspect = plot_width / plot_height
 
@@ -1537,7 +1537,7 @@ class PlottingMixin:
             # Attempt to recover by reinitializing the plot
             self._clear_plot(full_clear=True)
             self.ax = self.figure.add_subplot(111)
-            self.figure.subplots_adjust(left=0.085, right=0.95, top=0.95, bottom=0.08)
+            self.figure.subplots_adjust(left=0.085, right=0.99, top=0.95, bottom=0.08)
             self.canvas.draw_idle()
 
     def _clear_plot(self, full_clear=True):
