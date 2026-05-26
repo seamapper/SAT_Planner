@@ -266,6 +266,13 @@ class GMRTDownloadMixin:
             "mresolution": resolution,
         }
         worker = GMRTDownloadWorker(params, save_path)
+        # Remember which tab kicked off this import-driven download so the
+        # post-load step can zoom back to the right plan even if the user
+        # switches tabs while the download is running.
+        self._gmrt_download_origin_tab_index = (
+            self.param_notebook.currentIndex()
+            if hasattr(self, "param_notebook") else None
+        )
         worker.finished.connect(
             lambda success, path_or_error: self._on_gmrt_download_finished(
                 success, path_or_error, _log, split_topo_depths
@@ -299,8 +306,20 @@ class GMRTDownloadMixin:
                     return
                 log_func("Loading GeoTIFF...", append=True)
                 if hasattr(self, "_load_geotiff_from_path"):
-                    self._load_geotiff_from_path(path_to_load)
+                    # Suppress the load-time auto-zoom so the existing plan-
+                    # bounds view (set by the import handler) survives until
+                    # we explicitly re-zoom to the plan below.
+                    self._load_geotiff_from_path(path_to_load, auto_zoom_to_geotiff=False)
                 log_func("GMRT grid loaded.", append=True)
+                # Restore the plan-bounds view: the GeoTIFF load reset the
+                # axes to whatever the import handler had set them to (the
+                # plan extents), but a number of downstream redraws can
+                # still shift those limits. Re-zoom explicitly to the tab
+                # that originated this download so the user always lands
+                # on their plan, not the GMRT grid.
+                origin_tab = getattr(self, "_gmrt_download_origin_tab_index", None)
+                if origin_tab is not None and hasattr(self, "_zoom_to_tab_plan"):
+                    self._zoom_to_tab_plan(tab_index=origin_tab)
                 # On the Calibration tab, refresh pitch-line depth stats from
                 # the freshly loaded GeoTIFF. ``_update_cal_line_offset_from_pitch_line``
                 # is safe to call when the heading-line offset is locked to
@@ -323,6 +342,7 @@ class GMRTDownloadMixin:
             # Always clear the busy state, no matter which branch we took.
             self._gmrt_download_worker = None
             self._gmrt_download_in_progress = False
+            self._gmrt_download_origin_tab_index = None
             self._gmrt_restore_button()
 
     def _maybe_split_gmrt_grid(self, downloaded_path, split_topo_depths, log_func):

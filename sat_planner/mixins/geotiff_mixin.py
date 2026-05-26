@@ -692,34 +692,7 @@ class GeoTIFFMixin:
 
             self.backscatter_box_stats = self._compute_backscatter_box_stats()
             self._plot_survey_plan(preserve_view_limits=True)
-            # Fit view to imported geometry so imported line/area is immediately visible.
-            try:
-                lon_vals = []
-                lat_vals = []
-                if self.backscatter_box_centerline and len(self.backscatter_box_centerline) == 2:
-                    for lat, lon in self.backscatter_box_centerline:
-                        if lat is not None and lon is not None:
-                            lat_vals.append(float(lat))
-                            lon_vals.append(float(lon))
-                if self.backscatter_box_vertices and len(self.backscatter_box_vertices) == 4:
-                    for lon, lat in self.backscatter_box_vertices:
-                        lat_vals.append(float(lat))
-                        lon_vals.append(float(lon))
-                if lon_vals and lat_vals:
-                    lon_min, lon_max = min(lon_vals), max(lon_vals)
-                    lat_min, lat_max = min(lat_vals), max(lat_vals)
-                    lon_pad = max((lon_max - lon_min) * 0.2, 0.001)
-                    lat_pad = max((lat_max - lat_min) * 0.2, 0.001)
-                    xlim = (lon_min - lon_pad, lon_max + lon_pad)
-                    ylim = (lat_min - lat_pad, lat_max + lat_pad)
-                    if getattr(self, "geotiff_dataset_original", None) is not None and hasattr(self, "_apply_map_zoom_limits_and_reload_geotiff"):
-                        self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
-                    else:
-                        self.ax.set_xlim(*xlim)
-                        self.ax.set_ylim(*ylim)
-                        self.canvas.draw_idle()
-            except Exception:
-                pass
+            self._zoom_to_backscatter_line_or_area()
             if hasattr(self, "_draw_current_profile"):
                 self._draw_current_profile()
             self._update_backscatter_export_name_default()
@@ -1458,8 +1431,17 @@ class GeoTIFFMixin:
 
         self._load_geotiff_from_path(file_path, use_background_loading=use_background_loading)
 
-    def _load_geotiff_from_path(self, file_path, use_background_loading=False):
-        """Load and display a GeoTIFF from the given path. Used by Load GeoTIFF and by GMRT download."""
+    def _load_geotiff_from_path(self, file_path, use_background_loading=False,
+                                auto_zoom_to_geotiff=True):
+        """Load and display a GeoTIFF from the given path. Used by Load
+        GeoTIFF and by GMRT download.
+
+        ``auto_zoom_to_geotiff`` (default ``True``) controls whether the map
+        view snaps to the GeoTIFF's bounds after loading. Direct "Load
+        GeoTIFF" actions want this; the post-import GMRT callback passes
+        ``False`` so that the previously established plan-bounds zoom is
+        preserved (the GMRT-callback re-zooms to the active tab's plan
+        explicitly after the load completes)."""
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot load GeoTIFF.")
             return
@@ -1693,7 +1675,8 @@ class GeoTIFFMixin:
             # Store the initial limits after first plot
             self.initial_geotiff_xlim = self.current_xlim
             self.initial_geotiff_ylim = self.current_ylim
-            self._zoom_to_geotiff()
+            if auto_zoom_to_geotiff:
+                self._zoom_to_geotiff()
 
             if hasattr(self, "_on_geotiff_loaded_performance_depth"):
                 self._on_geotiff_loaded_performance_depth()
@@ -3132,6 +3115,43 @@ class GeoTIFFMixin:
             )
             return
         self._show_backscatter_stats_dialog()
+
+    def _zoom_to_backscatter_line_or_area(self):
+        """Fit the map view to the current Backscatter centerline plus any
+        defined area-box vertices, with a small lat/lon pad. Used by the
+        Backscatter import flow and by the post-GMRT-download tab-aware
+        re-zoom; safe to call when nothing is selected (no-op)."""
+        try:
+            lon_vals = []
+            lat_vals = []
+            centerline = getattr(self, "backscatter_box_centerline", None)
+            if centerline and len(centerline) == 2:
+                for lat, lon in centerline:
+                    if lat is not None and lon is not None:
+                        lat_vals.append(float(lat))
+                        lon_vals.append(float(lon))
+            vertices = getattr(self, "backscatter_box_vertices", None)
+            if vertices and len(vertices) == 4:
+                for lon, lat in vertices:
+                    lat_vals.append(float(lat))
+                    lon_vals.append(float(lon))
+            if not (lon_vals and lat_vals):
+                return
+            lon_min, lon_max = min(lon_vals), max(lon_vals)
+            lat_min, lat_max = min(lat_vals), max(lat_vals)
+            lon_pad = max((lon_max - lon_min) * 0.2, 0.001)
+            lat_pad = max((lat_max - lat_min) * 0.2, 0.001)
+            xlim = (lon_min - lon_pad, lon_max + lon_pad)
+            ylim = (lat_min - lat_pad, lat_max + lat_pad)
+            if (getattr(self, "geotiff_dataset_original", None) is not None
+                    and hasattr(self, "_apply_map_zoom_limits_and_reload_geotiff")):
+                self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
+            else:
+                self.ax.set_xlim(*xlim)
+                self.ax.set_ylim(*ylim)
+                self.canvas.draw_idle()
+        except Exception:
+            pass
 
     def _on_backscatter_zoom_to_line_clicked(self):
         """Zoom map to selected backscatter area bounds (box, not centerline)."""

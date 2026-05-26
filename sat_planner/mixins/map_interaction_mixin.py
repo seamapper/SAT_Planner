@@ -1087,6 +1087,69 @@ class MapInteractionMixin:
         ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
         self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
 
+    def _zoom_to_tab_plan(self, tab_index=None):
+        """Zoom the map to the bounds of the plan on the given tab.
+
+        Dispatches by ``param_notebook`` tab index to the per-tab zoom
+        helper (Calibration -> ``_zoom_to_any_lines``, Accuracy ->
+        ``_zoom_to_plan``, Line -> ``_zoom_to_line``, Backscatter ->
+        ``_zoom_to_backscatter_line_or_area``, Performance ->
+        ``_zoom_to_performance_lines``).
+
+        ``tab_index`` defaults to the currently active tab, but callers
+        like the post-import GMRT callback should pass the tab that
+        kicked off the import (the user may have switched tabs while the
+        download was running).
+
+        Quietly no-ops when no plan data is present on the target tab,
+        so it can be called unconditionally after a GMRT load without
+        flashing "No lines to zoom to" dialogs.
+
+        Tab order (see ``app_core._setup_layout``):
+            0: Calibration, 1: Accuracy, 2: Line, 3: Backscatter, 4: Performance
+        """
+        if not hasattr(self, "param_notebook"):
+            return
+        if tab_index is None:
+            tab_index = self.param_notebook.currentIndex()
+
+        # Pre-check data presence so the per-tab helpers don't surface
+        # their "no lines" info popups when called as a post-load
+        # housekeeping step.
+        if tab_index == 0:
+            has_lines = (
+                (getattr(self, "pitch_line_points", None) and len(self.pitch_line_points) == 2)
+                or any(len(h) == 2 for h in getattr(self, "heading_lines", []) or [])
+                or (getattr(self, "roll_line_points", None) and len(self.roll_line_points) == 2)
+            )
+            if has_lines and hasattr(self, "_zoom_to_any_lines"):
+                self._zoom_to_any_lines()
+        elif tab_index == 1:
+            has_lines = bool(
+                getattr(self, "survey_lines_data", None)
+                or getattr(self, "cross_line_data", None)
+            )
+            if has_lines and hasattr(self, "_zoom_to_plan"):
+                self._zoom_to_plan()
+        elif tab_index == 2:
+            line_pts = getattr(self, "line_planning_points", None)
+            if line_pts and len(line_pts) >= 2 and hasattr(self, "_zoom_to_line"):
+                self._zoom_to_line()
+        elif tab_index == 3:
+            has_geom = bool(
+                (getattr(self, "backscatter_box_centerline", None) and len(self.backscatter_box_centerline) == 2)
+                or (getattr(self, "backscatter_box_vertices", None) and len(self.backscatter_box_vertices) == 4)
+            )
+            if has_geom and hasattr(self, "_zoom_to_backscatter_line_or_area"):
+                self._zoom_to_backscatter_line_or_area()
+        elif tab_index == 4:
+            has_lines = (
+                getattr(self, "performance_test_lines_data", None)
+                and len(self.performance_test_lines_data) == 4
+            )
+            if has_lines and hasattr(self, "_zoom_to_performance_lines"):
+                self._zoom_to_performance_lines()
+
     def _zoom_to_any_lines(self):
         # Collect all points from pitch line and heading lines
         points = []
