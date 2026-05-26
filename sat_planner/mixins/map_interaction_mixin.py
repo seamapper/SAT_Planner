@@ -308,7 +308,7 @@ class MapInteractionMixin:
                 return
             self.pitch_line_points.append((clicked_lat, clicked_lon))
             if len(self.pitch_line_points) == 1:
-                self.pick_pitch_line_btn.setText("Drawing Pitch Line: Click End Point")
+                self.pick_pitch_line_btn.setText("Click Pitch End Point")
                 # Start drawing temporary line
                 self._temp_line = self.ax.plot([clicked_lon, clicked_lon], [clicked_lat, clicked_lat], color='orange', linestyle='--', linewidth=2)[0]
                 self._temp_line_start = (clicked_lat, clicked_lon)
@@ -320,7 +320,7 @@ class MapInteractionMixin:
                     self.pitch_line_info_text = None
                     self.canvas.draw_idle()
             elif len(self.pitch_line_points) == 2:
-                self.pick_pitch_line_btn.setText("Draw a Pitch Line")
+                self.pick_pitch_line_btn.setText("Draw Pitch Line")
                 self.pick_pitch_line_mode = False
                 self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
                 # Remove temporary line
@@ -329,7 +329,7 @@ class MapInteractionMixin:
                     del self._temp_line
                 self.canvas.mpl_disconnect(self._temp_line_motion_cid)
                 self._plot_survey_plan(preserve_view_limits=True)  # Redraw to show pitch line
-                # Make "Draw a Pitch Line" normal, "Add Heading Lines" and "Draw a Roll Line" bold and orange
+                # Make "Draw Pitch Line" normal, "Add Heading Lines" and "Draw Roll Line" bold and orange
                 if hasattr(self, 'pick_pitch_line_btn'):
                     self.pick_pitch_line_btn.setStyleSheet("")  # Reset to normal
                 if hasattr(self, 'add_heading_lines_btn'):
@@ -383,14 +383,14 @@ class MapInteractionMixin:
                 return
             self.roll_line_points.append((clicked_lat, clicked_lon))
             if len(self.roll_line_points) == 1:
-                self.pick_roll_line_btn.setText("Drawing Roll Line: Click End Point")
+                self.pick_roll_line_btn.setText("Click Roll Line End Point")
                 # Start drawing temporary line
                 self._temp_line = self.ax.plot([clicked_lon, clicked_lon], [clicked_lat, clicked_lat], color='purple', linestyle='--', linewidth=2)[0]
                 self._temp_line_start = (clicked_lat, clicked_lon)
                 self._temp_line_motion_cid = self.canvas.mpl_connect('motion_notify_event', self._on_temp_line_motion)
                 self.canvas.draw_idle()
             elif len(self.roll_line_points) == 2:
-                self.pick_roll_line_btn.setText("Draw a Roll Line")
+                self.pick_roll_line_btn.setText("Draw Roll Line")
                 self.pick_roll_line_mode = False
                 self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
                 # Remove temporary line
@@ -399,7 +399,7 @@ class MapInteractionMixin:
                     del self._temp_line
                 self.canvas.mpl_disconnect(self._temp_line_motion_cid)
                 self._plot_survey_plan(preserve_view_limits=True)  # Redraw to show roll line
-                # Make "Draw a Roll Line" button normal after drawing
+                # Make "Draw Roll Line" button normal after drawing
                 if hasattr(self, 'pick_roll_line_btn'):
                     self.pick_roll_line_btn.setStyleSheet("")  # Reset to normal
                 # Report roll line summary in info/error box

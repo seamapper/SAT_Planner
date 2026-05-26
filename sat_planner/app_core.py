@@ -1389,38 +1389,57 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_line_params_layout.setColumnStretch(1, 2)
 
         cal_line_row = 0
-        self.pick_pitch_line_btn = QPushButton("Draw a Pitch Line")
+        self.pick_pitch_line_btn = QPushButton("Draw Pitch Line")
         self.pick_pitch_line_btn.clicked.connect(self._toggle_pick_pitch_line_mode)
-        cal_line_params_layout.addWidget(self.pick_pitch_line_btn, cal_line_row, 0, 1, 2)
-        cal_line_row += 1
-
         self.edit_pitch_line_btn = QPushButton("Edit Pitch Line")
         self.edit_pitch_line_btn.setEnabled(False)
         self.edit_pitch_line_btn.clicked.connect(self._toggle_edit_pitch_line_mode)
-        cal_line_params_layout.addWidget(self.edit_pitch_line_btn, cal_line_row, 0, 1, 2)
-        cal_line_row += 1
-
-        cal_line_params_layout.addWidget(QLabel("Heading Line Offset (m):"), cal_line_row, 0)
-        self.cal_line_offset_entry = QLineEdit()
-        self.cal_line_offset_entry.textChanged.connect(self._update_cal_export_name_from_pitch_line)
-        cal_line_params_layout.addWidget(self.cal_line_offset_entry, cal_line_row, 1)
+        # Pair Draw/Edit on a single row, each taking half the row width.
+        # The grid columns above use a 1:2 stretch ratio for label/field
+        # pairs, so wrap the buttons in their own QHBoxLayout (equal
+        # stretch) and add that layout across both grid columns.
+        pitch_buttons_layout = QHBoxLayout()
+        pitch_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        pitch_buttons_layout.setSpacing(3)
+        pitch_buttons_layout.addWidget(self.pick_pitch_line_btn, 1)
+        pitch_buttons_layout.addWidget(self.edit_pitch_line_btn, 1)
+        cal_line_params_layout.addLayout(pitch_buttons_layout, cal_line_row, 0, 1, 2)
         cal_line_row += 1
 
         self.add_heading_lines_btn = QPushButton("Add Heading Lines")
         self.add_heading_lines_btn.setEnabled(False)
         self.add_heading_lines_btn.clicked.connect(self._add_heading_lines_from_pitch_line)
-        cal_line_params_layout.addWidget(self.add_heading_lines_btn, cal_line_row, 0, 1, 2)
+        self.cal_line_offset_entry = QLineEdit()
+        self.cal_line_offset_entry.textChanged.connect(self._update_cal_export_name_from_pitch_line)
+        # Pair "Add Heading Lines" with the "Line Offset (m)" parameter
+        # on a single row: button takes the left half, label + entry
+        # share the right half.
+        heading_row_layout = QHBoxLayout()
+        heading_row_layout.setContentsMargins(0, 0, 0, 0)
+        heading_row_layout.setSpacing(3)
+        heading_row_layout.addWidget(self.add_heading_lines_btn, 1)
+        offset_param_layout = QHBoxLayout()
+        offset_param_layout.setContentsMargins(0, 0, 0, 0)
+        offset_param_layout.setSpacing(3)
+        offset_param_layout.addWidget(QLabel("Line Offset (m):"))
+        offset_param_layout.addWidget(self.cal_line_offset_entry, 1)
+        heading_row_layout.addLayout(offset_param_layout, 1)
+        cal_line_params_layout.addLayout(heading_row_layout, cal_line_row, 0, 1, 2)
         cal_line_row += 1
 
-        self.pick_roll_line_btn = QPushButton("Draw a Roll Line")
+        self.pick_roll_line_btn = QPushButton("Draw Roll Line")
         self.pick_roll_line_btn.clicked.connect(self._toggle_pick_roll_line_mode)
-        cal_line_params_layout.addWidget(self.pick_roll_line_btn, cal_line_row, 0, 1, 2)
-        cal_line_row += 1
-
         self.edit_roll_line_btn = QPushButton("Edit Roll Line")
         self.edit_roll_line_btn.setEnabled(False)
         self.edit_roll_line_btn.clicked.connect(self._toggle_edit_roll_line_mode)
-        cal_line_params_layout.addWidget(self.edit_roll_line_btn, cal_line_row, 0, 1, 2)
+        # Pair Draw/Edit on a single row, each taking half the row width
+        # (same convention as the Pitch line pair above).
+        roll_buttons_layout = QHBoxLayout()
+        roll_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        roll_buttons_layout.setSpacing(3)
+        roll_buttons_layout.addWidget(self.pick_roll_line_btn, 1)
+        roll_buttons_layout.addWidget(self.edit_roll_line_btn, 1)
+        cal_line_params_layout.addLayout(roll_buttons_layout, cal_line_row, 0, 1, 2)
         cal_line_row += 1
 
         self.reverse_line_direction_btn = QPushButton("Reverse Line Direction")

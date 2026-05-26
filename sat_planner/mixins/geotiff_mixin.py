@@ -1636,7 +1636,7 @@ class GeoTIFFMixin:
             # Reset Load GeoTIFF button to normal style after successful loading
             if hasattr(self, 'load_geotiff_btn'):
                 self.load_geotiff_btn.setStyleSheet("")  # Reset to default style
-            # Make "Draw a Pitch Line" button bold and orange after loading GeoTIFF
+            # Make "Draw Pitch Line" button bold and orange after loading GeoTIFF
             if hasattr(self, 'pick_pitch_line_btn'):
                 self.pick_pitch_line_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
             # Make "Start Drawing Line" button bold and orange after loading GeoTIFF

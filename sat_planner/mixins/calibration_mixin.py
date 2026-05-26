@@ -421,13 +421,17 @@ class CalibrationMixin:
             self._show_message("warning","No GeoTIFF", "Load a GeoTIFF first to pick a pitch line.")
             return
         self.pick_pitch_line_mode = not self.pick_pitch_line_mode
+        # Same orange+bold convention used for "Click to Stop Editing" on
+        # the pitch/roll edit toggles (see ``_toggle_edit_pitch_line_mode``).
+        active_style = "QPushButton { color: rgb(255, 165, 0); font-weight: bold; }"
         if self.pick_pitch_line_mode:
             self.pitch_line_points = []
             # User is drawing a brand-new pitch line, so any prior import-
             # locked offset value no longer makes sense -- fall back to
             # depth-driven recommendation mode.
             self._cal_line_offset_locked_to_import = False
-            self.pick_pitch_line_btn.setText("Drawing Pitch Line: Click Start Point")
+            self.pick_pitch_line_btn.setText("Click Pitch Start Point")
+            self.pick_pitch_line_btn.setStyleSheet(active_style)
             if hasattr(self, 'calibration_frame'):
                 self.calibration_frame.setFocus()
             self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
@@ -449,7 +453,10 @@ class CalibrationMixin:
                 self.pitch_line_info_text = None
                 self.canvas.draw_idle()
         else:
-            self.pick_pitch_line_btn.setText("Draw a Pitch Line")
+            # Cancelling drawing mid-pick -- drop the orange/bold styling
+            # so the button reads neutrally as "Draw Pitch Line" again.
+            self.pick_pitch_line_btn.setText("Draw Pitch Line")
+            self.pick_pitch_line_btn.setStyleSheet("")
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             if hasattr(self, 'pitch_line_info_text') and self.pitch_line_info_text is not None:
                 self.pitch_line_info_text.set_visible(False)
@@ -469,6 +476,9 @@ class CalibrationMixin:
             return
 
         self.edit_pitch_line_mode = not self.edit_pitch_line_mode
+        # Style used elsewhere in the app for the "next logical action" button.
+        # Keep this constant in one place so the in/out paths stay symmetric.
+        active_style = "QPushButton { color: rgb(255, 165, 0); font-weight: bold; }"
         if self.edit_pitch_line_mode:
             self.heading_lines = []
             self._plot_survey_plan()
@@ -489,7 +499,26 @@ class CalibrationMixin:
             self.pitch_line_motion_cid = self.canvas.mpl_connect('motion_notify_event', self._on_pitch_line_handle_motion)
             self.pitch_line_release_cid = self.canvas.mpl_connect('button_release_event', self._on_pitch_line_handle_release)
 
-            self.edit_pitch_line_btn.setText("Click to Stop Editing Pitch Line")
+            self.edit_pitch_line_btn.setText("Click to Stop Editing")
+            self.edit_pitch_line_btn.setStyleSheet(active_style)
+            # While we're in edit mode, any "next logical action"
+            # highlighting on the heading/roll buttons is no longer
+            # accurate (heading lines were just cleared, and a roll
+            # line drawn against the old pitch line would now be wrong).
+            # Snapshot whatever styles those buttons had so we can
+            # restore them when the user stops editing.
+            self._cal_edit_pre_style_add_heading = (
+                self.add_heading_lines_btn.styleSheet()
+                if hasattr(self, 'add_heading_lines_btn') else ""
+            )
+            self._cal_edit_pre_style_pick_roll = (
+                self.pick_roll_line_btn.styleSheet()
+                if hasattr(self, 'pick_roll_line_btn') else ""
+            )
+            if hasattr(self, 'add_heading_lines_btn'):
+                self.add_heading_lines_btn.setStyleSheet("")
+            if hasattr(self, 'pick_roll_line_btn'):
+                self.pick_roll_line_btn.setStyleSheet("")
             self.canvas_widget.setCursor(Qt.CursorShape.SizeAllCursor)
             self.set_cal_info_text("You can drag the red (start) and blue (end) points to edit the pitch line. Heading lines have been cleared.")
         else:
@@ -506,6 +535,19 @@ class CalibrationMixin:
                 self.canvas.mpl_disconnect(self.pitch_line_release_cid)
 
             self.edit_pitch_line_btn.setText("Edit Pitch Line")
+            self.edit_pitch_line_btn.setStyleSheet("")
+            # Restore the heading/roll button styles to whatever they
+            # were before we entered edit mode (typically orange + bold,
+            # since they were the next logical actions after the pitch
+            # line was originally drawn).
+            if hasattr(self, 'add_heading_lines_btn'):
+                self.add_heading_lines_btn.setStyleSheet(
+                    getattr(self, "_cal_edit_pre_style_add_heading", "") or ""
+                )
+            if hasattr(self, 'pick_roll_line_btn'):
+                self.pick_roll_line_btn.setStyleSheet(
+                    getattr(self, "_cal_edit_pre_style_pick_roll", "") or ""
+                )
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             self.dragging_pitch_line_handle = None
 
@@ -531,9 +573,13 @@ class CalibrationMixin:
             self._show_message("warning","No GeoTIFF", "Load a GeoTIFF first to pick a roll line.")
             return
         self.pick_roll_line_mode = not self.pick_roll_line_mode
+        # Same orange+bold convention as the Draw Pitch Line drawing
+        # mode (see ``_toggle_pick_pitch_line_mode``).
+        active_style = "QPushButton { color: rgb(255, 165, 0); font-weight: bold; }"
         if self.pick_roll_line_mode:
             self.roll_line_points = []
-            self.pick_roll_line_btn.setText("Drawing Roll Line: Click Start Point")
+            self.pick_roll_line_btn.setText("Click Roll Line Start Point")
+            self.pick_roll_line_btn.setStyleSheet(active_style)
             if hasattr(self, 'calibration_frame'):
                 self.calibration_frame.setFocus()
             self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
@@ -551,7 +597,10 @@ class CalibrationMixin:
                 self.activity_log_text.setTextCursor(cursor)
                 self.activity_log_text.setReadOnly(True)
         else:
-            self.pick_roll_line_btn.setText("Draw a Roll Line")
+            # Cancelling drawing mid-pick -- drop the orange/bold styling
+            # so the button reads neutrally as "Draw Roll Line" again.
+            self.pick_roll_line_btn.setText("Draw Roll Line")
+            self.pick_roll_line_btn.setStyleSheet("")
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
         self._update_cal_line_times()
 
@@ -567,6 +616,9 @@ class CalibrationMixin:
             return
 
         self.edit_roll_line_mode = not self.edit_roll_line_mode
+        # Same orange-bold convention as the Pitch line "Click to Stop
+        # Editing" toggle (see ``_toggle_edit_pitch_line_mode``).
+        active_style = "QPushButton { color: rgb(255, 165, 0); font-weight: bold; }"
         if self.edit_roll_line_mode:
             (lat1, lon1), (lat2, lon2) = self.roll_line_points
             self.roll_line_start_handle = self.ax.scatter([lon1], [lat1], c='red', s=100, zorder=10, picker=True)
@@ -576,7 +628,31 @@ class CalibrationMixin:
             self.roll_line_motion_cid = self.canvas.mpl_connect('motion_notify_event', self._on_roll_line_handle_motion)
             self.roll_line_release_cid = self.canvas.mpl_connect('button_release_event', self._on_roll_line_handle_release)
 
-            self.edit_roll_line_btn.setText("Click to Stop Editing Roll Line")
+            self.edit_roll_line_btn.setText("Click to Stop Editing")
+            self.edit_roll_line_btn.setStyleSheet(active_style)
+            # Mirror the pitch-edit behavior: while we're in roll-edit
+            # mode, snapshot the "next logical action" highlighting on the
+            # other action buttons and reset them to neutral so the
+            # active "Editing" indicator is the only highlight on screen.
+            # Restored on exit.
+            self._cal_roll_edit_pre_style_pick_pitch = (
+                self.pick_pitch_line_btn.styleSheet()
+                if hasattr(self, 'pick_pitch_line_btn') else ""
+            )
+            self._cal_roll_edit_pre_style_add_heading = (
+                self.add_heading_lines_btn.styleSheet()
+                if hasattr(self, 'add_heading_lines_btn') else ""
+            )
+            self._cal_roll_edit_pre_style_pick_roll = (
+                self.pick_roll_line_btn.styleSheet()
+                if hasattr(self, 'pick_roll_line_btn') else ""
+            )
+            if hasattr(self, 'pick_pitch_line_btn'):
+                self.pick_pitch_line_btn.setStyleSheet("")
+            if hasattr(self, 'add_heading_lines_btn'):
+                self.add_heading_lines_btn.setStyleSheet("")
+            if hasattr(self, 'pick_roll_line_btn'):
+                self.pick_roll_line_btn.setStyleSheet("")
             self.canvas_widget.setCursor(Qt.CursorShape.SizeAllCursor)
             self.set_cal_info_text("You can drag the red (start) and blue (end) points to edit the roll line.")
         else:
@@ -593,6 +669,23 @@ class CalibrationMixin:
                 self.canvas.mpl_disconnect(self.roll_line_release_cid)
 
             self.edit_roll_line_btn.setText("Edit Roll Line")
+            self.edit_roll_line_btn.setStyleSheet("")
+            # Restore the styles that were in place when the user
+            # entered roll-edit mode (typically all neutral by this
+            # point in the workflow, but defensive against any other
+            # action button that was still highlighted).
+            if hasattr(self, 'pick_pitch_line_btn'):
+                self.pick_pitch_line_btn.setStyleSheet(
+                    getattr(self, "_cal_roll_edit_pre_style_pick_pitch", "") or ""
+                )
+            if hasattr(self, 'add_heading_lines_btn'):
+                self.add_heading_lines_btn.setStyleSheet(
+                    getattr(self, "_cal_roll_edit_pre_style_add_heading", "") or ""
+                )
+            if hasattr(self, 'pick_roll_line_btn'):
+                self.pick_roll_line_btn.setStyleSheet(
+                    getattr(self, "_cal_roll_edit_pre_style_pick_roll", "") or ""
+                )
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
             self.dragging_roll_line_handle = None
 
