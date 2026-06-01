@@ -255,6 +255,9 @@ class PlottingMixin:
             except Exception as e:
                 self.set_ref_info_text(f"Error calculating summary: {e}")
 
+            if hasattr(self, "_update_export_name"):
+                self._update_export_name()
+
             # Success dialog removed as requested
             # if show_success_dialog:
             #     self._show_message("info","Success", "Survey plan generated and plotted.")

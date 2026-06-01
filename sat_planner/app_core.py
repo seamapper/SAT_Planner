@@ -1278,6 +1278,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.crossline_passes_entry = QLineEdit("2")
         ref_test_plan_info_layout.addWidget(self.crossline_passes_entry, ref_test_plan_row, 1)
         self.crossline_passes_entry.textChanged.connect(self._on_parameter_changed)
+        self.crossline_passes_entry.textChanged.connect(self._update_export_name)
         ref_test_plan_row += 1
 
         ref_test_plan_info_layout.addWidget(QLabel("Select Profile:"), ref_test_plan_row, 0)
@@ -1353,10 +1354,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
         self.export_name_entry = QLineEdit()
         try:
-            heading = int(float(self.heading_entry.text() or "0"))
-            export_name = f"Accuracy_0m_{heading}deg"
+            heading = float(self.heading_entry.text() or "0")
+            cross = int(round((heading + 90) % 360))
+            export_name = f"acc_depth0m_cross{cross}deg"
         except Exception:
-            export_name = "Accuracy_0m_0deg"
+            export_name = "acc_depth0m_cross90deg"
         self.export_name_entry.setText(export_name)
         ref_export_name_layout.addWidget(self.export_name_entry, 0, 1)
         ref_import_export_layout.addWidget(ref_export_name_frame)
@@ -1410,7 +1412,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.add_heading_lines_btn.setEnabled(False)
         self.add_heading_lines_btn.clicked.connect(self._add_heading_lines_from_pitch_line)
         self.cal_line_offset_entry = QLineEdit()
-        self.cal_line_offset_entry.textChanged.connect(self._update_cal_export_name_from_pitch_line)
+        self.cal_line_offset_entry.editingFinished.connect(
+            self._on_cal_line_offset_user_edited
+        )
         # Pair "Add Heading Lines" with the "Line Offset (m)" parameter
         # on a single row: button takes the left half, label + entry
         # share the right half.
@@ -2455,13 +2459,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         perf_export_name_layout.setColumnStretch(1, 2)
         perf_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
         self.performance_export_name_entry = QLineEdit()
-        try:
-            swell_dir = self.performance_swell_direction_entry.text().strip() or "0"
-            spd = self.performance_test_speed_entry.text().strip() or "0"
-            perf_export_name = f"Performance_{swell_dir}deg_{spd}_kts"
-        except Exception:
-            perf_export_name = "Performance_0deg_0_kts"
-        self.performance_export_name_entry.setText(perf_export_name)
+        self.performance_export_name_entry.setText(
+            self._build_performance_export_basename()
+            if hasattr(self, "_build_performance_export_basename")
+            else "perf_swell0_depth0m"
+        )
         perf_export_name_layout.addWidget(self.performance_export_name_entry, 0, 1)
         perf_import_export_layout.addWidget(perf_export_name_frame)
 
@@ -2474,8 +2476,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.performance_num_pings_entry.textChanged.connect(self._update_performance_total_test_time)
         self.performance_bist_time_entry.textChanged.connect(self._update_performance_total_test_time)
         self.performance_test_speed_entry.textChanged.connect(self._update_performance_line_length)
-        self.performance_swath_angle_entry.textChanged.connect(self._update_performance_export_name)
-        self.performance_test_speed_entry.textChanged.connect(self._update_performance_export_name)
+        self.performance_swell_direction_entry.textChanged.connect(self._update_performance_export_name)
+        self.performance_test_depth_entry.textChanged.connect(self._update_performance_export_name)
         self._update_performance_ping_time()
         # Debounced auto-plot when center/swell are edited (speed/pings/BIST/depth chain already updates line length → schedule)
         self.performance_central_lat_entry.textChanged.connect(

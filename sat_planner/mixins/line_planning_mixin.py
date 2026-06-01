@@ -445,6 +445,7 @@ class LinePlanningMixin:
                 shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
                 features = [{'geometry': _shapely_mapping(shapely_line), 'properties': {'name': export_name}}]
                 if export_shapefile:
+                    export_utils.remove_export_file(shapefile_path)
                     with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
                         collection.writerecords(features)
                 self._write_gpkg_if_enabled(shapefile_path, schema, features, crs=crs_epsg)
@@ -456,6 +457,7 @@ class LinePlanningMixin:
                 except (ValueError, TypeError):
                     export_speed = 8.0
                 geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "survey_speed": export_speed, "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0), "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
+                export_utils.remove_export_file(geojson_file_path)
                 with open(geojson_file_path, 'w') as f:
                     json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0)}, "features": [geojson_feature]}, f, indent=2)
             lnw_file_path = None
@@ -508,6 +510,7 @@ class LinePlanningMixin:
                     profile_csv_path, d_exp, e_exp, s_exp, wp_labels_exp
                 )
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
+            export_utils.remove_export_file(stats_file_path)
             stats = self._calculate_line_planning_statistics()
             if stats:
                 with open(stats_file_path, 'w') as f:
@@ -543,6 +546,7 @@ class LinePlanningMixin:
                 with open(stats_file_path, 'w') as f:
                     f.write("Line planning info.\nNo statistics available for this export.\n")
             params_json_path = os.path.join(export_dir, f"{export_name}_params.json")
+            export_utils.remove_export_file(params_json_path)
             try:
                 try:
                     line_speed = (

@@ -773,6 +773,7 @@ class GeoTIFFMixin:
                 "properties": {"geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0))},
                 "features": gj_features,
             }
+            export_utils.remove_export_file(geojson_file_path)
             with open(geojson_file_path, "w", encoding="utf-8") as f:
                 json.dump(geojson_collection, f, indent=2)
 
@@ -794,6 +795,7 @@ class GeoTIFFMixin:
                         }
                     ],
                 }
+                export_utils.remove_export_file(area_geojson_file_path)
                 with open(area_geojson_file_path, "w", encoding="utf-8") as f:
                     json.dump(area_geojson_collection, f, indent=2)
 
@@ -824,6 +826,7 @@ class GeoTIFFMixin:
                         "properties": {"line_num": 1, "line_name": "BackscatterLine"},
                     }]
                     if export_shapefile:
+                        export_utils.remove_export_file(shapefile_path)
                         with fiona.open(shapefile_path, "w", driver="ESRI Shapefile", crs="EPSG:4326", schema=schema) as collection:
                             collection.writerecords(features)
                     else:
@@ -846,6 +849,7 @@ class GeoTIFFMixin:
                     }]
                     if export_shapefile:
                         area_shapefile_path = area_shp_target
+                        export_utils.remove_export_file(area_shapefile_path)
                         with fiona.open(area_shapefile_path, "w", driver="ESRI Shapefile", crs="EPSG:4326", schema=area_schema) as collection:
                             collection.writerecords(area_features)
                     self._write_gpkg_if_enabled(area_shp_target, area_schema, area_features, crs="EPSG:4326")
@@ -926,6 +930,7 @@ class GeoTIFFMixin:
                     else 200.0
                 ),
             }
+            export_utils.remove_export_file(params_json_path)
             with open(params_json_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
 
@@ -936,6 +941,7 @@ class GeoTIFFMixin:
                 info_stats = self._calculate_backscatter_line_statistics()
                 if info_stats:
                     info_txt_path = os.path.join(export_dir, f"{export_name}_info.txt")
+                    export_utils.remove_export_file(info_txt_path)
                     with open(info_txt_path, "w", encoding="utf-8") as info_file:
                         info_file.write(self._build_backscatter_info_text(info_stats))
             except Exception:
@@ -3819,6 +3825,10 @@ class GeoTIFFMixin:
         canvas = getattr(self, "backscatter_stats_canvas", None)
         if canvas is None:
             return
+        if save_high:
+            export_utils.remove_export_file(path)
+        if save_low:
+            export_utils.remove_export_file(export_utils.low_resolution_png_path(path))
         hover_artists = [
             getattr(self, "backscatter_stats_img_hover_text", None),
             getattr(self, "backscatter_stats_slope_hover_text", None),

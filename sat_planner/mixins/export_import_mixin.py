@@ -51,10 +51,7 @@ class ExportImportMixin:
         if not gpkg_path:
             return None
         try:
-            if os.path.exists(gpkg_path):
-                # Fiona append-mode for GPKG is fiddly; the simplest contract
-                # is "exporting overwrites prior runs", matching shapefile.
-                os.remove(gpkg_path)
+            export_utils.remove_export_file(gpkg_path)
             kwargs = {"driver": "GPKG", "crs": crs, "schema": schema}
             if layer_name:
                 kwargs["layer"] = layer_name
@@ -143,13 +140,19 @@ class ExportImportMixin:
             # Fallback to default naming if export name is empty: depth at center
             # (m) + main line heading (deg). Depth comes from Pick Center or an
             # imported survey's params; falls back to 0 when not available.
-            heading_int = int(values['heading'])
-            picked_depth = getattr(self, '_depth_at_picked_point', None)
-            try:
-                depth_int = int(abs(float(picked_depth))) if picked_depth is not None else 0
-            except (TypeError, ValueError):
-                depth_int = 0
-            export_name = f"Accuracy_{depth_int}m_{heading_int}deg"
+            if hasattr(self, "_build_accuracy_export_basename"):
+                export_name = self._build_accuracy_export_basename()
+            else:
+                picked_depth = getattr(self, "_depth_at_picked_point", None)
+                try:
+                    depth_int = int(round(abs(float(picked_depth)))) if picked_depth is not None else 0
+                except (TypeError, ValueError):
+                    depth_int = 0
+                try:
+                    cross_int = int(round((float(values["heading"]) + 90) % 360))
+                except (TypeError, ValueError):
+                    cross_int = 0
+                export_name = f"acc_depth{depth_int}m_cross{cross_int}deg"
         filename = f"{export_name}_params.json"
         file_path = os.path.join(save_dir, filename)
 
@@ -387,6 +390,7 @@ class ExportImportMixin:
                         'properties': {'line_num': 0, 'line_name': 'Crossline'},
                     })
                 if export_shapefile:
+                    export_utils.remove_export_file(shapefile_path)
                     with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
                         collection.writerecords(features)
                 self._write_gpkg_if_enabled(shapefile_path, schema, features, crs=crs_epsg)
@@ -439,6 +443,7 @@ class ExportImportMixin:
                 },
                 "features": geojson_features
             }
+            export_utils.remove_export_file(geojson_file_path)
             with open(geojson_file_path, 'w') as f:
                 json.dump(geojson_collection, f, indent=2)
 
@@ -515,6 +520,7 @@ class ExportImportMixin:
                     normalized_lines.append(line)
                 return "\n".join(normalized_lines) + "\n"
 
+            export_utils.remove_export_file(stats_file_path)
             with open(stats_file_path, 'w', encoding='utf-8') as f:
                 f.write(_normalize_degree_symbols_for_export(info_text))
             total_survey_time = self._calculate_total_survey_time()
@@ -677,6 +683,7 @@ class ExportImportMixin:
                     params['dist_between_lines_multiplier'] = 1.0  # Default
                 
                 # Save metadata
+                export_utils.remove_export_file(json_metadata_path)
                 with open(json_metadata_path, 'w', encoding='utf-8') as f:
                     json.dump(params, f, indent=2)
             except Exception as e:
@@ -764,7 +771,11 @@ class ExportImportMixin:
         if hasattr(self, "performance_export_name_entry"):
             export_name = self.performance_export_name_entry.text().strip()
         if not export_name:
-            export_name = "Performance_export"
+            export_name = (
+                self._build_performance_export_basename()
+                if hasattr(self, "_build_performance_export_basename")
+                else "perf_swell0_depth0m"
+            )
         bad = '<>:"/\\|?*'
         for c in bad:
             export_name = export_name.replace(c, "_")
@@ -838,6 +849,7 @@ class ExportImportMixin:
                             "properties": {"line_num": 10 + bn, "line_name": f"BISTLine{bn}"},
                         })
                 if export_shapefile:
+                    export_utils.remove_export_file(shapefile_path)
                     with fiona.open(shapefile_path, "w", driver="ESRI Shapefile", crs=crs_epsg, schema=schema) as collection:
                         collection.writerecords(features)
                 self._write_gpkg_if_enabled(shapefile_path, schema, features, crs=crs_epsg)
@@ -897,6 +909,7 @@ class ExportImportMixin:
                 "features": geojson_features,
             }
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
+            export_utils.remove_export_file(geojson_file_path)
             with open(geojson_file_path, "w", encoding="utf-8") as f:
                 json.dump(geojson_collection, f, indent=2)
 
@@ -967,6 +980,7 @@ class ExportImportMixin:
                     + f"Could not build detailed performance info: {e}\n"
                 )
 
+            export_utils.remove_export_file(stats_file_path)
             with open(stats_file_path, "w", encoding="utf-8") as f:
                 f.write("PERFORMANCE SURVEY INFORMATION\n")
                 f.write("=" * 50 + "\n\n")
@@ -1014,6 +1028,7 @@ class ExportImportMixin:
                     pmeta["line_length_m_label"] = ll.text().strip()
             except Exception:
                 pass
+            export_utils.remove_export_file(json_metadata_path)
             with open(json_metadata_path, "w", encoding="utf-8") as f:
                 json.dump(pmeta, f, indent=2)
 

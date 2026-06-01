@@ -363,6 +363,8 @@ class MapInteractionMixin:
                 except Exception as e:
                     self.set_cal_info_text(f"Error calculating pitch line summary: {e}")
                 # self._show_message("info","Pitch Line Picked", f"Pitch line defined from\nStart: {self.pitch_line_points[0]}\nEnd: {self.pitch_line_points[1]}")
+                if hasattr(self, "_clear_imported_cal_line_offset_lock"):
+                    self._clear_imported_cal_line_offset_lock()
                 self._update_cal_line_offset_from_pitch_line()
                 if hasattr(self, "_draw_current_profile"):
                     self._draw_current_profile()
@@ -500,8 +502,6 @@ class MapInteractionMixin:
             self._update_performance_center_from_pick(clicked_lat, clicked_lon)
         print(f"DEBUG: Center coordinates updated for tab {current_tab}: {clicked_lat:.6f}, {clicked_lon:.6f}")
 
-        export_name_to_set = None
-
         # Read Z-value from original GeoTIFF using the appropriate transformer
         if self.geotiff_dataset_original:
             try:
@@ -558,8 +558,8 @@ class MapInteractionMixin:
                             self.bisect_lead_entry.blockSignals(True)
                             self.bisect_lead_entry.setText(f"{bisect_lead:.2f}")
                             self.bisect_lead_entry.blockSignals(False)
-                            # Set Export Name to 'Accuracy_' + int(depth at center) + 'm_' + int(heading) + 'deg'
-                            export_name_to_set = f"Accuracy_{int(abs(z_value))}m_{int(float(self.heading_entry.text()))}deg"
+                            if hasattr(self, "_update_export_name"):
+                                self._update_export_name()
                         else:
                             self._show_message("warning","Input Warning",
                                                    "Calculated Distance Between Lines is not positive. Not setting Distance automatically.")
@@ -605,11 +605,6 @@ class MapInteractionMixin:
             if hasattr(self, 'central_pt_depth_value_label'):
                 self.central_pt_depth_value_label.setText("-")
             print("DEBUG: self.geotiff_dataset_original is None. GeoTIFF not loaded.")
-
-        # Set export name if calculated
-        if is_accuracy_tab and export_name_to_set is not None:
-            self.export_name_entry.clear()
-            self.export_name_entry.setText(export_name_to_set)
 
         # Performance tab: replot test lines after pick (allow depth/ping/line-length updates to run first)
         if is_performance_tab and hasattr(self, "_schedule_autoplot_performance_test_lines"):

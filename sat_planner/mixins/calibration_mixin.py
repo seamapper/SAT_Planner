@@ -429,7 +429,7 @@ class CalibrationMixin:
             # User is drawing a brand-new pitch line, so any prior import-
             # locked offset value no longer makes sense -- fall back to
             # depth-driven recommendation mode.
-            self._cal_line_offset_locked_to_import = False
+            self._clear_imported_cal_line_offset_lock()
             self.pick_pitch_line_btn.setText("Click Pitch Start Point")
             self.pick_pitch_line_btn.setStyleSheet(active_style)
             if hasattr(self, 'calibration_frame'):
@@ -554,7 +554,7 @@ class CalibrationMixin:
             self._plot_survey_plan()
             # Editing the pitch line returns the offset to depth-driven
             # recommendation mode, releasing any prior import-locked value.
-            self._cal_line_offset_locked_to_import = False
+            self._clear_imported_cal_line_offset_lock()
             self._update_cal_line_offset_from_pitch_line()
             if hasattr(self, "_draw_current_profile"):
                 self._draw_current_profile()
@@ -761,7 +761,7 @@ class CalibrationMixin:
 
             # Dragging the pitch line handles returns the offset to depth-
             # driven recommendation mode, releasing any prior import lock.
-            self._cal_line_offset_locked_to_import = False
+            self._clear_imported_cal_line_offset_lock()
             self._update_cal_line_offset_from_pitch_line()
             if hasattr(self, "_draw_current_profile"):
                 self._draw_current_profile()
@@ -1016,6 +1016,9 @@ class CalibrationMixin:
                 self._toggle_edit_pitch_line_mode()
             if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
                 self.pitch_line_points = [self.pitch_line_points[1], self.pitch_line_points[0]]
+                self._clear_imported_cal_line_offset_lock()
+                if hasattr(self, "_update_cal_export_name_from_pitch_line"):
+                    self._update_cal_export_name_from_pitch_line()
         elif line_type == 'roll':
             if getattr(self, 'edit_roll_line_mode', False):
                 self._toggle_edit_roll_line_mode()
@@ -1102,7 +1105,7 @@ class CalibrationMixin:
             self.cal_line_offset_entry.clear()
         if hasattr(self, 'cal_export_name_entry'):
             self.cal_export_name_entry.clear()
-        self._cal_line_offset_locked_to_import = False
+        self._clear_imported_cal_line_offset_lock()
 
         self._update_pitch_line_button_states()
         self._update_roll_line_button_states()
@@ -1265,6 +1268,7 @@ class CalibrationMixin:
                     shapely_line = LineString([(p[1], p[0]) for p in pts])
                     features.append({'geometry': mapping(shapely_line), 'properties': {'line_num': num, 'line_name': name}})
                 if export_shapefile:
+                    export_utils.remove_export_file(shapefile_path)
                     with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
                         collection.writerecords(features)
                 self._write_gpkg_if_enabled(shapefile_path, schema, features, crs=crs_epsg)
@@ -1281,6 +1285,7 @@ class CalibrationMixin:
                     "geometry": {"type": "LineString", "coordinates": [[p[1], p[0]] for p in pts]},
                     "properties": {"line_num": num, "line_name": name},
                 })
+            export_utils.remove_export_file(geojson_file_path)
             with open(geojson_file_path, 'w', encoding='utf-8') as f:
                 json.dump(
                     {
@@ -1326,6 +1331,7 @@ class CalibrationMixin:
             if export_text_txt:
                 export_utils.write_ddd_txt(txt_file_path, cal_rows)
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
+            export_utils.remove_export_file(stats_file_path)
             stats = self._calculate_calibration_survey_statistics()
             if stats:
                 stats_text = self._format_calibration_statistics_text(stats, include_export_date=True, export_name=export_name)
@@ -1378,6 +1384,7 @@ class CalibrationMixin:
                 )
                 params['visualization_shapefile_paths'] = list(getattr(self, 'visualization_shapefile_paths', []) or [])
                 json_metadata_path = os.path.join(export_dir, f"{export_name}_params.json")
+                export_utils.remove_export_file(json_metadata_path)
                 with open(json_metadata_path, 'w', encoding='utf-8') as f:
                     json.dump(params, f, indent=2)
             except Exception as e:
@@ -1920,6 +1927,9 @@ class CalibrationMixin:
                         self.cal_line_offset_entry.setText(str(params['line_offset']))
                     if params.get('export_name'):
                         self.cal_export_name_entry.setText(params['export_name'])
+                        self._cal_export_name_locked_to_params = True
+                    else:
+                        self._cal_export_name_locked_to_params = False
                     if params.get('survey_speed') is not None:
                         self.cal_survey_speed_entry.setText(str(params['survey_speed']))
                     if params.get('lead_in_m') is not None and hasattr(self, 'cal_lead_in_entry'):
@@ -2679,10 +2689,17 @@ class CalibrationMixin:
         self._cal_line_offset_locked_to_import = True
 
     def _clear_imported_cal_line_offset_lock(self):
-        """Release the heading-line-offset lock so GeoTIFF depth-based
-        recommendations can drive the field again. Called when the user
-        starts a new survey or edits/picks the pitch line."""
+        """Release import locks so depth-based offset and auto export naming
+        apply again. Called when the user starts a new survey or modifies the
+        plan after import."""
         self._cal_line_offset_locked_to_import = False
+        self._cal_export_name_locked_to_params = False
+
+    def _on_cal_line_offset_user_edited(self):
+        """Re-enable auto export naming when the user edits line offset after import."""
+        self._cal_export_name_locked_to_params = False
+        if hasattr(self, "_update_cal_export_name_from_pitch_line"):
+            self._update_cal_export_name_from_pitch_line()
 
     def _update_cal_line_offset_from_pitch_line(self):
         """Calculate heading line offset from median depth along pitch line.
@@ -2749,6 +2766,8 @@ class CalibrationMixin:
                     "Heading Line Offset: Could not calculate (no valid elevation data along pitch line).",
                     append=False,
                 )
+        if hasattr(self, "_update_cal_export_name_from_pitch_line"):
+            self._update_cal_export_name_from_pitch_line()
 
     def _add_heading_lines_from_pitch_line(self):
         """Add heading lines north and south of pitch line at offset distance."""
@@ -2822,6 +2841,9 @@ class CalibrationMixin:
             [(n1_lat, n1_lon), (n2_lat, n2_lon)],
             [(s1_lat, s1_lon), (s2_lat, s2_lon)]
         ]
+        self._cal_export_name_locked_to_params = False
+        if hasattr(self, "_update_cal_export_name_from_pitch_line"):
+            self._update_cal_export_name_from_pitch_line()
         self._plot_survey_plan(preserve_view_limits=True)
         if hasattr(self, 'add_heading_lines_btn'):
             self.add_heading_lines_btn.setStyleSheet("")
@@ -2829,11 +2851,11 @@ class CalibrationMixin:
             self.set_cal_info_text("Heading lines have been added north and south of the pitch line.")
 
     def _set_cal_export_name_after_import(self):
-        """Set suggested calibration export name after import using same
-        convention as drawing: ``Calibration_{offset}m_{heading}deg`` from
-        the pitch line. When the offset is locked to an imported value the
-        depth-driven refresh is skipped so we don't blow the locked offset
-        away (see ``_update_cal_line_offset_from_pitch_line``)."""
+        """Set suggested calibration export name after import (``cal_depth<m>m_pitch<deg>deg``).
+
+        When the offset is locked to an imported value the depth-driven refresh
+        is skipped so we don't blow the locked offset away (see
+        ``_update_cal_line_offset_from_pitch_line``)."""
         if not hasattr(self, 'cal_export_name_entry'):
             return
         if getattr(self, 'cal_download_gmrt_checkbox', None) and self.cal_download_gmrt_checkbox.isChecked():
@@ -2851,22 +2873,55 @@ class CalibrationMixin:
             self._update_cal_line_offset_from_pitch_line()
         self._update_cal_export_name_from_pitch_line()
         if not self.cal_export_name_entry.text().strip():
-            self.cal_export_name_entry.setText(f"Cal_import_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}")
+            self.cal_export_name_entry.setText(
+                self._build_calibration_export_basename()
+                if hasattr(self, "_build_calibration_export_basename")
+                else "cal_depth0m_pitch0deg"
+            )
+
+    def _build_calibration_export_basename(self, mean_depth_m=None, pitch_heading_deg=None):
+        """Default export stem: cal_depth<m>m_pitch<deg>deg (depth/heading rounded)."""
+        if pitch_heading_deg is None:
+            heading = 0
+            if hasattr(self, "pitch_line_points") and len(self.pitch_line_points) == 2:
+                (lat1, lon1), (lat2, lon2) = self.pitch_line_points
+                try:
+                    geod = pyproj.Geod(ellps="WGS84")
+                    az12, _az21, _dist = geod.inv(lon1, lat1, lon2, lat2)
+                    heading = int(round(az12)) % 360
+                except Exception:
+                    heading = 0
+        else:
+            try:
+                heading = int(round(float(pitch_heading_deg) % 360))
+            except (TypeError, ValueError):
+                heading = 0
+
+        if mean_depth_m is None:
+            depth_int = 0
+            pd = self._pitch_line_depth_stats_abs_m()
+            if pd is not None:
+                try:
+                    depth_int = int(round(float(pd["mean"])))
+                except (TypeError, ValueError, KeyError):
+                    depth_int = 0
+        else:
+            try:
+                depth_int = int(round(abs(float(mean_depth_m))))
+            except (TypeError, ValueError):
+                depth_int = 0
+
+        return f"cal_depth{depth_int}m_pitch{heading}deg"
 
     def _update_cal_export_name_from_pitch_line(self):
-        """Update calibration export name from pitch line and offset (same convention as when drawing: Calibration_{offset}m_{heading}deg)."""
-        if not hasattr(self, 'pitch_line_points') or len(self.pitch_line_points) != 2:
+        """Update calibration export name from pitch-line mean depth and heading."""
+        if getattr(self, "_cal_export_name_locked_to_params", False):
+            return
+        if not hasattr(self, "cal_export_name_entry"):
+            return
+        if not hasattr(self, "pitch_line_points") or len(self.pitch_line_points) != 2:
             return
         try:
-            offset_val = float(self.cal_line_offset_entry.text().strip() or "0")
-        except (ValueError, TypeError):
-            offset_val = 0
-        (lat1, lon1), (lat2, lon2) = self.pitch_line_points
-        try:
-            geod = pyproj.Geod(ellps="WGS84")
-            az12, az21, dist = geod.inv(lon1, lat1, lon2, lat2)
-            heading = int(round(az12)) % 360
+            self.cal_export_name_entry.setText(self._build_calibration_export_basename())
         except Exception:
-            heading = 0
-        export_name = f"Calibration_{int(round(offset_val))}m_{heading}deg"
-        self.cal_export_name_entry.setText(export_name)
+            pass

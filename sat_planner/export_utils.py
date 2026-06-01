@@ -8,6 +8,7 @@ Shared survey export writers. All CSV/TXT formats use the same row conventions:
 """
 import csv
 import datetime
+import glob
 import math
 import os
 from xml.sax.saxutils import escape
@@ -17,6 +18,23 @@ try:
 except ImportError:
     GEOSPATIAL_LIBS_AVAILABLE = False
     pyproj = None
+
+
+def remove_export_file(path):
+    """Remove an export target (and shapefile sidecars) so the next write overwrites cleanly."""
+    if not path:
+        return
+    targets = {path}
+    base, ext = os.path.splitext(path)
+    if ext.lower() == ".shp":
+        for sidecar in glob.glob(base + ".*"):
+            targets.add(sidecar)
+    for target in targets:
+        try:
+            if os.path.isfile(target):
+                os.remove(target)
+        except OSError:
+            pass
 
 
 def _deg_min(d):
@@ -35,6 +53,7 @@ def _deg_min_sec(d):
 
 def write_ddd_csv(path, rows, *, newline='', encoding='utf-8'):
     """Write *_DDD.csv. rows: list of (line_num, line_name, point_label, lat, lon)."""
+    remove_export_file(path)
     with open(path, 'w', newline=newline, encoding=encoding) as f:
         w = csv.writer(f)
         w.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude', 'Longitude'])
@@ -45,6 +64,7 @@ def write_ddd_csv(path, rows, *, newline='', encoding='utf-8'):
 
 def write_ddd_txt(path, rows, *, encoding='utf-8'):
     """Write *_DDD.txt. rows: list of (line_num, line_name, point_label, lat, lon). Writes label lat lon per line."""
+    remove_export_file(path)
     with open(path, 'w', encoding=encoding) as f:
         for row in rows:
             _, _, point_label, lat, lon = row
@@ -53,6 +73,7 @@ def write_ddd_txt(path, rows, *, encoding='utf-8'):
 
 def write_dmm_csv(path, rows, *, newline='', encoding='utf-8'):
     """Write *_DMM.csv. rows: list of (line_num, line_name, point_label, lat, lon). Converts to deg/min."""
+    remove_export_file(path)
     with open(path, 'w', newline=newline, encoding=encoding) as f:
         w = csv.writer(f)
         w.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Longitude (Deg)', 'Longitude (Min)'])
@@ -65,6 +86,7 @@ def write_dmm_csv(path, rows, *, newline='', encoding='utf-8'):
 
 def write_dmm_txt(path, rows, *, encoding='utf-8'):
     """Write *_DMM.txt. rows: list of (line_num, line_name, point_label, lat, lon). One line: label lat_deg lat_min lon_deg lon_min."""
+    remove_export_file(path)
     with open(path, 'w', encoding=encoding) as f:
         for row in rows:
             _, _, point_label, lat, lon = row
@@ -75,6 +97,7 @@ def write_dmm_txt(path, rows, *, encoding='utf-8'):
 
 def write_dms_csv(path, rows, *, newline='', encoding='utf-8'):
     """Write *_DMS.csv. rows: list of (line_num, line_name, point_label, lat, lon). Converts to deg/min/sec."""
+    remove_export_file(path)
     with open(path, 'w', newline=newline, encoding=encoding) as f:
         w = csv.writer(f)
         w.writerow(['Line Number', 'Line Name', 'Point Label', 'Latitude (Deg)', 'Latitude (Min)', 'Latitude (Sec)', 'Longitude (Deg)', 'Longitude (Min)', 'Longitude (Sec)'])
@@ -87,6 +110,7 @@ def write_dms_csv(path, rows, *, newline='', encoding='utf-8'):
 
 def write_dms_txt(path, rows, *, encoding='utf-8'):
     """Write *_DMS.txt. rows: list of (line_num, line_name, point_label, lat, lon). One line: label lat_deg lat_min lat_sec lon_deg lon_min lon_sec."""
+    remove_export_file(path)
     with open(path, 'w', encoding=encoding) as f:
         for row in rows:
             _, _, point_label, lat, lon = row
@@ -101,6 +125,7 @@ def write_profile_csv(path, distances, elevations, slopes, *, newline="", encodi
     ``distances``, ``elevations``, ``slopes`` are equal-length sequences (e.g. numpy arrays).
     Non-finite elevation/slope cells are written as empty fields.
     """
+    remove_export_file(path)
     with open(path, "w", newline=newline, encoding=encoding) as f:
         w = csv.writer(f)
         w.writerow(["Distance", "Elevation", "Slope"])
@@ -126,6 +151,7 @@ def write_line_plan_profile_csv(
     ``waypoint_labels`` is the same length as the numeric arrays; use \"\" for rows
     with no waypoint. Non-finite elevation/slope cells are written as empty fields.
     """
+    remove_export_file(path)
     with open(path, "w", newline=newline, encoding=encoding) as f:
         w = csv.writer(f)
         w.writerow(["Distance", "Elevation", "Slope", "Waypoint"])
@@ -177,6 +203,7 @@ def write_gpx_per_test_files(export_dir, export_base, tests, *, creator="SAT Pla
 
 def write_asciiplan(path, lines, *, encoding='utf-8'):
     """Write SIS .asciiplan. lines: list of (line_name, points) where points is list of (lat, lon) in decimal degrees."""
+    remove_export_file(path)
     ts = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     with open(path, 'w', encoding=encoding) as f:
         f.write("DEG\n\n0 0 0 0\n")
@@ -190,6 +217,7 @@ def write_gpx(path, lines, *, creator="SAT Planner", encoding='utf-8'):
     lines: list of (line_name, points) where points is list of (lat, lon).
     Returns True if written, False otherwise.
     """
+    remove_export_file(path)
     ts = datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
     try:
         with open(path, "w", encoding=encoding) as f:
@@ -250,6 +278,7 @@ def write_lnw(path, lines, *, encoding='utf-8'):
         transformer = pyproj.Transformer.from_crs("EPSG:4326", utm_crs, always_xy=True)
     except Exception:
         return False
+    remove_export_file(path)
     try:
         with open(path, "w", encoding=encoding) as f:
             f.write("LNW 1.0\n")
@@ -332,6 +361,10 @@ def save_export_png(
     """Save figure PNG(s) per high/low toggles. Returns ``(high_path_or_none, low_path_or_none)``."""
     if not save_high and not save_low:
         return None, None
+    if save_high:
+        remove_export_file(path)
+    if save_low:
+        remove_export_file(low_resolution_png_path(path))
     save_kwargs = _figure_save_kwargs(dpi=dpi, bbox_inches=bbox_inches, facecolor=facecolor)
     high_path = path if save_high else None
     low_path = low_resolution_png_path(path) if save_low else None

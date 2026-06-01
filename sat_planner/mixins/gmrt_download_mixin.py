@@ -320,21 +320,15 @@ class GMRTDownloadMixin:
                 origin_tab = getattr(self, "_gmrt_download_origin_tab_index", None)
                 if origin_tab is not None and hasattr(self, "_zoom_to_tab_plan"):
                     self._zoom_to_tab_plan(tab_index=origin_tab)
-                # On the Calibration tab, refresh pitch-line depth stats from
-                # the freshly loaded GeoTIFF. ``_update_cal_line_offset_from_pitch_line``
-                # is safe to call when the heading-line offset is locked to
-                # an imported value -- it refreshes the depth labels but
-                # leaves the offset entry alone. We also recompose the
-                # export name when it's still blank (the typical drawing-
-                # style import flow); when the import already populated the
-                # name from a locked offset, leave that alone.
+                # On the Calibration tab, refresh pitch-line depth stats and
+                # the default export name from the freshly loaded GeoTIFF.
+                # ``_update_cal_line_offset_from_pitch_line`` is safe when the
+                # heading-line offset is locked to an imported value (depth
+                # labels refresh; offset entry unchanged). Export name refresh
+                # is skipped when locked to ``export_name`` in params.
                 if (hasattr(self, "param_notebook") and self.param_notebook.currentIndex() == 0
                         and hasattr(self, "_update_cal_line_offset_from_pitch_line")):
                     self._update_cal_line_offset_from_pitch_line()
-                    if (hasattr(self, "cal_export_name_entry")
-                            and not self.cal_export_name_entry.text().strip()
-                            and hasattr(self, "_update_cal_export_name_from_pitch_line")):
-                        self._update_cal_export_name_from_pitch_line()
             else:
                 self._show_message("error", "GMRT Download", path_or_error)
                 log_func(f"GMRT download failed: {path_or_error}", append=True)

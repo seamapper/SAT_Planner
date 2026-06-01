@@ -235,8 +235,8 @@ class GMRTGrabber(QWidget):
         # Cell resolution selection
         # Allows users to specify meter-per-pixel resolution
         self.mres_combo = QComboBox()
-        self.mres_combo.addItems(["100", "200", "400", "Custom"])
-        self.mres_combo.setCurrentText("100")  # Default to 100 meters/pixel
+        self.mres_combo.addItems(["60", "120", "240", "480", "Custom"])
+        self.mres_combo.setCurrentText("120")  # Default to 120 meters/pixel
         self.mres_combo.currentTextChanged.connect(self._on_cell_resolution_changed)
         grid_form.addRow("Cell Resolution (meters/pixel)", self.mres_combo)
 
@@ -825,23 +825,15 @@ class GMRTGrabber(QWidget):
             float: Overlap in degrees (2 cells worth)
         """
         mres_value = self.get_cell_resolution_meters()
-        
-        # Use exact overlap values for common resolutions; otherwise calculate from meters
-        overlap_map = {
-            400: 0.008,  # 400m grids: 0.008 degrees
-            200: 0.004,  # 200m grids: 0.004 degrees
-            100: 0.002   # 100m grids: 0.002 degrees
-        }
-        
-        # Get overlap from map, or calculate if not in map (e.g. Custom)
-        if mres_value in overlap_map:
-            overlap_degrees = overlap_map[mres_value]
-        else:
-            # Fallback: calculate from meters (approximate)
-            meters_per_degree = 111000.0
-            cell_size_degrees = mres_value / meters_per_degree
-            overlap_degrees = 2.0 * cell_size_degrees
-        
+
+        # Overlap is 2 cells worth of degrees, calculated directly from the
+        # configured cell resolution. (Earlier preset-specific overrides have
+        # been removed; the formula gives a stable result for every resolution
+        # the dialog now offers as well as any Custom value.)
+        meters_per_degree = 111000.0
+        cell_size_degrees = mres_value / meters_per_degree
+        overlap_degrees = 2.0 * cell_size_degrees
+
         return overlap_degrees
     
     def generate_tiles(self, west, east, south, north, overlap=None):

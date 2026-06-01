@@ -338,6 +338,8 @@ class PerformanceMixin:
                 self.performance_test_depth_entry.clear()
         except Exception:
             self.performance_test_depth_entry.clear()
+        if hasattr(self, "_update_performance_export_name"):
+            self._update_performance_export_name()
 
     def _perf_depth_entry_needs_fill(self):
         """True if test depth is missing or not a positive number."""
@@ -375,6 +377,8 @@ class PerformanceMixin:
         if depth_m <= 0:
             return
         self.performance_test_depth_entry.setText(f"{depth_m:.1f}")
+        if hasattr(self, "_update_performance_export_name"):
+            self._update_performance_export_name()
 
     def _on_geotiff_loaded_performance_depth(self):
         """After any GeoTIFF load: refresh performance test depth from grid at current PCP if applicable."""
@@ -402,6 +406,8 @@ class PerformanceMixin:
         self._perf_fill_test_depth_from_geotiff_if_needed(plat, plon)
         if hasattr(self, "_update_performance_ping_time"):
             self._update_performance_ping_time()
+        if hasattr(self, "_update_performance_export_name"):
+            self._update_performance_export_name()
 
     def _plot_performance_test_lines(self, quiet=False):
         """Plot 4 performance test lines from center/length/swell and draw profile for line 1.
@@ -824,13 +830,43 @@ class PerformanceMixin:
         self.activity_log_text.ensureCursorVisible()
         self.activity_log_text.setReadOnly(True)
 
+    def _build_performance_export_basename(self, swell_direction_deg=None, test_depth_m=None):
+        """Default export stem: perf_swell<deg>_depth<m>m (depth rounded to nearest meter)."""
+        if swell_direction_deg is None:
+            swell_raw = ""
+            if hasattr(self, "performance_swell_direction_entry"):
+                swell_raw = self.performance_swell_direction_entry.text().strip()
+            try:
+                swell_int = int(round(float(swell_raw or 0) % 360))
+            except (TypeError, ValueError):
+                swell_int = 0
+        else:
+            try:
+                swell_int = int(round(float(swell_direction_deg) % 360))
+            except (TypeError, ValueError):
+                swell_int = 0
+
+        if test_depth_m is None:
+            depth_raw = ""
+            if hasattr(self, "performance_test_depth_entry"):
+                depth_raw = self.performance_test_depth_entry.text().strip()
+            try:
+                depth_int = int(round(abs(float(depth_raw or 0))))
+            except (TypeError, ValueError):
+                depth_int = 0
+        else:
+            try:
+                depth_int = int(round(abs(float(test_depth_m))))
+            except (TypeError, ValueError):
+                depth_int = 0
+
+        return f"perf_swell{swell_int}_depth{depth_int}m"
+
     def _update_performance_export_name(self):
         if not hasattr(self, "performance_export_name_entry"):
             return
         try:
-            swell_dir = self.performance_swell_direction_entry.text().strip() or "0"
-            spd = self.performance_test_speed_entry.text().strip() or "0"
-            self.performance_export_name_entry.setText(f"Performance_{swell_dir}deg_{spd}_kts")
+            self.performance_export_name_entry.setText(self._build_performance_export_basename())
         except Exception:
             pass
 

@@ -353,6 +353,7 @@ class ReferenceMixin:
 
             # --- Export Input Parameters to TXT ---
             params_file_path = os.path.join(export_dir, f"{export_name}_params_DD.txt")
+            export_utils.remove_export_file(params_file_path)
             with open(params_file_path, 'w') as f:
                 f.write("Survey Plan Input Parameters:\n\n")
                 for key, value in values.items():
@@ -385,6 +386,7 @@ class ReferenceMixin:
                     })
 
                 shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
+                export_utils.remove_export_file(shapefile_path)
                 with fiona.open(shapefile_path, 'w', driver='ESRI Shapefile', crs=crs_epsg, schema=schema) as collection:
                     collection.writerecords(features)
                 self.set_ref_info_text(
@@ -809,8 +811,8 @@ class ReferenceMixin:
                 self._load_geotiff_from_path(imported_params_geotiff_path)
             else:
                 self.set_ref_info_text(f"Saved GeoTIFF not found: {imported_params_geotiff_path}. Continuing without GeoTIFF.", append=True)
-        # Migrate legacy auto-generated export names (Accuracy_<spacing>m_<heading>deg)
-        # to the new depth-based form. Done after the GeoTIFF load so the depth
+        # Migrate legacy auto-generated export names to acc_depth<m>m_cross<deg>deg.
+        # Done after the GeoTIFF load so the depth
         # can be sampled from the grid for older surveys whose *_params.json
         # did not store ``central_point_depth_m``.
         self._regenerate_auto_accuracy_export_name()
@@ -1294,8 +1296,7 @@ class ReferenceMixin:
                     self._load_geotiff_from_path(geotiff_path_to_load)
                 else:
                     self.set_ref_info_text(f"Saved GeoTIFF not found: {geotiff_path_to_load}. Continuing without GeoTIFF.", append=True)
-            # Migrate legacy auto-generated export names
-            # (Accuracy_<spacing>m_<heading>deg) to the new depth-based form.
+            # Migrate legacy auto-generated export names to acc_depth<m>m_cross<deg>deg.
             # Done after the GeoTIFF load so the depth can be sampled from the
             # grid for older surveys whose *_params.json did not store
             # ``central_point_depth_m``.
@@ -1430,12 +1431,10 @@ class ReferenceMixin:
             self.crossline_passes_entry.setText("2")
         if hasattr(self, 'export_name_entry'):
             self.export_name_entry.clear()
-            try:
-                heading = int(float(self.heading_entry.text())) if self.heading_entry.text() else 0
-                export_name = f"Accuracy_0m_{heading}deg"
-            except Exception:
-                export_name = "Accuracy_0m_0deg"
-            self.export_name_entry.setText(export_name)
+            if hasattr(self, "_build_accuracy_export_basename"):
+                self.export_name_entry.setText(self._build_accuracy_export_basename())
+            else:
+                self.export_name_entry.setText("acc_depth0m_cross90deg")
         if hasattr(self, 'offset_direction_var'):
             self.offset_direction_var = "North"
             if hasattr(self, 'offset_direction_combo'):
@@ -1498,12 +1497,14 @@ class ReferenceMixin:
 
             # Calculate travel time and distance between main lines (zigzag pattern)
             travel_between_lines_minutes = 0
+            travel_between_main_legs = []
+            travel_to_crossline_leg = None
             if len(self.survey_lines_data) > 1:
                 for i in range(1, len(self.survey_lines_data)):
-                    if (i-1) % 2 == 0:
-                        end_lat, end_lon = self.survey_lines_data[i-1][1]
+                    if (i - 1) % 2 == 0:
+                        end_lat, end_lon = self.survey_lines_data[i - 1][1]
                     else:
-                        end_lat, end_lon = self.survey_lines_data[i-1][0]
+                        end_lat, end_lon = self.survey_lines_data[i - 1][0]
 
                     if i % 2 == 0:
                         start_lat, start_lon = self.survey_lines_data[i][0]
@@ -1513,8 +1514,16 @@ class ReferenceMixin:
                     _, _, travel_distance = geod.inv(end_lon, end_lat, start_lon, start_lat)
                     travel_between_lines_total_distance += travel_distance
                     travel_time_hours = travel_distance / speed_m_per_h if speed_m_per_h > 0 else 0
-                    # Travel time + turn time between lines
-                    travel_between_lines_minutes += travel_time_hours * 60 + turn_time_min
+                    leg_travel_min = travel_time_hours * 60
+                    leg_total_min = leg_travel_min + turn_time_min
+                    travel_between_lines_minutes += leg_total_min
+                    travel_between_main_legs.append({
+                        'from_line': i,
+                        'to_line': i + 1,
+                        'distance_m': travel_distance,
+                        'travel_minutes': leg_travel_min,
+                        'total_minutes': leg_total_min,
+                    })
 
             # Calculate travel time and distance from last main line to crossline
             travel_to_crossline_minutes = 0
@@ -1528,18 +1537,31 @@ class ReferenceMixin:
                 crossline_start_lat, crossline_start_lon = self.cross_line_data[0]
                 crossline_end_lat, crossline_end_lon = self.cross_line_data[1]
 
-                _, _, dist_to_crossline_start = geod.inv(last_end_lon, last_end_lat, crossline_start_lon, crossline_start_lat)
-                _, _, dist_to_crossline_end = geod.inv(last_end_lon, last_end_lat, crossline_end_lon, crossline_end_lat)
+                _, _, dist_to_crossline_start = geod.inv(
+                    last_end_lon, last_end_lat, crossline_start_lon, crossline_start_lat
+                )
+                _, _, dist_to_crossline_end = geod.inv(
+                    last_end_lon, last_end_lat, crossline_end_lon, crossline_end_lat
+                )
 
                 if dist_to_crossline_start <= dist_to_crossline_end:
                     travel_distance = dist_to_crossline_start
+                    crossline_endpoint = 'start'
                 else:
                     travel_distance = dist_to_crossline_end
+                    crossline_endpoint = 'end'
 
                 travel_to_crossline_distance = travel_distance
                 travel_time_hours = travel_distance / speed_m_per_h if speed_m_per_h > 0 else 0
-                # Travel time + turn time to crossline
-                travel_to_crossline_minutes = travel_time_hours * 60 + turn_time_min
+                leg_travel_min = travel_time_hours * 60
+                travel_to_crossline_minutes = leg_travel_min + turn_time_min
+                travel_to_crossline_leg = {
+                    'from_line': last_line_index + 1,
+                    'distance_m': travel_distance,
+                    'travel_minutes': leg_travel_min,
+                    'total_minutes': travel_to_crossline_minutes,
+                    'crossline_endpoint': crossline_endpoint,
+                }
 
             # Calculate crossline survey time and distance
             crossline_survey_minutes = 0
@@ -1605,7 +1627,9 @@ class ReferenceMixin:
                 'crossline_total_distance_m': crossline_single_pass_distance * num_passes,
                 'crossline_total_distance_km': (crossline_single_pass_distance * num_passes) / 1000.0,
                 'crossline_total_distance_nm': (crossline_single_pass_distance * num_passes) / 1852.0,
-                'num_crossline_passes': num_passes
+                'num_crossline_passes': num_passes,
+                'travel_between_main_legs': travel_between_main_legs,
+                'travel_to_crossline_leg': travel_to_crossline_leg,
             }
         except Exception as e:
             print(f"Error calculating total survey time: {e}")
@@ -1639,7 +1663,9 @@ class ReferenceMixin:
                 'crossline_total_distance_m': 0,
                 'crossline_total_distance_km': 0,
                 'crossline_total_distance_nm': 0,
-                'num_crossline_passes': 1
+                'num_crossline_passes': 1,
+                'travel_between_main_legs': [],
+                'travel_to_crossline_leg': None,
             }
 
     def _calculate_reference_survey_statistics(self):
@@ -1665,6 +1691,9 @@ class ReferenceMixin:
 
         def _fmt_minutes_and_hours(minutes_val):
             return f"{minutes_val:.1f} min ({minutes_val / 60.0:.2f} hr)"
+
+        def _fmt_distance_m(m_val):
+            return f"{m_val:.1f} m ({m_val / 1000.0:.3f} km, {m_val / 1852.0:.3f} nm)"
 
         include_crossline = stats.get('num_crossline_passes', 0) > 0 and stats.get('crossline_single_pass_distance_m', 0) > 0
         stats_text = "ACCURACY SURVEY INFORMATION\n"
@@ -1724,12 +1753,46 @@ class ReferenceMixin:
         stats_text += f"Total Distance: {stats['main_lines_distance_m']:.1f} m ({stats['main_lines_distance_km']:.3f} km, {stats['main_lines_distance_nm']:.3f} nm)\n"
         stats_text += f"Survey Time: {_fmt_minutes_and_hours(stats['main_lines_minutes'])}\n\n"
 
-        # Travel between lines
-        if stats['travel_between_lines_distance_m'] > 0:
+        # Travel between lines (per-leg detail + totals)
+        travel_main_legs = stats.get('travel_between_main_legs') or []
+        travel_to_crossline_leg = stats.get('travel_to_crossline_leg')
+        has_travel_section = bool(travel_main_legs) or travel_to_crossline_leg is not None
+        if has_travel_section:
             stats_text += "TRAVEL BETWEEN LINES\n"
             stats_text += "-" * 25 + "\n"
-            stats_text += f"Total Travel Distance: {stats['travel_between_lines_distance_m']:.1f} m ({stats['travel_between_lines_distance_km']:.3f} km, {stats['travel_between_lines_distance_nm']:.3f} nm)\n"
-            stats_text += f"Travel Time: {_fmt_minutes_and_hours(stats['travel_minutes'])}\n\n"
+            for leg in travel_main_legs:
+                from_n = leg['from_line']
+                to_n = leg['to_line']
+                stats_text += f"Main Line {from_n} → Main Line {to_n}\n"
+                stats_text += f"  Distance: {_fmt_distance_m(leg['distance_m'])}\n"
+                stats_text += (
+                    f"  Transit Time: {_fmt_minutes_and_hours(leg['travel_minutes'])}"
+                    f" (+ {_fmt_minutes_and_hours(turn_time_min)} turn)"
+                    f" = {_fmt_minutes_and_hours(leg['total_minutes'])}\n"
+                )
+            if travel_to_crossline_leg is not None:
+                cl_leg = travel_to_crossline_leg
+                endpoint_label = (
+                    "crossline start"
+                    if cl_leg.get('crossline_endpoint') == 'start'
+                    else "crossline end"
+                )
+                stats_text += f"Main Line {cl_leg['from_line']} → Crossline ({endpoint_label})\n"
+                stats_text += f"  Distance: {_fmt_distance_m(cl_leg['distance_m'])}\n"
+                stats_text += (
+                    f"  Transit Time: {_fmt_minutes_and_hours(cl_leg['travel_minutes'])}"
+                    f" (+ {_fmt_minutes_and_hours(turn_time_min)} turn)"
+                    f" = {_fmt_minutes_and_hours(cl_leg['total_minutes'])}\n"
+                )
+            combined_travel_distance_m = stats['travel_between_lines_distance_m'] + stats.get(
+                'travel_to_crossline_distance_m', 0
+            )
+            combined_travel_minutes = stats['travel_minutes'] + stats.get('travel_to_crossline_minutes', 0)
+            if combined_travel_distance_m > 0:
+                stats_text += (
+                    f"Total Travel Distance: {_fmt_distance_m(combined_travel_distance_m)}\n"
+                )
+            stats_text += f"Total Travel Time: {_fmt_minutes_and_hours(combined_travel_minutes)}\n\n"
 
         # Crossline information
         if include_crossline:
@@ -1804,9 +1867,6 @@ class ReferenceMixin:
             stats_text += f"Crossline (per pass): {stats['crossline_single_pass_distance_m']:.1f} m ({stats['crossline_single_pass_distance_km']:.3f} km, {stats['crossline_single_pass_distance_nm']:.3f} nm)\n"
             stats_text += f"Crossline Total Distance: {stats['crossline_total_distance_m']:.1f} m ({stats['crossline_total_distance_km']:.3f} km, {stats['crossline_total_distance_nm']:.3f} nm)\n"
             stats_text += f"Crossline Time: {_fmt_minutes_and_hours(stats['crossline_minutes'])}\n"
-            if stats['travel_to_crossline_distance_m'] > 0:
-                stats_text += f"Travel to Crossline: {stats['travel_to_crossline_distance_m']:.1f} m ({stats['travel_to_crossline_distance_km']:.3f} km, {stats['travel_to_crossline_distance_nm']:.3f} nm)\n"
-            stats_text += f"Travel to Crossline Time: {_fmt_minutes_and_hours(stats['travel_to_crossline_minutes'])}\n"
             stats_text += "\n"
 
         # Survey Time Breakdown
@@ -2058,18 +2118,16 @@ class ReferenceMixin:
     def _on_line_length_or_speed_change(self, *args):
         pass
 
-    # Auto-generated Accuracy export name pattern, e.g. "Accuracy_117m_45deg".
-    # Used to detect imported names that should be regenerated under the new
-    # depth-based scheme rather than preserved verbatim. Custom names that do not
-    # match this pattern are left untouched.
-    _AUTO_ACCURACY_EXPORT_NAME_RE = re.compile(r"^Accuracy_\d+m_\d+deg$", re.IGNORECASE)
+    # Auto-generated Accuracy export name patterns (legacy and current).
+    # Used to detect imported names that should be regenerated rather than
+    # preserved verbatim. Custom names that do not match are left untouched.
+    _AUTO_ACCURACY_EXPORT_NAME_RE = re.compile(
+        r"^(?:Accuracy_\d+m_\d+deg|acc_depth\d+m_cross\d+deg)$",
+        re.IGNORECASE,
+    )
 
-    def _update_export_name(self):
-        try:
-            heading = int(float(self.heading_entry.text()))
-        except (ValueError, TypeError):
-            return
-
+    def _accuracy_central_depth_m_for_export(self):
+        """Central-point depth (m, positive) for the default export basename."""
         depth_val = None
         picked = getattr(self, "_depth_at_picked_point", None)
         if picked is not None:
@@ -2079,20 +2137,72 @@ class ReferenceMixin:
                 depth_val = None
         if depth_val is None and hasattr(self, "central_pt_depth_value_label"):
             label_text = (self.central_pt_depth_value_label.text() or "").strip()
-            try:
-                depth_val = float(label_text)
-            except (TypeError, ValueError):
-                depth_val = None
-        depth_int = int(abs(depth_val)) if depth_val is not None else 0
+            if label_text and label_text != "-":
+                try:
+                    depth_val = float(label_text)
+                except (TypeError, ValueError):
+                    depth_val = None
+        if depth_val is None:
+            return 0
+        try:
+            return int(round(abs(float(depth_val))))
+        except (TypeError, ValueError):
+            return 0
 
-        export_name = f"Accuracy_{depth_int}m_{heading}deg"
-        self.export_name_entry.clear()
-        self.export_name_entry.setText(export_name)
+    def _crossline_heading_deg_for_export(self):
+        """Crossline heading (degrees, 0–359) rounded to nearest integer."""
+        if getattr(self, "cross_line_data", None) and len(self.cross_line_data) >= 2:
+            try:
+                if pyproj is not None:
+                    geod = pyproj.Geod(ellps="WGS84")
+                    lat1, lon1 = self.cross_line_data[0]
+                    lat2, lon2 = self.cross_line_data[1]
+                    fwd_az, _back_az, _ = geod.inv(lon1, lat1, lon2, lat2)
+                    return int(round(float(fwd_az) % 360))
+            except Exception:
+                pass
+
+        survey_lines = getattr(self, "survey_lines_data", None) or []
+        if len(survey_lines) >= 2 and pyproj is not None:
+            try:
+                geod = pyproj.Geod(ellps="WGS84")
+                first_line = survey_lines[0]
+                last_line = survey_lines[-1]
+                first_mid_lat = (first_line[0][0] + first_line[1][0]) / 2
+                first_mid_lon = (first_line[0][1] + first_line[1][1]) / 2
+                last_mid_lat = (last_line[0][0] + last_line[1][0]) / 2
+                last_mid_lon = (last_line[0][1] + last_line[1][1]) / 2
+                crossline_azimuth, _, _ = geod.inv(
+                    first_mid_lon, first_mid_lat, last_mid_lon, last_mid_lat
+                )
+                return int(round(float(crossline_azimuth) % 360))
+            except Exception:
+                pass
+
+        try:
+            heading = float(self.heading_entry.text())
+            return int(round((heading + 90) % 360))
+        except (ValueError, TypeError, AttributeError):
+            return 0
+
+    def _build_accuracy_export_basename(self):
+        """Default export stem: acc_depth<m>m_cross<deg>deg."""
+        depth_int = self._accuracy_central_depth_m_for_export()
+        cross_int = self._crossline_heading_deg_for_export()
+        return f"acc_depth{depth_int}m_cross{cross_int}deg"
+
+    def _update_export_name(self):
+        if not hasattr(self, "export_name_entry"):
+            return
+        try:
+            self.export_name_entry.setText(self._build_accuracy_export_basename())
+        except Exception:
+            pass
 
     def _regenerate_auto_accuracy_export_name(self):
-        """If the current Export Name is blank or matches the auto-generated
-        ``Accuracy_<int>m_<int>deg`` pattern, rebuild it from the current depth
-        and heading. User-customized names are left untouched.
+        """If the current Export Name is blank or matches an auto-generated
+        pattern, rebuild it from central depth and crossline heading.
+        User-customized names are left untouched.
         Intended to be called at the end of an Accuracy import, after depth,
         heading, and (when available) the GeoTIFF have been restored from the
         saved params, so legacy saved names that encoded line spacing get
@@ -2151,3 +2261,5 @@ class ReferenceMixin:
         self._depth_at_picked_point = depth_m
         if hasattr(self, "central_pt_depth_value_label"):
             self.central_pt_depth_value_label.setText(f"{depth_m:.1f}")
+        if hasattr(self, "_update_export_name"):
+            self._update_export_name()
