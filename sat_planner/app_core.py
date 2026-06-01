@@ -45,10 +45,11 @@ from .mixins.profiles_mixin import ProfilesMixin
 from .mixins.map_interaction_mixin import MapInteractionMixin
 from .mixins.export_import_mixin import ExportImportMixin
 from .mixins.config_mixin import ConfigMixin
+from .mixins.deferred_params_mixin import DeferredParamsMixin
 from .gmrt_dialog import GMRTGrabber
 
 
-class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, PerformanceMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, QMainWindow):
+class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, PerformanceMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, DeferredParamsMixin, QMainWindow):
     CONFIG_FILENAME = CONFIG_FILENAME  # from package
 
     def __init__(self):
@@ -58,15 +59,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         # Set minimum window size
         self.setMinimumSize(1600, 1110)
         self.setWindowState(Qt.WindowState.WindowMaximized)
-
-        # Auto-regenerate timer: wait 800ms after last parameter change before regenerating
-        self.auto_regenerate_timer = QTimer()
-        self.auto_regenerate_timer.setSingleShot(True)
-        self.auto_regenerate_timer.timeout.connect(self._auto_regenerate_survey_plan)
-        # Debounce calibration lead-in updates while typing.
-        self.cal_lead_in_update_timer = QTimer()
-        self.cal_lead_in_update_timer.setSingleShot(True)
-        self.cal_lead_in_update_timer.timeout.connect(self._apply_cal_lead_in_change)
 
         # Central widget for main layout
         self.central_widget = QWidget()
@@ -508,20 +500,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             if hasattr(self, 'backscatter_box_width_entry'):
                 self.backscatter_box_width_entry.setEnabled(False)
 
-        # Bind parameter changes to update the plot
         self._updating_from_code = False  # Flag to prevent recursion
-        param_entries = [
-            self.central_lat_entry,
-            self.central_lon_entry,
-            self.line_length_entry,
-            self.heading_entry,
-            self.dist_between_lines_entry,
-            self.num_lines_entry,
-            self.bisect_lead_entry,
-            self.survey_speed_entry
-        ]
-        for entry in param_entries:
-            entry.textChanged.connect(self._on_parameter_change)
 
         self.last_used_dir = os.path.expanduser("~")  # Default to user's home directory
         self.last_geotiff_dir = os.path.expanduser("~")  # Default to user's home directory
@@ -556,24 +535,15 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         # After self._setup_layout(), connect the motion event for line planning, pitch line, pick center, and geotiff hover
         # Note: These are now handled by the main _on_mouse_motion method
 
-        # Bind parameter changes to update the Export Name
-        self.central_lat_entry.textChanged.connect(self._update_export_name)
-        # Reset "Pick Center from GeoTIFF" button to normal style when Central Latitude is entered
+        # Reset pick-center button style when latitude is typed (no plan/export side effects).
         self.central_lat_entry.textChanged.connect(
             lambda: (
                 self.pick_center_btn.setStyleSheet("") if hasattr(self, 'pick_center_btn') and self.central_lat_entry.text().strip() else None,
                 self.performance_pick_center_btn.setStyleSheet("") if hasattr(self, 'performance_pick_center_btn') and self.central_lat_entry.text().strip() else None
             )
         )
-        self.central_lon_entry.textChanged.connect(self._update_export_name)
-        self.line_length_entry.textChanged.connect(self._update_export_name)
-        self.heading_entry.textChanged.connect(self._update_export_name)
-        self.dist_between_lines_entry.textChanged.connect(self._update_export_name)
-        self.num_lines_entry.textChanged.connect(self._update_export_name)
-        self.bisect_lead_entry.textChanged.connect(self._update_export_name)
-        self.survey_speed_entry.textChanged.connect(self._update_export_name)
-        self.offset_direction_combo.currentTextChanged.connect(self._update_export_name)
-        # Slider connections already set up in widget creation
+
+        self._setup_deferred_parameter_bindings()
 
         # Show window maximized after everything is set up
         # Set window to minimum size on startup
@@ -824,11 +794,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             # Add content layout to main layout
             self.main_layout.addLayout(self.content_layout, 1)  # stretch factor 1
 
-            # Connect signals for line_length_entry and survey_speed_entry
-            if hasattr(self, 'line_length_entry') and hasattr(self, 'survey_speed_entry'):
-                self.line_length_entry.textChanged.connect(self._on_line_length_or_speed_change)
-                self.survey_speed_entry.textChanged.connect(self._on_line_length_or_speed_change)
-
             # Force update and show
             self.central_widget.update()
             self.central_widget.show()
@@ -969,7 +934,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         geotiff_nan_layout.addWidget(QLabel("NaN Value:"))
         self.geotiff_nan_entry = QLineEdit(f"{self.geotiff_nan_value:g}")
         self.geotiff_nan_entry.setToolTip("Bathymetry values equal to this sentinel value are treated as NaN.")
-        self.geotiff_nan_entry.textChanged.connect(self._on_geotiff_nan_value_changed)
         geotiff_nan_layout.addWidget(self.geotiff_nan_entry, 1)
         geotiff_load_layout.addWidget(geotiff_nan_frame, 1)
         geotiff_layout.addWidget(geotiff_load_row)
@@ -1040,7 +1004,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.show_contours_checkbox.stateChanged.connect(self._on_contour_checkbox_changed)
         contours_interval_layout.addWidget(self.show_contours_checkbox)
         self.contour_interval_entry = QLineEdit("200")
-        self.contour_interval_entry.textChanged.connect(self._on_contour_interval_changed)
         self.contour_interval_entry.setMaximumWidth(80)  # Limit width of entry field
         contours_interval_layout.addWidget(self.contour_interval_entry)
         self.show_slope_overlay_checkbox = QCheckBox("Slopes")
@@ -1048,12 +1011,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.show_slope_overlay_checkbox.stateChanged.connect(self._on_slope_overlay_checkbox_changed)
         contours_interval_layout.addWidget(self.show_slope_overlay_checkbox)
         self.slope_overlay_min_entry = QLineEdit("10")
-        self.slope_overlay_min_entry.textChanged.connect(self._on_slope_overlay_min_changed)
         self.slope_overlay_min_entry.setMaximumWidth(60)  # Limit width of entry field
         contours_interval_layout.addWidget(self.slope_overlay_min_entry)
         contours_interval_layout.addWidget(QLabel("To"))
         self.slope_overlay_max_entry = QLineEdit("20")
-        self.slope_overlay_max_entry.textChanged.connect(self._on_slope_overlay_max_changed)
         self.slope_overlay_max_entry.setMaximumWidth(60)  # Limit width of entry field
         contours_interval_layout.addWidget(self.slope_overlay_max_entry)
         contours_interval_layout.addStretch()
@@ -1173,7 +1134,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_line_params_layout.addWidget(QLabel("Line Length (m):"), ref_line_row, 0)
         self.line_length_entry = QLineEdit()
         ref_line_params_layout.addWidget(self.line_length_entry, ref_line_row, 1)
-        self.line_length_entry.editingFinished.connect(self._on_line_length_manual_changed)
         ref_line_row += 1
 
         ref_line_params_layout.addWidget(QLabel("Heading (deg, 0-360):"), ref_line_row, 0)
@@ -1184,7 +1144,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_line_params_layout.addWidget(QLabel("Distance Between Lines (m):"), ref_line_row, 0)
         self.dist_between_lines_entry = QLineEdit()
         ref_line_params_layout.addWidget(self.dist_between_lines_entry, ref_line_row, 1)
-        self.dist_between_lines_entry.editingFinished.connect(self._on_dist_between_lines_manual_changed)
         ref_line_row += 1
 
         ref_line_params_layout.addWidget(QLabel("Crossline Lead-in/out (m):"), ref_line_row, 0)
@@ -1198,7 +1157,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         slider_layout_len.setContentsMargins(0, 0, 0, 0)
         self.multiplier_entry_len = QLineEdit(f"{self.line_length_multiplier:.1f}")
         self.multiplier_entry_len.setMaximumWidth(80)
-        self.multiplier_entry_len.editingFinished.connect(self._on_line_length_multiplier_changed)
         slider_layout_len.addWidget(self.multiplier_entry_len)
         slider_layout_len.addStretch()
         ref_line_params_layout.addWidget(slider_frame_len, ref_line_row, 1)
@@ -1210,7 +1168,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         slider_layout_dist.setContentsMargins(0, 0, 0, 0)
         self.multiplier_entry_dist = QLineEdit(f"{self.dist_between_lines_multiplier:.1f}")
         self.multiplier_entry_dist.setMaximumWidth(80)
-        self.multiplier_entry_dist.editingFinished.connect(self._on_separation_multiplier_changed)
         slider_layout_dist.addWidget(self.multiplier_entry_dist)
         slider_layout_dist.addStretch()
         ref_line_params_layout.addWidget(slider_frame_dist, ref_line_row, 1)
@@ -1220,15 +1177,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.generate_plot_btn.clicked.connect(self._generate_and_plot)
         ref_line_params_layout.addWidget(self.generate_plot_btn, ref_line_row, 0, 1, 2)
 
-        # Connect parameter changes to auto-regenerate (after all widgets are created)
-        self.central_lat_entry.textChanged.connect(self._on_parameter_changed)
-        self.central_lon_entry.textChanged.connect(self._on_parameter_changed)
-        self.line_length_entry.textChanged.connect(self._on_parameter_changed)
-        self.heading_entry.textChanged.connect(self._on_parameter_changed)
-        self.dist_between_lines_entry.textChanged.connect(self._on_parameter_changed)
-        self.num_lines_entry.textChanged.connect(self._on_parameter_changed)
-        self.bisect_lead_entry.textChanged.connect(self._on_parameter_changed)
-        self.offset_direction_combo.currentTextChanged.connect(self._on_parameter_changed)
 
         ref_layout.addWidget(ref_line_params_groupbox, row, 0, 1, 2)
         ref_layout.setRowStretch(row, 0)
@@ -1277,8 +1225,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_test_plan_info_layout.addWidget(QLabel("Number of Crossline Passes:"), ref_test_plan_row, 0)
         self.crossline_passes_entry = QLineEdit("2")
         ref_test_plan_info_layout.addWidget(self.crossline_passes_entry, ref_test_plan_row, 1)
-        self.crossline_passes_entry.textChanged.connect(self._on_parameter_changed)
-        self.crossline_passes_entry.textChanged.connect(self._update_export_name)
         ref_test_plan_row += 1
 
         ref_test_plan_info_layout.addWidget(QLabel("Select Profile:"), ref_test_plan_row, 0)
@@ -1370,9 +1316,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         # Add stretch at the bottom to push all groupboxes to the top
         ref_layout.setRowStretch(row, 1)
 
-        self.dist_between_lines_entry.textChanged.connect(self._update_export_name)
-        self.heading_entry.textChanged.connect(self._update_export_name)
-
         # --- Calibration Planning Tab ---
         cal_layout = QGridLayout(self.calibration_frame)
         cal_layout.setColumnStretch(0, 1)
@@ -1412,9 +1355,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.add_heading_lines_btn.setEnabled(False)
         self.add_heading_lines_btn.clicked.connect(self._add_heading_lines_from_pitch_line)
         self.cal_line_offset_entry = QLineEdit()
-        self.cal_line_offset_entry.editingFinished.connect(
-            self._on_cal_line_offset_user_edited
-        )
         # Pair "Add Heading Lines" with the "Line Offset (m)" parameter
         # on a single row: button takes the left half, label + entry
         # share the right half.
@@ -1569,7 +1509,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_test_plan_row = 0
         cal_test_plan_info_layout.addWidget(QLabel("Lead-In (m):"), cal_test_plan_row, 0)
         self.cal_lead_in_entry = QLineEdit("0")
-        self.cal_lead_in_entry.textChanged.connect(self._on_cal_lead_in_changed)
         cal_test_plan_info_layout.addWidget(self.cal_lead_in_entry, cal_test_plan_row, 1)
         cal_test_plan_row += 1
 
@@ -1861,13 +1800,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_depth_min_m_entry = QLineEdit(f"{self.backscatter_depth_min_m:g}")
         self.backscatter_depth_min_m_entry.setMaximumWidth(100)
         self.backscatter_depth_min_m_entry.setToolTip("Minimum depth for magenta area filtering (m, absolute depth).")
-        self.backscatter_depth_min_m_entry.textChanged.connect(self._on_backscatter_depth_text_changed)
         backscatter_depth_layout.addWidget(self.backscatter_depth_min_m_entry)
         backscatter_depth_layout.addWidget(QLabel("Max (m)"))
         self.backscatter_depth_max_m_entry = QLineEdit(f"{self.backscatter_depth_max_m:g}")
         self.backscatter_depth_max_m_entry.setMaximumWidth(100)
         self.backscatter_depth_max_m_entry.setToolTip("Maximum depth for magenta area filtering (m, absolute depth).")
-        self.backscatter_depth_max_m_entry.textChanged.connect(self._on_backscatter_depth_text_changed)
         backscatter_depth_layout.addWidget(self.backscatter_depth_max_m_entry)
         backscatter_depth_layout.addStretch(1)
 
@@ -1928,7 +1865,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_min_area_m2_entry.setToolTip(
             "Minimum contiguous area (m²). Type a number; map updates shortly after you stop typing."
         )
-        self.backscatter_min_area_m2_entry.textChanged.connect(self._on_backscatter_min_area_m2_text_changed)
         backscatter_min_area_row.addWidget(self.backscatter_min_area_m2_entry)
         backscatter_min_area_row.addWidget(QLabel("m²"))
         backscatter_min_area_row.addStretch(1)
@@ -1951,7 +1887,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_min_width_m_entry.setToolTip(
             "Minimum bounding width, east–west (m). Type a number; map updates shortly after you stop typing."
         )
-        self.backscatter_min_width_m_entry.textChanged.connect(self._on_backscatter_extent_m_text_changed)
         backscatter_extent_row.addWidget(self.backscatter_min_width_m_entry)
         backscatter_extent_row.addWidget(QLabel("m"))
         backscatter_extent_row.addSpacing(8)
@@ -1962,7 +1897,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_min_height_m_entry.setToolTip(
             "Minimum bounding height, north–south (m). Type a number; map updates shortly after you stop typing."
         )
-        self.backscatter_min_height_m_entry.textChanged.connect(self._on_backscatter_extent_m_text_changed)
         backscatter_extent_row.addWidget(self.backscatter_min_height_m_entry)
         backscatter_extent_row.addWidget(QLabel("m"))
         backscatter_extent_row.addStretch(1)
@@ -2023,7 +1957,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_nan_entry.setToolTip(
             "Backscatter values equal to this sentinel value are treated as NaN."
         )
-        self.backscatter_nan_entry.textChanged.connect(self._on_backscatter_nan_value_changed)
         backscatter_nan_layout.addWidget(self.backscatter_nan_entry, 1)
         backscatter_bs_top_row.addWidget(backscatter_nan_frame)
         self.show_backscatter_checkbox = QCheckBox("Show Backscatter Grid")
@@ -2053,12 +1986,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         backscatter_bs_clip_row.addWidget(QLabel("Min (%)"))
         self.backscatter_percent_clip_min_entry = QLineEdit(f"{self.backscatter_percent_clip_min:g}")
         self.backscatter_percent_clip_min_entry.setMaximumWidth(80)
-        self.backscatter_percent_clip_min_entry.textChanged.connect(self._on_backscatter_percent_clip_changed)
         backscatter_bs_clip_row.addWidget(self.backscatter_percent_clip_min_entry)
         backscatter_bs_clip_row.addWidget(QLabel("Max (%)"))
         self.backscatter_percent_clip_max_entry = QLineEdit(f"{self.backscatter_percent_clip_max:g}")
         self.backscatter_percent_clip_max_entry.setMaximumWidth(80)
-        self.backscatter_percent_clip_max_entry.textChanged.connect(self._on_backscatter_percent_clip_changed)
         backscatter_bs_clip_row.addWidget(self.backscatter_percent_clip_max_entry)
         backscatter_bs_clip_row.addStretch(1)
         backscatter_bs_criteria_layout.addLayout(backscatter_bs_clip_row)
@@ -2131,22 +2062,18 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.backscatter_lead_in_entry.setToolTip(
             "Extend the saved backscatter normalization centerline by this distance at both ends."
         )
-        self.backscatter_lead_in_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
         backscatter_line_info_layout.addWidget(self.backscatter_lead_in_entry, 0, 1)
         backscatter_line_info_layout.addWidget(QLabel("Survey Speed (kn)"), 0, 2)
         self.backscatter_survey_speed_entry = QLineEdit(f"{self.backscatter_survey_speed_kn:g}")
         self.backscatter_survey_speed_entry.setToolTip("Survey speed used for backscatter line planning calculations.")
-        self.backscatter_survey_speed_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
         backscatter_line_info_layout.addWidget(self.backscatter_survey_speed_entry, 0, 3)
         backscatter_line_info_layout.addWidget(QLabel("Swath Ang (deg)"), 1, 0)
         self.backscatter_swath_ang_entry = QLineEdit(f"{self.backscatter_swath_ang_deg:g}")
         self.backscatter_swath_ang_entry.setToolTip("Backscatter swath angle in degrees.")
-        self.backscatter_swath_ang_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
         backscatter_line_info_layout.addWidget(self.backscatter_swath_ang_entry, 1, 1)
         backscatter_line_info_layout.addWidget(QLabel("SV (m/sec)"), 1, 2)
         self.backscatter_sv_entry = QLineEdit(f"{self.backscatter_sv_mps:g}")
         self.backscatter_sv_entry.setToolTip("Sound velocity in meters per second.")
-        self.backscatter_sv_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
         backscatter_line_info_layout.addWidget(self.backscatter_sv_entry, 1, 3)
         backscatter_line_info_layout.addWidget(QLabel("Box Width (m)"), 2, 0)
         self.backscatter_box_width_entry = QLineEdit()
@@ -2154,7 +2081,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             "Full width of the normalization area (perpendicular to the centerline). "
             "Updated when you draw the area; edit to resize the box on the map."
         )
-        self.backscatter_box_width_entry.textChanged.connect(self._on_backscatter_line_info_text_changed)
         backscatter_line_info_layout.addWidget(self.backscatter_box_width_entry, 2, 1)
         self.backscatter_show_info_btn = QPushButton("Show Survey Info")
         self.backscatter_show_info_btn.clicked.connect(self._show_backscatter_line_information)
@@ -2470,25 +2396,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         swath_perf_layout.addWidget(perf_import_export_groupbox, swath_perf_row, 0, 1, 2)
         swath_perf_row += 1
 
-        self.performance_test_depth_entry.textChanged.connect(self._update_performance_ping_time)
-        self.performance_swath_angle_entry.textChanged.connect(self._update_performance_ping_time)
-        self.performance_sound_velocity_entry.textChanged.connect(self._update_performance_ping_time)
-        self.performance_num_pings_entry.textChanged.connect(self._update_performance_total_test_time)
-        self.performance_bist_time_entry.textChanged.connect(self._update_performance_total_test_time)
-        self.performance_test_speed_entry.textChanged.connect(self._update_performance_line_length)
-        self.performance_swell_direction_entry.textChanged.connect(self._update_performance_export_name)
-        self.performance_test_depth_entry.textChanged.connect(self._update_performance_export_name)
         self._update_performance_ping_time()
-        # Debounced auto-plot when center/swell are edited (speed/pings/BIST/depth chain already updates line length → schedule)
-        self.performance_central_lat_entry.textChanged.connect(
-            lambda: self._schedule_autoplot_performance_test_lines(400)
-        )
-        self.performance_central_lon_entry.textChanged.connect(
-            lambda: self._schedule_autoplot_performance_test_lines(400)
-        )
-        self.performance_swell_direction_entry.textChanged.connect(
-            lambda: self._schedule_autoplot_performance_test_lines(400)
-        )
 
         performance_layout.addWidget(swath_perf_groupbox, performance_row, 0, 1, 2)
         performance_layout.setRowStretch(performance_row, 0)

@@ -311,9 +311,19 @@ class PerformanceMixin:
     def _update_performance_center_from_pick(self, clicked_lat, clicked_lon):
         """Update Performance tab center fields from map pick-center click."""
         if hasattr(self, "performance_central_lat_entry"):
-            self.performance_central_lat_entry.setText(f"{clicked_lat:.6f}")
+            if hasattr(self, "_deferred_set_line_edit"):
+                self._deferred_set_line_edit(
+                    self.performance_central_lat_entry, f"{clicked_lat:.6f}"
+                )
+            else:
+                self.performance_central_lat_entry.setText(f"{clicked_lat:.6f}")
         if hasattr(self, "performance_central_lon_entry"):
-            self.performance_central_lon_entry.setText(f"{clicked_lon:.6f}")
+            if hasattr(self, "_deferred_set_line_edit"):
+                self._deferred_set_line_edit(
+                    self.performance_central_lon_entry, f"{clicked_lon:.6f}"
+                )
+            else:
+                self.performance_central_lon_entry.setText(f"{clicked_lon:.6f}")
 
     def _schedule_autoplot_performance_test_lines(self, delay_ms=400):
         """Debounce auto-plot: replot after the user pauses editing or after pick (delay_ms=0 or small)."""
@@ -333,12 +343,21 @@ class PerformanceMixin:
             return
         try:
             if z_value is not None and not np.isnan(z_value):
-                self.performance_test_depth_entry.setText(f"{abs(float(z_value)):.1f}")
+                text = f"{abs(float(z_value)):.1f}"
+            else:
+                text = ""
+        except Exception:
+            text = ""
+        if hasattr(self, "_deferred_set_line_edit"):
+            self._deferred_set_line_edit(self.performance_test_depth_entry, text)
+        else:
+            if text:
+                self.performance_test_depth_entry.setText(text)
             else:
                 self.performance_test_depth_entry.clear()
-        except Exception:
-            self.performance_test_depth_entry.clear()
-        if hasattr(self, "_update_performance_export_name"):
+        if hasattr(self, "_apply_performance_param_commit"):
+            self._apply_performance_param_commit()
+        elif hasattr(self, "_update_performance_export_name"):
             self._update_performance_export_name()
 
     def _perf_depth_entry_needs_fill(self):

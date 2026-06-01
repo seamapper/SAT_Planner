@@ -1138,10 +1138,7 @@ class CalibrationMixin:
         return max(0.0, lead_in_m)
 
     def _on_cal_lead_in_changed(self):
-        """Debounce calibration lead-in updates while user is typing."""
-        if hasattr(self, "cal_lead_in_update_timer"):
-            self.cal_lead_in_update_timer.start(700)
-            return
+        """Legacy hook; lead-in uses deferred commit (Enter / blur)."""
         self._apply_cal_lead_in_change()
 
     def _apply_cal_lead_in_change(self):
@@ -1175,6 +1172,8 @@ class CalibrationMixin:
             return list(pts)
 
     def _export_cal_survey_files(self):
+        if hasattr(self, "_commit_all_deferred_line_edits"):
+            self._commit_all_deferred_line_edits()
         export_shapefile = self._export_type_enabled("esri_shapefile") if hasattr(self, "_export_type_enabled") else True
         export_gpkg = self._export_type_enabled("gpkg") if hasattr(self, "_export_type_enabled") else False
         export_sis = self._export_type_enabled("sis_asciiplan") if hasattr(self, "_export_type_enabled") else True

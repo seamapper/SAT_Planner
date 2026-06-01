@@ -491,13 +491,16 @@ class MapInteractionMixin:
         is_performance_tab = current_tab == 4
 
         if is_accuracy_tab:
-            # Temporarily block signals to prevent auto-regenerate from triggering zoom
-            self.central_lat_entry.blockSignals(True)
-            self.central_lon_entry.blockSignals(True)
-            self.central_lat_entry.setText(f"{clicked_lat:.6f}")
-            self.central_lon_entry.setText(f"{clicked_lon:.6f}")
-            self.central_lat_entry.blockSignals(False)
-            self.central_lon_entry.blockSignals(False)
+            if hasattr(self, "_deferred_set_line_edit"):
+                self._deferred_set_line_edit(self.central_lat_entry, f"{clicked_lat:.6f}")
+                self._deferred_set_line_edit(self.central_lon_entry, f"{clicked_lon:.6f}")
+            else:
+                self.central_lat_entry.blockSignals(True)
+                self.central_lon_entry.blockSignals(True)
+                self.central_lat_entry.setText(f"{clicked_lat:.6f}")
+                self.central_lon_entry.setText(f"{clicked_lon:.6f}")
+                self.central_lat_entry.blockSignals(False)
+                self.central_lon_entry.blockSignals(False)
         elif is_performance_tab and hasattr(self, '_update_performance_center_from_pick'):
             self._update_performance_center_from_pick(clicked_lat, clicked_lon)
         print(f"DEBUG: Center coordinates updated for tab {current_tab}: {clicked_lat:.6f}, {clicked_lon:.6f}")
@@ -549,17 +552,22 @@ class MapInteractionMixin:
                             f"DEBUG: Dist Multiplier: {dist_multiplier}, Calculated Dist Between Lines: {calculated_dist_between_lines:.2f}")
 
                         if calculated_dist_between_lines > 0:  # Ensure distance is positive
-                            # Block signals to prevent auto-regenerate from triggering
-                            self.dist_between_lines_entry.blockSignals(True)
-                            self.dist_between_lines_entry.setText(f"{calculated_dist_between_lines:.2f}")
-                            self.dist_between_lines_entry.blockSignals(False)
-                            # Set Crossline Lead-in/out to 0.2 * Distance Between Lines
                             bisect_lead = 0.2 * calculated_dist_between_lines
-                            self.bisect_lead_entry.blockSignals(True)
-                            self.bisect_lead_entry.setText(f"{bisect_lead:.2f}")
-                            self.bisect_lead_entry.blockSignals(False)
-                            if hasattr(self, "_update_export_name"):
-                                self._update_export_name()
+                            if hasattr(self, "_deferred_set_line_edit"):
+                                self._deferred_set_line_edit(
+                                    self.dist_between_lines_entry,
+                                    f"{calculated_dist_between_lines:.2f}",
+                                )
+                                self._deferred_set_line_edit(
+                                    self.bisect_lead_entry, f"{bisect_lead:.2f}"
+                                )
+                            else:
+                                self.dist_between_lines_entry.blockSignals(True)
+                                self.dist_between_lines_entry.setText(f"{calculated_dist_between_lines:.2f}")
+                                self.dist_between_lines_entry.blockSignals(False)
+                                self.bisect_lead_entry.blockSignals(True)
+                                self.bisect_lead_entry.setText(f"{bisect_lead:.2f}")
+                                self.bisect_lead_entry.blockSignals(False)
                         else:
                             self._show_message("warning","Input Warning",
                                                    "Calculated Distance Between Lines is not positive. Not setting Distance automatically.")
@@ -573,10 +581,14 @@ class MapInteractionMixin:
                         print(
                             f"DEBUG: Length Multiplier: {len_multiplier}, Calculated Line Length: {calculated_line_length:.2f}")
                         if calculated_line_length > 0:  # Ensure line length is positive
-                            # Block signals to prevent auto-regenerate from triggering
-                            self.line_length_entry.blockSignals(True)
-                            self.line_length_entry.setText(f"{calculated_line_length:.2f}")
-                            self.line_length_entry.blockSignals(False)
+                            if hasattr(self, "_deferred_set_line_edit"):
+                                self._deferred_set_line_edit(
+                                    self.line_length_entry, f"{calculated_line_length:.2f}"
+                                )
+                            else:
+                                self.line_length_entry.blockSignals(True)
+                                self.line_length_entry.setText(f"{calculated_line_length:.2f}")
+                                self.line_length_entry.blockSignals(False)
                         else:
                             self._show_message("warning","Input Warning",
                                                    "Calculated Line Length is not positive. Not setting Line Length automatically.")
@@ -606,20 +618,15 @@ class MapInteractionMixin:
                 self.central_pt_depth_value_label.setText("-")
             print("DEBUG: self.geotiff_dataset_original is None. GeoTIFF not loaded.")
 
-        # Performance tab: replot test lines after pick (allow depth/ping/line-length updates to run first)
-        if is_performance_tab and hasattr(self, "_schedule_autoplot_performance_test_lines"):
-            self._schedule_autoplot_performance_test_lines(50)
+        if is_performance_tab and hasattr(self, "_apply_performance_param_commit"):
+            self._apply_performance_param_commit()
 
         # Reset "Pick Center from GeoTIFF" button to normal style after center is selected
         if hasattr(self, 'pick_center_btn'):
             self.pick_center_btn.setStyleSheet("")
         if hasattr(self, 'performance_pick_center_btn'):
             self.performance_pick_center_btn.setStyleSheet("")
-        
-        # Stop auto-regenerate timer to prevent it from triggering zoom after we manually generate
-        if hasattr(self, 'auto_regenerate_timer'):
-            self.auto_regenerate_timer.stop()
-        
+
         self._toggle_pick_center_mode()  # Turn off pick mode after click
         if hasattr(self, 'param_notebook') and self.param_notebook.currentIndex() == 1:
             self._generate_and_plot(show_success_dialog=False, auto_zoom=False)  # Re-generate plot for Accuracy tab

@@ -15,6 +15,8 @@ class PlottingMixin:
     """Mixin providing _generate_and_plot, _plot_survey_plan, _clear_plot, _remove_colorbar."""
 
     def _generate_and_plot(self, show_success_dialog=True, auto_zoom=True):
+        if hasattr(self, "_commit_all_deferred_line_edits"):
+            self._commit_all_deferred_line_edits()
         # Clear the elevation profile immediately when generating a new plan
         self._draw_crossline_profile()
         if not GEOSPATIAL_LIBS_AVAILABLE:

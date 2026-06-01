@@ -306,6 +306,9 @@ class ExportImportMixin:
             self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot export survey files.")
             return
 
+        if hasattr(self, "_commit_all_deferred_line_edits"):
+            self._commit_all_deferred_line_edits()
+
         is_valid, values = self._validate_inputs()
         if not is_valid:
             return
@@ -745,6 +748,8 @@ class ExportImportMixin:
             self._show_message("error","Export Error", f"Failed to export survey files: {e}")
 
     def _export_performance_survey_files(self):
+        if hasattr(self, "_commit_all_deferred_line_edits"):
+            self._commit_all_deferred_line_edits()
         """Export performance swath lines and BIST segments (same products as Accuracy export)."""
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot export.")

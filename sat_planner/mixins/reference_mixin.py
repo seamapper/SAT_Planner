@@ -309,6 +309,9 @@ class ReferenceMixin:
             self._show_message("warning","Disabled Feature", "Geospatial libraries not loaded. Cannot export data.")
             return
 
+        if hasattr(self, "_commit_all_deferred_line_edits"):
+            self._commit_all_deferred_line_edits()
+
         is_valid, values = self._validate_inputs()
         if not is_valid:
             return
@@ -816,6 +819,8 @@ class ReferenceMixin:
         # can be sampled from the grid for older surveys whose *_params.json
         # did not store ``central_point_depth_m``.
         self._regenerate_auto_accuracy_export_name()
+        if hasattr(self, "_deferred_sync_all_bound_params"):
+            self._deferred_sync_all_bound_params()
         if imported_params_shapefile_paths is not None and hasattr(self, '_load_visualization_shapefile_paths'):
             shapefile_load_result = self._load_visualization_shapefile_paths(
                 imported_params_shapefile_paths,
@@ -1301,6 +1306,8 @@ class ReferenceMixin:
             # grid for older surveys whose *_params.json did not store
             # ``central_point_depth_m``.
             self._regenerate_auto_accuracy_export_name()
+            if hasattr(self, "_deferred_sync_all_bound_params"):
+                self._deferred_sync_all_bound_params()
             if imported_params_shapefile_paths is not None and hasattr(self, '_load_visualization_shapefile_paths'):
                 shapefile_load_result = self._load_visualization_shapefile_paths(
                     imported_params_shapefile_paths,
@@ -2010,10 +2017,15 @@ class ReferenceMixin:
         if depth is not None and depth > 0:
             calculated_line_length = depth * mult
             if calculated_line_length > 0:
-                self.line_length_entry.blockSignals(True)
-                self.line_length_entry.setText(f"{calculated_line_length:.2f}")
-                self.line_length_entry.blockSignals(False)
-        self._on_parameter_changed()
+                if hasattr(self, "_deferred_set_line_edit"):
+                    self._deferred_set_line_edit(
+                        self.line_length_entry, f"{calculated_line_length:.2f}"
+                    )
+                else:
+                    self.line_length_entry.blockSignals(True)
+                    self.line_length_entry.setText(f"{calculated_line_length:.2f}")
+                    self.line_length_entry.blockSignals(False)
+        self._apply_accuracy_survey_plan_now()
 
     def _update_multiplier_label_dist(self, val):
         """Updates the separation multiplier display/control."""
@@ -2050,14 +2062,24 @@ class ReferenceMixin:
         if depth is not None and depth > 0:
             calculated_dist_between_lines = depth * mult
             if calculated_dist_between_lines > 0:
-                self.dist_between_lines_entry.blockSignals(True)
-                self.dist_between_lines_entry.setText(f"{calculated_dist_between_lines:.2f}")
-                self.dist_between_lines_entry.blockSignals(False)
-                bisect_lead = 0.2 * calculated_dist_between_lines
-                self.bisect_lead_entry.blockSignals(True)
-                self.bisect_lead_entry.setText(f"{bisect_lead:.2f}")
-                self.bisect_lead_entry.blockSignals(False)
-        self._on_parameter_changed()
+                if hasattr(self, "_deferred_set_line_edit"):
+                    self._deferred_set_line_edit(
+                        self.dist_between_lines_entry,
+                        f"{calculated_dist_between_lines:.2f}",
+                    )
+                    bisect_lead = 0.2 * calculated_dist_between_lines
+                    self._deferred_set_line_edit(
+                        self.bisect_lead_entry, f"{bisect_lead:.2f}"
+                    )
+                else:
+                    self.dist_between_lines_entry.blockSignals(True)
+                    self.dist_between_lines_entry.setText(f"{calculated_dist_between_lines:.2f}")
+                    self.dist_between_lines_entry.blockSignals(False)
+                    bisect_lead = 0.2 * calculated_dist_between_lines
+                    self.bisect_lead_entry.blockSignals(True)
+                    self.bisect_lead_entry.setText(f"{bisect_lead:.2f}")
+                    self.bisect_lead_entry.blockSignals(False)
+        self._apply_accuracy_survey_plan_now()
 
     def _on_dist_between_lines_manual_changed(self):
         """When user edits distance between lines, recalculate separation multiplier from picked depth."""
@@ -2099,10 +2121,23 @@ class ReferenceMixin:
         self.line_length_multiplier = new_multiplier
         self._update_multiplier_label_len(new_multiplier)
 
+    def _apply_accuracy_survey_plan_now(self):
+        """Regenerate the accuracy plan and refresh the auto export name (after commit)."""
+        self._auto_regenerate_survey_plan()
+        if hasattr(self, "_update_export_name"):
+            self._update_export_name()
+
+    def _commit_accuracy_plan_field(self, widget=None):
+        """Apply one accuracy parameter field after Enter / focus loss."""
+        if widget is self.line_length_entry:
+            self._on_line_length_manual_changed()
+        elif widget is self.dist_between_lines_entry:
+            self._on_dist_between_lines_manual_changed()
+        self._apply_accuracy_survey_plan_now()
+
     def _on_parameter_changed(self):
-        """Handle parameter changes by restarting the auto-regenerate timer."""
-        self.auto_regenerate_timer.stop()
-        self.auto_regenerate_timer.start(800)  # 800ms debounce delay
+        """Legacy hook: apply accuracy plan immediately (no debounce)."""
+        self._apply_accuracy_survey_plan_now()
 
     def _auto_regenerate_survey_plan(self):
         """Auto-regenerate survey plan when timer expires, if survey plan already exists."""
