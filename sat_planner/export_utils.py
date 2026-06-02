@@ -27,8 +27,10 @@ def remove_export_file(path):
     targets = {path}
     base, ext = os.path.splitext(path)
     if ext.lower() == ".shp":
-        for sidecar in glob.glob(base + ".*"):
-            targets.add(sidecar)
+        # Only remove known shapefile sidecars; do not wipe unrelated files
+        # that share the same basename (e.g. .geojson, .gpx, .asciiplan).
+        for shp_ext in (".shp", ".shx", ".dbf", ".prj", ".cpg", ".qix", ".sbn", ".sbx", ".xml"):
+            targets.add(base + shp_ext)
     for target in targets:
         try:
             if os.path.isfile(target):

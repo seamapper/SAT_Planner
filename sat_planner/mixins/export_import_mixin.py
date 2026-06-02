@@ -740,6 +740,43 @@ class ExportImportMixin:
             if profile_csv_path and os.path.isfile(profile_csv_path):
                 success_files.append(f"- {os.path.basename(profile_csv_path)}")
 
+            # Per-file export status block for activity log (OK / FAILED).
+            status_lines = []
+            def _add_status(path):
+                if not path:
+                    return
+                status_lines.append(
+                    f"{'OK' if os.path.exists(path) else 'FAILED'}: {os.path.basename(path)}"
+                )
+            _add_status(geojson_file_path)
+            if export_text_csv:
+                _add_status(csv_file_path)
+                _add_status(ddm_file_path)
+                _add_status(dms_file_path)
+            if export_text_txt:
+                _add_status(txt_file_path)
+                _add_status(ddm_txt_file_path)
+                _add_status(dms_txt_file_path)
+            if export_shapefile:
+                _add_status(shapefile_path)
+            _add_status(lnw_file_path)
+            if export_sis:
+                _add_status(sis_file_path)
+            if gpx_written:
+                _add_status(gpx_file_path)
+            _add_status(stats_file_path)
+            if export_map_png:
+                _add_status(map_png_path)
+            _add_status(json_metadata_path)
+            for profile_png_path in profile_png_paths:
+                _add_status(profile_png_path)
+            _add_status(profile_csv_path)
+            if status_lines:
+                self.set_ref_info_text(
+                    "Accuracy export results:\n" + "\n".join(status_lines),
+                    append=True,
+                )
+
             self.set_ref_info_text(
                 f"Survey exported successfully to:\n" + "\n".join(success_files) + 
                 f"\nin directory: {export_dir}", append=False)
@@ -1086,6 +1123,46 @@ class ExportImportMixin:
             if export_profiles_png and hasattr(self, "profile_fig") and self.profile_fig is not None:
                 for bn in self._profile_png_export_basenames(profile_png_path):
                     msg_lines.append(f"- {bn}")
+            status_lines = []
+            def _add_status(path):
+                if not path:
+                    return
+                status_lines.append(
+                    f"{'OK' if os.path.exists(path) else 'FAILED'}: {os.path.basename(path)}"
+                )
+            _add_status(geojson_file_path)
+            if export_text_csv:
+                _add_status(csv_file_path)
+                _add_status(ddm_file_path)
+                _add_status(dms_file_path)
+            if export_text_txt:
+                _add_status(txt_file_path)
+                _add_status(ddm_txt_file_path)
+                _add_status(dms_txt_file_path)
+            if export_shapefile:
+                _add_status(shapefile_path)
+            _add_status(lnw_file_path)
+            if export_sis:
+                _add_status(sis_file_path)
+            if gpx_written:
+                _add_status(gpx_file_path)
+            _add_status(stats_file_path)
+            if export_map_png:
+                _add_status(map_png_path)
+            _add_status(json_metadata_path)
+            if export_profiles_png and hasattr(self, "profile_fig") and self.profile_fig is not None:
+                _add_status(profile_png_path)
+            if status_lines:
+                if hasattr(self, "set_performance_activity_text"):
+                    self.set_performance_activity_text(
+                        "Performance export results:\n" + "\n".join(status_lines),
+                        append=True,
+                    )
+                else:
+                    self.set_ref_info_text(
+                        "Performance export results:\n" + "\n".join(status_lines),
+                        append=True,
+                    )
             log_msg = "Performance survey exported successfully to:\n" + "\n".join(msg_lines) + f"\nin directory: {export_dir}"
             if hasattr(self, "set_performance_activity_text"):
                 self.set_performance_activity_text(log_msg, append=False)

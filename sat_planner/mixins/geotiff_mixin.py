@@ -724,6 +724,26 @@ class GeoTIFFMixin:
         if hasattr(self, "_save_last_backscatter_export_dir"):
             self._save_last_backscatter_export_dir()
 
+        geojson_file_path = None
+        area_geojson_file_path = None
+        csv_file_path = None
+        ddm_file_path = None
+        dms_file_path = None
+        txt_file_path = None
+        ddm_txt_file_path = None
+        dms_txt_file_path = None
+        lnw_file_path = None
+        sis_file_path = None
+        gpx_file_path = None
+        shapefile_path = None
+        area_shapefile_path = None
+        map_png_path = None
+        profile_png_path = None
+        stats_png_path = None
+        params_json_path = None
+        info_txt_path = None
+        export_errors = {}
+
         try:
             line_points = list(getattr(self, "_calculate_backscatter_line_statistics", lambda: {})().get("line_waypoints", []))
             if len(line_points) < 2:
@@ -744,21 +764,6 @@ class GeoTIFFMixin:
             export_map_png = self._export_map_png_enabled() if hasattr(self, "_export_map_png_enabled") else True
             export_profiles_png = self._export_profiles_png_enabled() if hasattr(self, "_export_profiles_png_enabled") else True
 
-            csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
-            ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
-            dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
-            ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
-            dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
-            txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
-            if export_text_csv:
-                export_utils.write_ddd_csv(csv_file_path, rows, newline="")
-                export_utils.write_dmm_csv(ddm_file_path, rows)
-                export_utils.write_dms_csv(dms_file_path, rows)
-            if export_text_txt:
-                export_utils.write_dmm_txt(ddm_txt_file_path, rows)
-                export_utils.write_dms_txt(dms_txt_file_path, rows)
-                export_utils.write_ddd_txt(txt_file_path, rows)
-
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
             gj_features = [{
                 "type": "Feature",
@@ -773,9 +778,33 @@ class GeoTIFFMixin:
                 "properties": {"geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0))},
                 "features": gj_features,
             }
-            export_utils.remove_export_file(geojson_file_path)
-            with open(geojson_file_path, "w", encoding="utf-8") as f:
-                json.dump(geojson_collection, f, indent=2)
+            try:
+                export_utils.remove_export_file(geojson_file_path)
+                with open(geojson_file_path, "w", encoding="utf-8") as f:
+                    json.dump(geojson_collection, f, indent=2)
+            except Exception as e:
+                export_errors[geojson_file_path] = str(e)
+
+            csv_file_path = os.path.join(export_dir, f"{export_name}_DDD.csv")
+            ddm_file_path = os.path.join(export_dir, f"{export_name}_DMM.csv")
+            dms_file_path = os.path.join(export_dir, f"{export_name}_DMS.csv")
+            ddm_txt_file_path = os.path.join(export_dir, f"{export_name}_DMM.txt")
+            dms_txt_file_path = os.path.join(export_dir, f"{export_name}_DMS.txt")
+            txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
+            if export_text_csv:
+                try:
+                    export_utils.write_ddd_csv(csv_file_path, rows, newline="")
+                    export_utils.write_dmm_csv(ddm_file_path, rows)
+                    export_utils.write_dms_csv(dms_file_path, rows)
+                except Exception:
+                    pass
+            if export_text_txt:
+                try:
+                    export_utils.write_dmm_txt(ddm_txt_file_path, rows)
+                    export_utils.write_dms_txt(dms_txt_file_path, rows)
+                    export_utils.write_ddd_txt(txt_file_path, rows)
+                except Exception:
+                    pass
 
             # Export normalization area polygon (if present) as separate GeoJSON.
             area_geojson_file_path = None
@@ -795,11 +824,13 @@ class GeoTIFFMixin:
                         }
                     ],
                 }
-                export_utils.remove_export_file(area_geojson_file_path)
-                with open(area_geojson_file_path, "w", encoding="utf-8") as f:
-                    json.dump(area_geojson_collection, f, indent=2)
+                try:
+                    export_utils.remove_export_file(area_geojson_file_path)
+                    with open(area_geojson_file_path, "w", encoding="utf-8") as f:
+                        json.dump(area_geojson_collection, f, indent=2)
+                except Exception as e:
+                    export_errors[area_geojson_file_path] = str(e)
 
-            lnw_file_path = None
             if export_hypack:
                 lnw_lines = [("BACKSCATTER", [line_points[0], line_points[-1]])]
                 zone, hem = export_utils.compute_utm_zone_from_points([line_points[0], line_points[-1]])
@@ -809,11 +840,22 @@ class GeoTIFFMixin:
 
             sis_file_path = os.path.join(export_dir, f"{export_name}.asciiplan")
             if export_sis:
-                export_utils.write_asciiplan(sis_file_path, [("BackscatterLine", [line_points[0], line_points[-1]])])
+                try:
+                    export_utils.write_asciiplan(
+                        sis_file_path,
+                        [("BackscatterLine", [line_points[0], line_points[-1]])],
+                    )
+                except Exception as e:
+                    export_errors[sis_file_path] = str(e)
 
             gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
             if export_gpx:
-                export_utils.write_gpx(gpx_file_path, [("BackscatterLine", line_points)])
+                try:
+                    gpx_ok = export_utils.write_gpx(gpx_file_path, [("BackscatterLine", line_points)])
+                    if not gpx_ok:
+                        export_errors[gpx_file_path] = "GPX writer returned False"
+                except Exception as e:
+                    export_errors[gpx_file_path] = str(e)
 
             shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
             if (export_shapefile or export_gpkg) and LineString is not None:
@@ -836,7 +878,6 @@ class GeoTIFFMixin:
                     shapefile_path = None
 
             # Export normalization area polygon (if present) as separate shapefile / GeoPackage.
-            area_shapefile_path = None
             if (export_shapefile or export_gpkg) and LineString is not None and len(area_vertices) == 4:
                 try:
                     from shapely.geometry import mapping, Polygon
@@ -946,6 +987,49 @@ class GeoTIFFMixin:
                         info_file.write(self._build_backscatter_info_text(info_stats))
             except Exception:
                 pass
+
+            if hasattr(self, "set_line_info_text"):
+                results = []
+                def _add_result(path):
+                    if not path:
+                        return
+                    ok = os.path.exists(path)
+                    err = export_errors.get(path)
+                    if ok and not err:
+                        results.append(f"OK: {os.path.basename(path)}")
+                    elif err:
+                        results.append(f"FAILED: {os.path.basename(path)} ({err})")
+                    else:
+                        results.append(f"FAILED: {os.path.basename(path)}")
+
+                _add_result(geojson_file_path)
+                _add_result(area_geojson_file_path)
+                if export_text_csv:
+                    _add_result(csv_file_path)
+                    _add_result(ddm_file_path)
+                    _add_result(dms_file_path)
+                if export_text_txt:
+                    _add_result(txt_file_path)
+                    _add_result(ddm_txt_file_path)
+                    _add_result(dms_txt_file_path)
+                if export_hypack:
+                    _add_result(lnw_file_path)
+                if export_sis:
+                    _add_result(sis_file_path)
+                if export_gpx:
+                    _add_result(gpx_file_path)
+                if export_shapefile:
+                    _add_result(shapefile_path)
+                    _add_result(area_shapefile_path)
+                if export_map_png:
+                    _add_result(map_png_path)
+                    _add_result(stats_png_path)
+                if export_profiles_png:
+                    _add_result(profile_png_path)
+                _add_result(params_json_path)
+                _add_result(info_txt_path)
+                if results:
+                    self.set_line_info_text("Backscatter export results:\n" + "\n".join(results), append=True)
         except Exception as e:
             self._show_message("error", "Export Error", f"Failed to export backscatter line: {e}")
 

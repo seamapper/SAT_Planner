@@ -1469,6 +1469,44 @@ class CalibrationMixin:
             if roll_profile_csv_path and os.path.isfile(roll_profile_csv_path):
                 success_msg += f"- {os.path.basename(roll_profile_csv_path)}\n"
             success_msg += f"in directory: {export_dir}"
+
+            status_lines = []
+            def _add_status(path):
+                if not path:
+                    return
+                status_lines.append(
+                    f"{'OK' if os.path.exists(path) else 'FAILED'}: {os.path.basename(path)}"
+                )
+            _add_status(geojson_file_path)
+            if export_text_csv:
+                _add_status(csv_file_path)
+                _add_status(ddm_file_path)
+                _add_status(dms_file_path)
+            if export_text_txt:
+                _add_status(txt_file_path)
+                _add_status(ddm_txt_file_path)
+                _add_status(dms_txt_file_path)
+            if export_shapefile:
+                _add_status(shapefile_path)
+            _add_status(lnw_file_path)
+            if export_sis:
+                _add_status(sis_file_path)
+            if gpx_written:
+                _add_status(gpx_file_path)
+            _add_status(stats_file_path)
+            _add_status(json_metadata_path)
+            if export_map_png:
+                _add_status(map_png_path)
+            _add_status(pitch_profile_png_path)
+            _add_status(pitch_profile_csv_path)
+            _add_status(roll_profile_png_path)
+            _add_status(roll_profile_csv_path)
+            if status_lines:
+                self.set_cal_info_text(
+                    "Calibration export results:\n" + "\n".join(status_lines),
+                    append=True,
+                )
+
             self.set_cal_info_text(success_msg, append=False)
         except Exception as e:
             self._show_message("error","Export Error", f"Failed to export calibration survey files: {e}")

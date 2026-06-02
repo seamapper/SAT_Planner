@@ -609,6 +609,43 @@ class LinePlanningMixin:
             if params_json_path:
                 success_msg += f"- {os.path.basename(params_json_path)}\n"
             success_msg += f"in directory: {export_dir}"
+
+            status_lines = []
+            def _add_status(path):
+                if not path:
+                    return
+                status_lines.append(
+                    f"{'OK' if os.path.exists(path) else 'FAILED'}: {os.path.basename(path)}"
+                )
+            _add_status(geojson_file_path)
+            if export_text_csv:
+                _add_status(csv_file_path)
+                _add_status(ddm_file_path)
+                _add_status(dms_file_path)
+            if export_text_txt:
+                _add_status(txt_file_path)
+                _add_status(ddm_txt_file_path)
+                _add_status(dms_txt_file_path)
+            _add_status(shapefile_path)
+            _add_status(lnw_file_path)
+            if export_sis:
+                _add_status(sis_file_path)
+            if gpx_written:
+                _add_status(gpx_file_path)
+            if gpx_lineplan_written:
+                _add_status(gpx_lineplan_path)
+            if export_map_png:
+                _add_status(map_png_path)
+            _add_status(profile_png_path)
+            _add_status(profile_csv_path)
+            _add_status(stats_file_path)
+            _add_status(params_json_path)
+            if status_lines:
+                self.set_line_info_text(
+                    "Line export results:\n" + "\n".join(status_lines),
+                    append=True,
+                )
+
             self.set_line_info_text(success_msg, append=False)
         except Exception as e:
             self.set_line_info_text(f"Failed to export drawn line: {e}")
