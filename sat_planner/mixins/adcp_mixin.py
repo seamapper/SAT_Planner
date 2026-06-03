@@ -828,7 +828,8 @@ class AdcpMixin:
                 segs = getattr(self, f"adcp_circle{circle_num}_segments", []) or []
                 for i, seg in enumerate(segs, start=1):
                     name = f"ADCP_C{circle_num}_{i:02d}"
-                    lnw_lines.append((name, seg))
+                    lnw_name = f"C{circle_num}S{i}" if i == 1 else ""
+                    lnw_lines.append((lnw_name, seg))
                     ascii_lines.append((name, seg))
                     gpx_lines.append((name, seg))
             lnw_file_path = None

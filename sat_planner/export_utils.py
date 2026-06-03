@@ -297,7 +297,8 @@ def write_lnw(path, lines, *, encoding='utf-8'):
                 f.write(f"LIN {len(utm_pts)}\n")
                 for easting, northing in utm_pts:
                     f.write(f"PTS {easting:.4f} {northing:.4f}\n")
-                f.write(f"LNN {name}\n")
+                if name:
+                    f.write(f"LNN {name}\n")
                 f.write("EOL\n")
     except OSError:
         return False
