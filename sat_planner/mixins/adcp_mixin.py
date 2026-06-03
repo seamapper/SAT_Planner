@@ -333,6 +333,22 @@ class AdcpMixin:
         if hasattr(self, "_update_travel_direction_arrows"):
             self._update_travel_direction_arrows()
 
+    def _adcp_show_direction_enabled(self):
+        cb = getattr(self, "adcp_show_direction_checkbox", None)
+        return bool(cb and cb.isChecked())
+
+    def _adcp_apply_show_direction_from_meta(self, meta):
+        if meta is None or "show_direction_of_travel" not in meta:
+            return
+        cb = getattr(self, "adcp_show_direction_checkbox", None)
+        if cb is None:
+            return
+        cb.blockSignals(True)
+        cb.setChecked(bool(meta.get("show_direction_of_travel")))
+        cb.blockSignals(False)
+        if hasattr(self, "_update_travel_direction_arrows"):
+            self._update_travel_direction_arrows()
+
     def _handle_adcp_plot_click(self, event):
         mode = getattr(self, "adcp_pick_mode", None)
         if not mode:
@@ -879,6 +895,7 @@ class AdcpMixin:
                 "circle_diameter_m": diameter_m,
                 "survey_speed_kts": speed_kts,
                 "turn_time_min": turn_min,
+                "show_direction_of_travel": self._adcp_show_direction_enabled(),
                 "circle1_center": list(self.adcp_circle1_center),
                 "circle1_start": list(self.adcp_circle1_start),
                 "circle2_center": list(self.adcp_circle2_center),
@@ -1087,6 +1104,7 @@ class AdcpMixin:
             self._adcp_set_deferred_field("adcp_survey_speed_entry", meta.get("survey_speed_kts"))
         if meta.get("turn_time_min") is not None:
             self._adcp_set_deferred_field("adcp_turn_time_entry", meta.get("turn_time_min"))
+        self._adcp_apply_show_direction_from_meta(meta)
         en = meta.get("export_name")
         if en:
             self._adcp_set_deferred_field("adcp_export_name_entry", en)
@@ -1132,6 +1150,7 @@ class AdcpMixin:
                 self._adcp_set_deferred_field("adcp_turn_time_entry", params.get("turn_time_min"))
             if params.get("export_name"):
                 self._adcp_set_deferred_field("adcp_export_name_entry", params.get("export_name"))
+            self._adcp_apply_show_direction_from_meta(params)
             if params.get("geotiff_nan_value") is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
                 self._set_geotiff_nan_cutoff(params.get("geotiff_nan_value"), update_entry=True)
             gtp = params.get("geotiff_path")
