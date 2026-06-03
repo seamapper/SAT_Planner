@@ -4,7 +4,7 @@ Survey plan plotting: generate plan, plot survey lines/GeoTIFF/contours, clear p
 import traceback
 import numpy as np
 from matplotlib.colors import LightSource
-from matplotlib.patches import Polygon
+from matplotlib.patches import FancyArrowPatch, Polygon
 from matplotlib.ticker import FuncFormatter
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, CRSError
@@ -13,6 +13,81 @@ from sat_planner.utils_geo import decimal_degrees_to_ddm
 
 class PlottingMixin:
     """Mixin providing _generate_and_plot, _plot_survey_plan, _clear_plot, _remove_colorbar."""
+
+    def _should_show_travel_direction_arrows(self):
+        """ADCP circle direction arrows when the ADCP tab checkbox is checked."""
+        if getattr(self, "_suppress_map_direction_arrows", False):
+            return False
+        cb = getattr(self, "adcp_show_direction_checkbox", None)
+        return cb is not None and cb.isChecked()
+
+    def _clear_travel_direction_arrows(self):
+        for artist in getattr(self, "_travel_direction_arrow_artists", None) or []:
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        self._travel_direction_arrow_artists = []
+
+    def _set_travel_direction_arrows_visible(self, visible):
+        """Show/hide arrow overlay (used before map PNG export). Returns whether any existed."""
+        artists = getattr(self, "_travel_direction_arrow_artists", None) or []
+        for artist in artists:
+            try:
+                artist.set_visible(bool(visible))
+            except Exception:
+                pass
+        if hasattr(self, "canvas") and artists:
+            self.canvas.draw_idle()
+        return bool(artists)
+
+    def _collect_adcp_travel_direction_segments(self):
+        """Return (lat1, lon1, lat2, lon2) for each ADCP circle segment."""
+        segments = []
+        for circle_num in (1, 2):
+            for seg in getattr(self, f"adcp_circle{circle_num}_segments", None) or []:
+                if seg and len(seg) == 2:
+                    segments.append((seg[0][0], seg[0][1], seg[1][0], seg[1][1]))
+        return segments
+
+    def _draw_travel_direction_arrow_on_segment(self, lat1, lon1, lat2, lon2):
+        t0, t1 = 0.40, 0.60
+        x0 = lon1 + t0 * (lon2 - lon1)
+        y0 = lat1 + t0 * (lat2 - lat1)
+        x1 = lon1 + t1 * (lon2 - lon1)
+        y1 = lat1 + t1 * (lat2 - lat1)
+        if abs(x1 - x0) < 1e-14 and abs(y1 - y0) < 1e-14:
+            return
+        arrow = FancyArrowPatch(
+            (x0, y0),
+            (x1, y1),
+            transform=self.ax.transData,
+            arrowstyle="-|>",
+            color="red",
+            linewidth=1.0,
+            mutation_scale=9,
+            shrinkA=0,
+            shrinkB=0,
+            zorder=25,
+        )
+        self.ax.add_patch(arrow)
+        self._travel_direction_arrow_artists.append(arrow)
+
+    def _draw_all_travel_direction_arrows(self):
+        self._clear_travel_direction_arrows()
+        if not self._should_show_travel_direction_arrows():
+            return
+        self._travel_direction_arrow_artists = []
+        for lat1, lon1, lat2, lon2 in self._collect_adcp_travel_direction_segments():
+            self._draw_travel_direction_arrow_on_segment(lat1, lon1, lat2, lon2)
+
+    def _update_travel_direction_arrows(self):
+        """Refresh ADCP direction arrows on the map (no full replot)."""
+        if not hasattr(self, "ax") or self.ax is None:
+            return
+        self._draw_all_travel_direction_arrows()
+        if hasattr(self, "canvas"):
+            self.canvas.draw_idle()
 
     def _generate_and_plot(self, show_success_dialog=True, auto_zoom=True):
         if hasattr(self, "_commit_all_deferred_line_edits"):
@@ -1596,6 +1671,8 @@ class PlottingMixin:
                 except Exception:
                     pass
 
+            self._draw_all_travel_direction_arrows()
+
             # Draw legend after all overlays so it sits above every layer.
             handles, labels = self.ax.get_legend_handles_labels()
             if handles and any(label and not label.startswith('_') for label in labels):
@@ -1605,6 +1682,9 @@ class PlottingMixin:
             else:
                 if self.ax.get_legend() is not None:
                     self.ax.get_legend().remove()
+
+            if hasattr(self, "_connect_map_axis_callbacks"):
+                self._connect_map_axis_callbacks()
 
             self.canvas.draw_idle()
 

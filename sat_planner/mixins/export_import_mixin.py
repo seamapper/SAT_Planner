@@ -88,13 +88,20 @@ class ExportImportMixin:
         return self._export_type_enabled("profiles_png_high") or self._export_type_enabled("profiles_png_low")
 
     def _save_export_map_png(self, path, **kwargs):
-        return export_utils.save_export_png(
-            self.figure,
-            path,
-            save_high=self._export_type_enabled("map_png_high"),
-            save_low=self._export_type_enabled("map_png_low"),
-            **kwargs,
-        )
+        had_arrows = False
+        if hasattr(self, "_set_travel_direction_arrows_visible"):
+            had_arrows = self._set_travel_direction_arrows_visible(False)
+        try:
+            return export_utils.save_export_png(
+                self.figure,
+                path,
+                save_high=self._export_type_enabled("map_png_high"),
+                save_low=self._export_type_enabled("map_png_low"),
+                **kwargs,
+            )
+        finally:
+            if had_arrows and hasattr(self, "_set_travel_direction_arrows_visible"):
+                self._set_travel_direction_arrows_visible(True)
 
     def _save_export_profile_png(self, path, **kwargs):
         return export_utils.save_export_png(

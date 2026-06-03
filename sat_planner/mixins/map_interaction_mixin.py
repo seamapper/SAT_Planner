@@ -1556,9 +1556,30 @@ class MapInteractionMixin:
                                                      bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
                                                      zorder=13)
 
+    def _connect_map_axis_callbacks(self):
+        """Reconnect axis limit callbacks after ``_plot_survey_plan`` recreates ``self.ax``."""
+        if not hasattr(self, "ax") or self.ax is None:
+            return
+        if not hasattr(self, "_on_axis_limits_changed"):
+            return
+        try:
+            if hasattr(self, "cid_xlim_changed"):
+                self.ax.callbacks.disconnect(self.cid_xlim_changed)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "cid_ylim_changed"):
+                self.ax.callbacks.disconnect(self.cid_ylim_changed)
+        except Exception:
+            pass
+        self.cid_xlim_changed = self.ax.callbacks.connect("xlim_changed", self._on_axis_limits_changed)
+        self.cid_ylim_changed = self.ax.callbacks.connect("ylim_changed", self._on_axis_limits_changed)
+
     def _hide_map_hover_tooltip_for_export(self):
         """Hide on-map hover tooltip (lat/lon, depth, etc.) so exported map PNGs are clean."""
         if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
             self.mouse_hover_info_text.set_visible(False)
         if hasattr(self, 'pitch_line_tooltip_text') and self.pitch_line_tooltip_text is not None:
             self.pitch_line_tooltip_text.set_visible(False)
+        if hasattr(self, "_set_travel_direction_arrows_visible"):
+            self._set_travel_direction_arrows_visible(False)

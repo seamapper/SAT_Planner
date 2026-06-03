@@ -54,28 +54,46 @@ class AdcpMixin:
                 return float(v)
         except Exception:
             pass
-        return 8.0
+        return 6.0
 
     def _adcp_get_turn_time_min(self):
         try:
             raw = self.adcp_turn_time_entry.text().strip()
             if not raw:
-                return 10.0
+                return 5.0
             v = float(raw)
             if v >= 0 and np.isfinite(v):
                 return float(v)
         except Exception:
             pass
-        return 10.0
+        return 5.0
 
     def _build_adcp_export_basename(self):
         d_int = int(round(self._adcp_get_diameter_m()))
-        return f"ADCP_Calibration_{d_int}m"
+        date_str = datetime.datetime.now().strftime("%Y%m%d")
+        return f"ADCP_Cal_Circle{d_int}m_{date_str}"
 
     def _update_adcp_export_name(self):
         if not hasattr(self, "adcp_export_name_entry"):
             return
-        self.adcp_export_name_entry.setText(self._build_adcp_export_basename())
+        name = self._build_adcp_export_basename()
+        if hasattr(self, "_deferred_set_line_edit"):
+            self._deferred_set_line_edit(self.adcp_export_name_entry, name)
+        else:
+            self.adcp_export_name_entry.setText(name)
+
+    def _adcp_set_deferred_field(self, attr_name, value):
+        """Set an ADCP QLineEdit from import/code without pending (amber) styling."""
+        if value is None:
+            return
+        widget = getattr(self, attr_name, None)
+        if widget is None:
+            return
+        text = str(value).strip()
+        if hasattr(self, "_deferred_set_line_edit"):
+            self._deferred_set_line_edit(widget, text)
+        else:
+            widget.setText(text)
 
     def _adcp_geod(self):
         if not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
@@ -145,6 +163,11 @@ class AdcpMixin:
         self._adcp_rebuild_circle(2)
 
     def _adcp_on_diameter_changed(self, *_args):
+        """Legacy name; use ``_apply_adcp_params_commit`` (deferred Enter / blur)."""
+        self._apply_adcp_params_commit()
+
+    def _apply_adcp_params_commit(self, _widget=None):
+        """Apply committed ADCP parameter edits: rebuild circles and refresh export name."""
         self._update_adcp_export_name()
         if getattr(self, "adcp_circle1_start", None) is not None:
             self._adcp_rebuild_circle(1)
@@ -186,10 +209,6 @@ class AdcpMixin:
             "c1_start": "adcp_pick_circle1_start_btn",
             "c2_center": "adcp_pick_circle2_center_btn",
             "c2_start": "adcp_pick_circle2_start_btn",
-            "edit_c1_center": "adcp_move_circle1_center_btn",
-            "edit_c1_start": "adcp_edit_circle1_start_btn",
-            "edit_c2_center": "adcp_move_circle2_center_btn",
-            "edit_c2_start": "adcp_edit_circle2_start_btn",
         }.get(mode)
 
     def _adcp_clear_pick_button_styles(self):
@@ -198,10 +217,6 @@ class AdcpMixin:
             "adcp_pick_circle1_start_btn",
             "adcp_pick_circle2_center_btn",
             "adcp_pick_circle2_start_btn",
-            "adcp_move_circle1_center_btn",
-            "adcp_edit_circle1_start_btn",
-            "adcp_move_circle2_center_btn",
-            "adcp_edit_circle2_start_btn",
         ):
             btn = getattr(self, attr, None)
             if btn is not None:
@@ -258,7 +273,7 @@ class AdcpMixin:
         if self.adcp_pick_mode == "c2_center":
             self._adcp_set_pick_mode(None)
             return
-        if not self._adcp_circle_complete(1):
+        if not self._adcp_circle_complete(1) and getattr(self, "adcp_circle2_center", None) is None:
             self._show_message("info", "ADCP Planning", "Complete Circle 1 first (center and start point).")
             return
         self._adcp_set_pick_mode("c2_center")
@@ -272,42 +287,6 @@ class AdcpMixin:
             return
         self._adcp_set_pick_mode("c2_start")
 
-    def _toggle_adcp_move_circle1_center(self):
-        if self.adcp_pick_mode == "edit_c1_center":
-            self._adcp_set_pick_mode(None)
-            return
-        if getattr(self, "adcp_circle1_center", None) is None:
-            self._show_message("info", "ADCP Planning", "Circle 1 has not been placed yet.")
-            return
-        self._adcp_set_pick_mode("edit_c1_center")
-
-    def _toggle_adcp_edit_circle1_start(self):
-        if self.adcp_pick_mode == "edit_c1_start":
-            self._adcp_set_pick_mode(None)
-            return
-        if getattr(self, "adcp_circle1_center", None) is None:
-            self._show_message("info", "ADCP Planning", "Circle 1 has not been placed yet.")
-            return
-        self._adcp_set_pick_mode("edit_c1_start")
-
-    def _toggle_adcp_move_circle2_center(self):
-        if self.adcp_pick_mode == "edit_c2_center":
-            self._adcp_set_pick_mode(None)
-            return
-        if getattr(self, "adcp_circle2_center", None) is None:
-            self._show_message("info", "ADCP Planning", "Circle 2 has not been placed yet.")
-            return
-        self._adcp_set_pick_mode("edit_c2_center")
-
-    def _toggle_adcp_edit_circle2_start(self):
-        if self.adcp_pick_mode == "edit_c2_start":
-            self._adcp_set_pick_mode(None)
-            return
-        if getattr(self, "adcp_circle2_center", None) is None:
-            self._show_message("info", "ADCP Planning", "Circle 2 has not been placed yet.")
-            return
-        self._adcp_set_pick_mode("edit_c2_start")
-
     def _update_adcp_button_states(self):
         has_geotiff = bool(getattr(self, "geotiff_dataset_original", None))
         c1_center = getattr(self, "adcp_circle1_center", None) is not None
@@ -320,10 +299,6 @@ class AdcpMixin:
             "adcp_pick_circle1_start_btn",
             "adcp_pick_circle2_center_btn",
             "adcp_pick_circle2_start_btn",
-            "adcp_move_circle1_center_btn",
-            "adcp_edit_circle1_start_btn",
-            "adcp_move_circle2_center_btn",
-            "adcp_edit_circle2_start_btn",
             "adcp_zoom_btn",
             "adcp_clear_btn",
             "adcp_show_info_btn",
@@ -336,17 +311,9 @@ class AdcpMixin:
         if hasattr(self, "adcp_pick_circle1_start_btn"):
             self.adcp_pick_circle1_start_btn.setEnabled(has_geotiff and c1_center)
         if hasattr(self, "adcp_pick_circle2_center_btn"):
-            self.adcp_pick_circle2_center_btn.setEnabled(has_geotiff and c1_done)
+            self.adcp_pick_circle2_center_btn.setEnabled(has_geotiff and (c1_done or c2_center))
         if hasattr(self, "adcp_pick_circle2_start_btn"):
             self.adcp_pick_circle2_start_btn.setEnabled(has_geotiff and c2_center)
-        if hasattr(self, "adcp_move_circle1_center_btn"):
-            self.adcp_move_circle1_center_btn.setEnabled(has_geotiff and c1_center)
-        if hasattr(self, "adcp_edit_circle1_start_btn"):
-            self.adcp_edit_circle1_start_btn.setEnabled(has_geotiff and c1_center)
-        if hasattr(self, "adcp_move_circle2_center_btn"):
-            self.adcp_move_circle2_center_btn.setEnabled(has_geotiff and c2_center)
-        if hasattr(self, "adcp_edit_circle2_start_btn"):
-            self.adcp_edit_circle2_start_btn.setEnabled(has_geotiff and c2_center)
         if hasattr(self, "adcp_zoom_btn"):
             self.adcp_zoom_btn.setEnabled(has_geotiff and self._adcp_plan_has_any_geometry())
         if hasattr(self, "adcp_clear_btn"):
@@ -355,6 +322,16 @@ class AdcpMixin:
             self.adcp_show_info_btn.setEnabled(self._adcp_plan_complete())
         if hasattr(self, "adcp_export_btn"):
             self.adcp_export_btn.setEnabled(self._adcp_plan_complete())
+        if hasattr(self, "adcp_show_direction_checkbox"):
+            has_segments = bool(
+                getattr(self, "adcp_circle1_segments", None)
+                or getattr(self, "adcp_circle2_segments", None)
+            )
+            self.adcp_show_direction_checkbox.setEnabled(has_geotiff and has_segments)
+
+    def _on_adcp_show_direction_changed(self, *_args):
+        if hasattr(self, "_update_travel_direction_arrows"):
+            self._update_travel_direction_arrows()
 
     def _handle_adcp_plot_click(self, event):
         mode = getattr(self, "adcp_pick_mode", None)
@@ -417,46 +394,6 @@ class AdcpMixin:
             self.adcp_circle2_segments = segments
             self._adcp_set_pick_mode(None)
             self.set_adcp_activity_text("ADCP calibration plan complete (both circles).", append=False)
-        elif mode == "edit_c1_center":
-            self.adcp_circle1_center = (clicked_lat, clicked_lon)
-            self.adcp_circle1_start = None
-            self.adcp_circle1_segments = []
-            self._adcp_set_pick_mode("c1_start")
-            self.set_adcp_activity_text(
-                "Circle 1 center moved — pick a new start point on the circle.",
-                append=False,
-            )
-        elif mode == "edit_c1_start":
-            snapped = self._adcp_snap_point_to_circle(self.adcp_circle1_center, clicked_lat, clicked_lon)
-            if snapped is None:
-                return True
-            segments, snapped_start = self._adcp_build_circle_segments(
-                self.adcp_circle1_center, snapped, clockwise=True
-            )
-            self.adcp_circle1_start = snapped_start
-            self.adcp_circle1_segments = segments
-            self._adcp_set_pick_mode(None)
-            self.set_adcp_activity_text("Circle 1 start point updated.", append=False)
-        elif mode == "edit_c2_center":
-            self.adcp_circle2_center = (clicked_lat, clicked_lon)
-            self.adcp_circle2_start = None
-            self.adcp_circle2_segments = []
-            self._adcp_set_pick_mode("c2_start")
-            self.set_adcp_activity_text(
-                "Circle 2 center moved — pick a new start point on the circle.",
-                append=False,
-            )
-        elif mode == "edit_c2_start":
-            snapped = self._adcp_snap_point_to_circle(self.adcp_circle2_center, clicked_lat, clicked_lon)
-            if snapped is None:
-                return True
-            segments, snapped_start = self._adcp_build_circle_segments(
-                self.adcp_circle2_center, snapped, clockwise=False
-            )
-            self.adcp_circle2_start = snapped_start
-            self.adcp_circle2_segments = segments
-            self._adcp_set_pick_mode(None)
-            self.set_adcp_activity_text("Circle 2 start point updated.", append=False)
         else:
             return False
 
@@ -556,25 +493,9 @@ class AdcpMixin:
         t.append("Circle 1: 36 straight segments, clockwise, starting at the picked start point.\n")
         t.append("Circle 2: 36 straight segments, counter-clockwise, starting at the picked start point.\n\n")
 
-        t.append("SEGMENT DISTANCES AND TIMES\n")
-        t.append("-" * 29 + "\n")
         grand_dist = 0.0
         grand_time = 0.0
         for row in circle_rows:
-            n = row["num"]
-            t.append(f"Circle {n} ({row['direction']}):\n")
-            for i, seg in enumerate(row["segments"], start=1):
-                d_m = self._adcp_segment_distance_m(seg)
-                t.append(f"  Seg {i:02d}: {d_m:.1f} m")
-                if speed_mps > 0:
-                    t.append(f"  |  {fmt_time(leg_time_sec(d_m))}\n")
-                else:
-                    t.append("\n")
-            t.append(
-                f"  Circle {n} subtotal: {row['total_dist']:.1f} m"
-                + (f"  |  {fmt_time(row['total_time'])}\n" if speed_mps > 0 else "\n")
-            )
-            t.append("\n")
             grand_dist += row["total_dist"]
             grand_time += row["total_time"]
 
@@ -767,11 +688,17 @@ class AdcpMixin:
             export_name = export_name.replace(c, "_")
         export_name = export_name.strip().strip(".")
 
-        export_dir = QFileDialog.getExistingDirectory(self, "Select Export Directory", self.last_export_dir)
+        export_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Export Directory",
+            getattr(self, "last_adcp_import_dir", os.path.expanduser("~")),
+        )
         if not export_dir:
             return
-        self.last_export_dir = export_dir
-        self._save_last_export_dir()
+        if export_dir and os.path.isdir(export_dir):
+            self.last_adcp_import_dir = export_dir
+            if hasattr(self, "_save_last_adcp_import_dir"):
+                self._save_last_adcp_import_dir()
 
         speed_kts = self._adcp_get_survey_speed_kts()
         turn_min = self._adcp_get_turn_time_min()
@@ -1151,17 +1078,17 @@ class AdcpMixin:
         elif c2_segs:
             self.adcp_circle2_start = c2_segs[0][0]
 
-        if meta.get("circle_diameter_m") is not None and hasattr(self, "adcp_circle_diameter_entry"):
-            self.adcp_circle_diameter_entry.setText(str(meta.get("circle_diameter_m")))
+        if meta.get("circle_diameter_m") is not None:
+            self._adcp_set_deferred_field("adcp_circle_diameter_entry", meta.get("circle_diameter_m"))
         elif meta.get("circle1_center") and meta.get("circle1_start"):
             self._adcp_rebuild_all_circles()
-        if meta.get("survey_speed_kts") is not None and hasattr(self, "adcp_survey_speed_entry"):
-            self.adcp_survey_speed_entry.setText(str(meta.get("survey_speed_kts")))
-        if meta.get("turn_time_min") is not None and hasattr(self, "adcp_turn_time_entry"):
-            self.adcp_turn_time_entry.setText(str(meta.get("turn_time_min")))
+        if meta.get("survey_speed_kts") is not None:
+            self._adcp_set_deferred_field("adcp_survey_speed_entry", meta.get("survey_speed_kts"))
+        if meta.get("turn_time_min") is not None:
+            self._adcp_set_deferred_field("adcp_turn_time_entry", meta.get("turn_time_min"))
         en = meta.get("export_name")
-        if en and hasattr(self, "adcp_export_name_entry"):
-            self.adcp_export_name_entry.setText(str(en))
+        if en:
+            self._adcp_set_deferred_field("adcp_export_name_entry", en)
         else:
             self._update_adcp_export_name()
 
@@ -1187,8 +1114,8 @@ class AdcpMixin:
             except Exception as e:
                 print(f"Warning: could not load ADCP metadata: {e}")
         if params:
-            if params.get("circle_diameter_m") is not None and hasattr(self, "adcp_circle_diameter_entry"):
-                self.adcp_circle_diameter_entry.setText(str(params.get("circle_diameter_m")))
+            if params.get("circle_diameter_m") is not None:
+                self._adcp_set_deferred_field("adcp_circle_diameter_entry", params.get("circle_diameter_m"))
             if params.get("circle1_center"):
                 self.adcp_circle1_center = tuple(params["circle1_center"])
             if params.get("circle1_start"):
@@ -1198,12 +1125,12 @@ class AdcpMixin:
             if params.get("circle2_start"):
                 self.adcp_circle2_start = tuple(params["circle2_start"])
             self._adcp_rebuild_all_circles()
-            if params.get("survey_speed_kts") is not None and hasattr(self, "adcp_survey_speed_entry"):
-                self.adcp_survey_speed_entry.setText(str(params.get("survey_speed_kts")))
-            if params.get("turn_time_min") is not None and hasattr(self, "adcp_turn_time_entry"):
-                self.adcp_turn_time_entry.setText(str(params.get("turn_time_min")))
-            if params.get("export_name") and hasattr(self, "adcp_export_name_entry"):
-                self.adcp_export_name_entry.setText(str(params.get("export_name")))
+            if params.get("survey_speed_kts") is not None:
+                self._adcp_set_deferred_field("adcp_survey_speed_entry", params.get("survey_speed_kts"))
+            if params.get("turn_time_min") is not None:
+                self._adcp_set_deferred_field("adcp_turn_time_entry", params.get("turn_time_min"))
+            if params.get("export_name"):
+                self._adcp_set_deferred_field("adcp_export_name_entry", params.get("export_name"))
             if params.get("geotiff_nan_value") is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
                 self._set_geotiff_nan_cutoff(params.get("geotiff_nan_value"), update_entry=True)
             gtp = params.get("geotiff_path")
@@ -1395,8 +1322,8 @@ class AdcpMixin:
                 if params.get("circle2_center") and params.get("circle2_start"):
                     self.adcp_circle2_center = tuple(params["circle2_center"])
                     self.adcp_circle2_start = tuple(params["circle2_start"])
-                if params.get("circle_diameter_m") is not None and hasattr(self, "adcp_circle_diameter_entry"):
-                    self.adcp_circle_diameter_entry.setText(str(params.get("circle_diameter_m")))
+                if params.get("circle_diameter_m") is not None:
+                    self._adcp_set_deferred_field("adcp_circle_diameter_entry", params.get("circle_diameter_m"))
                 self._adcp_rebuild_all_circles()
                 self._adcp_import_post_import(meta_path)
                 return

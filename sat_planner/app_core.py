@@ -524,6 +524,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.last_backscatter_import_dir = os.path.expanduser("~")
         self.last_backscatter_export_dir = os.path.expanduser("~")
         self.last_perf_import_dir = os.path.expanduser("~")
+        self.last_adcp_import_dir = os.path.expanduser("~")
         self.last_shapefile_dir = os.path.expanduser("~")
         self.export_type_options = self._default_export_type_options()
         self._load_last_used_dir()
@@ -537,6 +538,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_last_ref_import_dir()
         self._load_last_line_import_dir()
         self._load_last_perf_import_dir()
+        self._load_last_adcp_import_dir()
         self._load_last_shapefile_dir()
         self._load_export_type_options()
         if hasattr(self, "_refresh_visualization_shapefile_button_state"):
@@ -914,13 +916,16 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         print("Creating widgets...")
         # --- 1. Tabbed Parameters Section ---
         # Use QScrollArea for scrolling
+        _param_col_width = 500
         self.param_scroll = QScrollArea()
         self.param_scroll.setWidgetResizable(True)
-        self.param_scroll.setMaximumWidth(500)
-        self.param_scroll.setMinimumWidth(500)  # Keep left parameter column width (px)
+        self.param_scroll.setMaximumWidth(_param_col_width)
+        self.param_scroll.setMinimumWidth(_param_col_width)  # Keep left parameter column width (px)
+        self.param_scroll.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         self.param_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # Disable horizontal scrollbar
 
         param_widget = QWidget()
+        param_widget.setMaximumWidth(_param_col_width)
         param_widget.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         param_layout = QVBoxLayout(param_widget)
 
@@ -2436,15 +2441,14 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         adcp_params_layout.addWidget(QLabel("Circle Diameter (m):"), 0, 0)
         self.adcp_circle_diameter_entry = QLineEdit("300")
         self.adcp_circle_diameter_entry.setToolTip("Diameter of each calibration circle (default 300 m).")
-        self.adcp_circle_diameter_entry.textChanged.connect(self._adcp_on_diameter_changed)
         adcp_params_layout.addWidget(self.adcp_circle_diameter_entry, 0, 1)
 
         adcp_params_layout.addWidget(QLabel("Survey Speed (kts):"), 1, 0)
-        self.adcp_survey_speed_entry = QLineEdit("8")
+        self.adcp_survey_speed_entry = QLineEdit("6")
         adcp_params_layout.addWidget(self.adcp_survey_speed_entry, 1, 1)
 
         adcp_params_layout.addWidget(QLabel("Turn Time (min):"), 2, 0)
-        self.adcp_turn_time_entry = QLineEdit("10")
+        self.adcp_turn_time_entry = QLineEdit("5")
         adcp_params_layout.addWidget(self.adcp_turn_time_entry, 2, 1)
 
         adcp_layout.addWidget(adcp_params_groupbox, adcp_row, 0, 1, 2)
@@ -2478,45 +2482,14 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.adcp_pick_circle2_start_btn.setEnabled(False)
         adcp_pick_layout.addWidget(self.adcp_pick_circle2_start_btn, 1, 1)
 
-        adcp_pick_layout.addWidget(QLabel("Circle 1: clockwise; Circle 2: counter-clockwise."), 2, 0, 1, 2)
+        adcp_pick_hint_label = QLabel(
+            "Circle 1: clockwise; Circle 2: counter-clockwise. "
+            "Re-picking a center clears that circle's start until you pick a new one."
+        )
+        adcp_pick_hint_label.setWordWrap(True)
+        adcp_pick_layout.addWidget(adcp_pick_hint_label, 2, 0, 1, 2)
 
         adcp_layout.addWidget(adcp_pick_groupbox, adcp_row, 0, 1, 2)
-        adcp_row += 1
-
-        adcp_edit_groupbox = QGroupBox("Edit Plan")
-        adcp_edit_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        adcp_edit_layout = QGridLayout(adcp_edit_groupbox)
-        adcp_edit_layout.setSpacing(3)
-        adcp_edit_layout.setContentsMargins(9, 9, 9, 9)
-        adcp_edit_layout.setColumnStretch(0, 1)
-        adcp_edit_layout.setColumnStretch(1, 1)
-
-        self.adcp_move_circle1_center_btn = QPushButton("Move Circle 1 Center")
-        self.adcp_move_circle1_center_btn.clicked.connect(self._toggle_adcp_move_circle1_center)
-        self.adcp_move_circle1_center_btn.setEnabled(False)
-        adcp_edit_layout.addWidget(self.adcp_move_circle1_center_btn, 0, 0)
-
-        self.adcp_edit_circle1_start_btn = QPushButton("Edit Circle 1 Start")
-        self.adcp_edit_circle1_start_btn.clicked.connect(self._toggle_adcp_edit_circle1_start)
-        self.adcp_edit_circle1_start_btn.setEnabled(False)
-        adcp_edit_layout.addWidget(self.adcp_edit_circle1_start_btn, 0, 1)
-
-        self.adcp_move_circle2_center_btn = QPushButton("Move Circle 2 Center")
-        self.adcp_move_circle2_center_btn.clicked.connect(self._toggle_adcp_move_circle2_center)
-        self.adcp_move_circle2_center_btn.setEnabled(False)
-        adcp_edit_layout.addWidget(self.adcp_move_circle2_center_btn, 1, 0)
-
-        self.adcp_edit_circle2_start_btn = QPushButton("Edit Circle 2 Start")
-        self.adcp_edit_circle2_start_btn.clicked.connect(self._toggle_adcp_edit_circle2_start)
-        self.adcp_edit_circle2_start_btn.setEnabled(False)
-        adcp_edit_layout.addWidget(self.adcp_edit_circle2_start_btn, 1, 1)
-
-        adcp_edit_layout.addWidget(
-            QLabel("Moving a center clears its start point until you pick a new one."),
-            2, 0, 1, 2,
-        )
-
-        adcp_layout.addWidget(adcp_edit_groupbox, adcp_row, 0, 1, 2)
         adcp_row += 1
 
         adcp_plot_control_groupbox = QGroupBox("ADCP Plot Control")
@@ -2524,21 +2497,36 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         adcp_plot_control_layout = QGridLayout(adcp_plot_control_groupbox)
         adcp_plot_control_layout.setSpacing(3)
         adcp_plot_control_layout.setContentsMargins(9, 9, 9, 9)
+        adcp_plot_control_layout.setColumnStretch(0, 1)
+        adcp_plot_control_layout.setColumnStretch(1, 1)
 
         self.adcp_zoom_btn = QPushButton("Zoom to ADCP Cal")
         self.adcp_zoom_btn.clicked.connect(self._zoom_to_adcp_cal)
         self.adcp_zoom_btn.setEnabled(False)
+        self.adcp_zoom_btn.setMinimumWidth(0)
+        self.adcp_zoom_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         adcp_plot_control_layout.addWidget(self.adcp_zoom_btn, 0, 0)
+
+        self.adcp_show_direction_checkbox = QCheckBox("Show Direction of Travel")
+        self.adcp_show_direction_checkbox.setChecked(False)
+        self.adcp_show_direction_checkbox.setToolTip(
+            "Show small red arrowheads on each ADCP circle segment indicating travel direction."
+        )
+        self.adcp_show_direction_checkbox.setEnabled(False)
+        self.adcp_show_direction_checkbox.stateChanged.connect(self._on_adcp_show_direction_changed)
+        self.adcp_show_direction_checkbox.setMinimumWidth(0)
+        self.adcp_show_direction_checkbox.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        adcp_plot_control_layout.addWidget(self.adcp_show_direction_checkbox, 0, 1)
 
         self.adcp_clear_btn = QPushButton("Clear ADCP Cal Plan")
         self.adcp_clear_btn.clicked.connect(self._clear_adcp_plan)
         self.adcp_clear_btn.setEnabled(False)
-        adcp_plot_control_layout.addWidget(self.adcp_clear_btn, 1, 0)
+        adcp_plot_control_layout.addWidget(self.adcp_clear_btn, 1, 0, 1, 2)
 
         self.adcp_show_info_btn = QPushButton("Show ADCP Cal Info")
         self.adcp_show_info_btn.clicked.connect(self._show_adcp_cal_info)
         self.adcp_show_info_btn.setEnabled(False)
-        adcp_plot_control_layout.addWidget(self.adcp_show_info_btn, 2, 0, 1, 1)
+        adcp_plot_control_layout.addWidget(self.adcp_show_info_btn, 2, 0, 1, 2)
 
         adcp_layout.addWidget(adcp_plot_control_groupbox, adcp_row, 0, 1, 2)
         adcp_row += 1

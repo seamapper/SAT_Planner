@@ -201,6 +201,21 @@ class DeferredParamsMixin:
         if cal_export is not None:
             self._bind_deferred_param(cal_export, lambda _w: None)
 
+        adcp_commit = getattr(self, "_apply_adcp_params_commit", None)
+        if adcp_commit is not None:
+            for name in (
+                "adcp_circle_diameter_entry",
+                "adcp_survey_speed_entry",
+                "adcp_turn_time_entry",
+            ):
+                w = getattr(self, name, None)
+                if w is not None:
+                    self._bind_deferred_param(w, lambda _widget, f=adcp_commit: f())
+
+        adcp_export = getattr(self, "adcp_export_name_entry", None)
+        if adcp_export is not None:
+            self._bind_deferred_param(adcp_export, lambda _w: None)
+
         if hasattr(self, "offset_direction_combo") and hasattr(self, "_apply_accuracy_survey_plan_now"):
             self.offset_direction_combo.currentTextChanged.connect(
                 lambda _text: self._apply_accuracy_survey_plan_now()
