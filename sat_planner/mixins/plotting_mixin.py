@@ -1330,6 +1330,79 @@ class PlottingMixin:
                         bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
                     )
 
+            # Plot ADCP calibration circles if present
+            if hasattr(self, 'adcp_circle1_center') and self.adcp_circle1_center is not None:
+                c1c = self.adcp_circle1_center
+                if not getattr(self, 'adcp_circle1_segments', None):
+                    preview = getattr(self, '_adcp_preview_circle_vertices', None)
+                    if callable(preview) and getattr(self, 'adcp_circle1_start', None) is None:
+                        verts = preview(c1c, clockwise=True)
+                        if len(verts) >= 2:
+                            self.ax.plot(
+                                [p[1] for p in verts] + [verts[0][1]],
+                                [p[0] for p in verts] + [verts[0][0]],
+                                color='dodgerblue',
+                                linewidth=1.2,
+                                linestyle=':',
+                                label='ADCP Circle 1 (preview)',
+                            )
+                self.ax.plot(c1c[1], c1c[0], marker='+', color='dodgerblue', markersize=10, linestyle='None', label='_nolegend_')
+                if getattr(self, 'adcp_circle1_start', None) is not None:
+                    s = self.adcp_circle1_start
+                    self.ax.plot(s[1], s[0], marker='o', color='dodgerblue', markersize=5, linestyle='None', label='_nolegend_')
+                    self.ax.annotate(
+                        'C1S',
+                        (s[1], s[0]),
+                        xytext=(5, 5),
+                        textcoords='offset points',
+                        fontsize=8,
+                        color='dodgerblue',
+                        weight='bold',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                    )
+            if hasattr(self, 'adcp_circle1_segments') and len(self.adcp_circle1_segments) == 36:
+                for i, seg in enumerate(self.adcp_circle1_segments):
+                    lats = [p[0] for p in seg]
+                    lons = [p[1] for p in seg]
+                    label = 'ADCP Circle 1' if i == 0 else '_nolegend_'
+                    self.ax.plot(lons, lats, color='dodgerblue', linewidth=2.0, linestyle='-', label=label)
+
+            if hasattr(self, 'adcp_circle2_center') and self.adcp_circle2_center is not None:
+                c2c = self.adcp_circle2_center
+                if not getattr(self, 'adcp_circle2_segments', None):
+                    preview = getattr(self, '_adcp_preview_circle_vertices', None)
+                    if callable(preview) and getattr(self, 'adcp_circle2_start', None) is None:
+                        verts = preview(c2c, clockwise=False)
+                        if len(verts) >= 2:
+                            self.ax.plot(
+                                [p[1] for p in verts] + [verts[0][1]],
+                                [p[0] for p in verts] + [verts[0][0]],
+                                color='darkorange',
+                                linewidth=1.2,
+                                linestyle=':',
+                                label='ADCP Circle 2 (preview)',
+                            )
+                self.ax.plot(c2c[1], c2c[0], marker='+', color='darkorange', markersize=10, linestyle='None', label='_nolegend_')
+                if getattr(self, 'adcp_circle2_start', None) is not None:
+                    s = self.adcp_circle2_start
+                    self.ax.plot(s[1], s[0], marker='o', color='darkorange', markersize=5, linestyle='None', label='_nolegend_')
+                    self.ax.annotate(
+                        'C2S',
+                        (s[1], s[0]),
+                        xytext=(5, 5),
+                        textcoords='offset points',
+                        fontsize=8,
+                        color='darkorange',
+                        weight='bold',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                    )
+            if hasattr(self, 'adcp_circle2_segments') and len(self.adcp_circle2_segments) == 36:
+                for i, seg in enumerate(self.adcp_circle2_segments):
+                    lats = [p[0] for p in seg]
+                    lons = [p[1] for p in seg]
+                    label = 'ADCP Circle 2' if i == 0 else '_nolegend_'
+                    self.ax.plot(lons, lats, color='darkorange', linewidth=2.0, linestyle='-', label=label)
+
             # --- Plot the drawn line in Line Planning tab if it exists ---
             if hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 2:
                 lats = [p[0] for p in self.line_planning_points]
@@ -1660,6 +1733,13 @@ class PlottingMixin:
             if hasattr(self, 'performance_pick_center_btn'):
                 self.performance_pick_center_btn.setEnabled(False)
                 self.performance_pick_center_btn.setStyleSheet("")
+            if hasattr(self, '_adcp_set_pick_mode'):
+                self._adcp_set_pick_mode(None)
+            if hasattr(self, 'adcp_pick_circle1_center_btn'):
+                self.adcp_pick_circle1_center_btn.setEnabled(False)
+                self.adcp_pick_circle1_center_btn.setStyleSheet("")
+            if hasattr(self, '_update_adcp_button_states'):
+                self._update_adcp_button_states()
             if hasattr(self, 'zoom_to_geotiff_btn'):
                 self.zoom_to_geotiff_btn.setEnabled(False)
             # Reset "Start Drawing Line" button to normal style when GeoTIFF is removed

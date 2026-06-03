@@ -852,6 +852,14 @@ class ProfilesMixin:
             self._draw_backscatter_line_profile()
         elif current_tab == 4:
             self._draw_performance_profile()
+        elif current_tab == 5:
+            if hasattr(self, "_draw_adcp_profile"):
+                self._draw_adcp_profile()
+            else:
+                self.profile_ax.clear()
+                self.profile_ax.set_title("Elevation Profile", fontsize=8)
+                self.profile_fig.tight_layout(pad=1.0)
+                self.profile_canvas.draw()
         else:
             self.profile_ax.clear()
             self.profile_ax.set_title("Elevation Profile", fontsize=8)

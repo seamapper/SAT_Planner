@@ -41,6 +41,7 @@ from .mixins.gmrt_download_mixin import GMRTDownloadMixin
 from .mixins.calibration_mixin import CalibrationMixin
 from .mixins.line_planning_mixin import LinePlanningMixin
 from .mixins.performance_mixin import PerformanceMixin
+from .mixins.adcp_mixin import AdcpMixin
 from .mixins.profiles_mixin import ProfilesMixin
 from .mixins.map_interaction_mixin import MapInteractionMixin
 from .mixins.export_import_mixin import ExportImportMixin
@@ -49,7 +50,7 @@ from .mixins.deferred_params_mixin import DeferredParamsMixin
 from .gmrt_dialog import GMRTGrabber
 
 
-class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, PerformanceMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, DeferredParamsMixin, QMainWindow):
+class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, PerformanceMixin, AdcpMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, DeferredParamsMixin, QMainWindow):
     CONFIG_FILENAME = CONFIG_FILENAME  # from package
 
     def __init__(self):
@@ -227,6 +228,15 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.line_planning_handles = []
         self.dragging_line_planning_handle = None
         self.line_planning_edit_line = None
+
+        # ADCP calibration circles
+        self.adcp_circle1_center = None
+        self.adcp_circle1_start = None
+        self.adcp_circle1_segments = []
+        self.adcp_circle2_center = None
+        self.adcp_circle2_start = None
+        self.adcp_circle2_segments = []
+        self.adcp_pick_mode = None
 
         # Track previous tab for clearing on tab switch
         self.previous_tab_index = 0
@@ -881,6 +891,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         try:
             current_tab = self.param_notebook.currentIndex()
 
+            if hasattr(self, "adcp_pick_mode") and self.adcp_pick_mode and current_tab != 5:
+                if hasattr(self, "_adcp_set_pick_mode"):
+                    self._adcp_set_pick_mode(None)
+
             # Mark as initialized and update previous tab index
             self.tab_switch_initialized = True
             self.previous_tab_index = current_tab
@@ -902,8 +916,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         # Use QScrollArea for scrolling
         self.param_scroll = QScrollArea()
         self.param_scroll.setWidgetResizable(True)
-        self.param_scroll.setMaximumWidth(430)
-        self.param_scroll.setMinimumWidth(430)  # Keep left parameter column width (px)
+        self.param_scroll.setMaximumWidth(500)
+        self.param_scroll.setMinimumWidth(500)  # Keep left parameter column width (px)
         self.param_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)  # Disable horizontal scrollbar
 
         param_widget = QWidget()
@@ -1036,12 +1050,14 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.line_planning_frame = QWidget()
         self.backscatter_frame = QWidget()
         self.performance_frame = QWidget()
+        self.adcp_frame = QWidget()
         self.param_notebook.addTab(self.calibration_frame, "Calibration")
         # Label the second tab as 'Accuracy' instead of 'Reference'
         self.param_notebook.addTab(self.reference_frame, "Accuracy")
         self.param_notebook.addTab(self.line_planning_frame, "Line")
         self.param_notebook.addTab(self.backscatter_frame, "Backscatter")
         self.param_notebook.addTab(self.performance_frame, "Performance")
+        self.param_notebook.addTab(self.adcp_frame, "ADCP")
 
         test_planning_layout.addWidget(self.param_notebook)
         param_layout.addWidget(test_planning_groupbox)
@@ -2402,6 +2418,190 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         performance_layout.setRowStretch(performance_row, 0)
         performance_row += 1
         performance_layout.setRowStretch(performance_row, 1)
+
+        # --- ADCP Tab ---
+        adcp_layout = QGridLayout(self.adcp_frame)
+        adcp_layout.setColumnStretch(0, 1)
+        adcp_layout.setColumnStretch(1, 2)
+        adcp_row = 0
+
+        adcp_params_groupbox = QGroupBox("ADCP Calibration Parameters")
+        adcp_params_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        adcp_params_layout = QGridLayout(adcp_params_groupbox)
+        adcp_params_layout.setSpacing(3)
+        adcp_params_layout.setContentsMargins(9, 9, 9, 9)
+        adcp_params_layout.setColumnStretch(0, 1)
+        adcp_params_layout.setColumnStretch(1, 2)
+
+        adcp_params_layout.addWidget(QLabel("Circle Diameter (m):"), 0, 0)
+        self.adcp_circle_diameter_entry = QLineEdit("300")
+        self.adcp_circle_diameter_entry.setToolTip("Diameter of each calibration circle (default 300 m).")
+        self.adcp_circle_diameter_entry.textChanged.connect(self._adcp_on_diameter_changed)
+        adcp_params_layout.addWidget(self.adcp_circle_diameter_entry, 0, 1)
+
+        adcp_params_layout.addWidget(QLabel("Survey Speed (kts):"), 1, 0)
+        self.adcp_survey_speed_entry = QLineEdit("8")
+        adcp_params_layout.addWidget(self.adcp_survey_speed_entry, 1, 1)
+
+        adcp_params_layout.addWidget(QLabel("Turn Time (min):"), 2, 0)
+        self.adcp_turn_time_entry = QLineEdit("10")
+        adcp_params_layout.addWidget(self.adcp_turn_time_entry, 2, 1)
+
+        adcp_layout.addWidget(adcp_params_groupbox, adcp_row, 0, 1, 2)
+        adcp_row += 1
+
+        adcp_pick_groupbox = QGroupBox("Plan Circles on GeoTIFF")
+        adcp_pick_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        adcp_pick_layout = QGridLayout(adcp_pick_groupbox)
+        adcp_pick_layout.setSpacing(3)
+        adcp_pick_layout.setContentsMargins(9, 9, 9, 9)
+        adcp_pick_layout.setColumnStretch(0, 1)
+        adcp_pick_layout.setColumnStretch(1, 1)
+
+        self.adcp_pick_circle1_center_btn = QPushButton("Pick Circle 1 Center")
+        self.adcp_pick_circle1_center_btn.clicked.connect(self._toggle_adcp_pick_circle1_center)
+        self.adcp_pick_circle1_center_btn.setEnabled(False)
+        adcp_pick_layout.addWidget(self.adcp_pick_circle1_center_btn, 0, 0)
+
+        self.adcp_pick_circle1_start_btn = QPushButton("Pick Circle 1 Start")
+        self.adcp_pick_circle1_start_btn.clicked.connect(self._toggle_adcp_pick_circle1_start)
+        self.adcp_pick_circle1_start_btn.setEnabled(False)
+        adcp_pick_layout.addWidget(self.adcp_pick_circle1_start_btn, 0, 1)
+
+        self.adcp_pick_circle2_center_btn = QPushButton("Pick Circle 2 Center")
+        self.adcp_pick_circle2_center_btn.clicked.connect(self._toggle_adcp_pick_circle2_center)
+        self.adcp_pick_circle2_center_btn.setEnabled(False)
+        adcp_pick_layout.addWidget(self.adcp_pick_circle2_center_btn, 1, 0)
+
+        self.adcp_pick_circle2_start_btn = QPushButton("Pick Circle 2 Start")
+        self.adcp_pick_circle2_start_btn.clicked.connect(self._toggle_adcp_pick_circle2_start)
+        self.adcp_pick_circle2_start_btn.setEnabled(False)
+        adcp_pick_layout.addWidget(self.adcp_pick_circle2_start_btn, 1, 1)
+
+        adcp_pick_layout.addWidget(QLabel("Circle 1: clockwise; Circle 2: counter-clockwise."), 2, 0, 1, 2)
+
+        adcp_layout.addWidget(adcp_pick_groupbox, adcp_row, 0, 1, 2)
+        adcp_row += 1
+
+        adcp_edit_groupbox = QGroupBox("Edit Plan")
+        adcp_edit_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        adcp_edit_layout = QGridLayout(adcp_edit_groupbox)
+        adcp_edit_layout.setSpacing(3)
+        adcp_edit_layout.setContentsMargins(9, 9, 9, 9)
+        adcp_edit_layout.setColumnStretch(0, 1)
+        adcp_edit_layout.setColumnStretch(1, 1)
+
+        self.adcp_move_circle1_center_btn = QPushButton("Move Circle 1 Center")
+        self.adcp_move_circle1_center_btn.clicked.connect(self._toggle_adcp_move_circle1_center)
+        self.adcp_move_circle1_center_btn.setEnabled(False)
+        adcp_edit_layout.addWidget(self.adcp_move_circle1_center_btn, 0, 0)
+
+        self.adcp_edit_circle1_start_btn = QPushButton("Edit Circle 1 Start")
+        self.adcp_edit_circle1_start_btn.clicked.connect(self._toggle_adcp_edit_circle1_start)
+        self.adcp_edit_circle1_start_btn.setEnabled(False)
+        adcp_edit_layout.addWidget(self.adcp_edit_circle1_start_btn, 0, 1)
+
+        self.adcp_move_circle2_center_btn = QPushButton("Move Circle 2 Center")
+        self.adcp_move_circle2_center_btn.clicked.connect(self._toggle_adcp_move_circle2_center)
+        self.adcp_move_circle2_center_btn.setEnabled(False)
+        adcp_edit_layout.addWidget(self.adcp_move_circle2_center_btn, 1, 0)
+
+        self.adcp_edit_circle2_start_btn = QPushButton("Edit Circle 2 Start")
+        self.adcp_edit_circle2_start_btn.clicked.connect(self._toggle_adcp_edit_circle2_start)
+        self.adcp_edit_circle2_start_btn.setEnabled(False)
+        adcp_edit_layout.addWidget(self.adcp_edit_circle2_start_btn, 1, 1)
+
+        adcp_edit_layout.addWidget(
+            QLabel("Moving a center clears its start point until you pick a new one."),
+            2, 0, 1, 2,
+        )
+
+        adcp_layout.addWidget(adcp_edit_groupbox, adcp_row, 0, 1, 2)
+        adcp_row += 1
+
+        adcp_plot_control_groupbox = QGroupBox("ADCP Plot Control")
+        adcp_plot_control_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        adcp_plot_control_layout = QGridLayout(adcp_plot_control_groupbox)
+        adcp_plot_control_layout.setSpacing(3)
+        adcp_plot_control_layout.setContentsMargins(9, 9, 9, 9)
+
+        self.adcp_zoom_btn = QPushButton("Zoom to ADCP Cal")
+        self.adcp_zoom_btn.clicked.connect(self._zoom_to_adcp_cal)
+        self.adcp_zoom_btn.setEnabled(False)
+        adcp_plot_control_layout.addWidget(self.adcp_zoom_btn, 0, 0)
+
+        self.adcp_clear_btn = QPushButton("Clear ADCP Cal Plan")
+        self.adcp_clear_btn.clicked.connect(self._clear_adcp_plan)
+        self.adcp_clear_btn.setEnabled(False)
+        adcp_plot_control_layout.addWidget(self.adcp_clear_btn, 1, 0)
+
+        self.adcp_show_info_btn = QPushButton("Show ADCP Cal Info")
+        self.adcp_show_info_btn.clicked.connect(self._show_adcp_cal_info)
+        self.adcp_show_info_btn.setEnabled(False)
+        adcp_plot_control_layout.addWidget(self.adcp_show_info_btn, 2, 0, 1, 1)
+
+        adcp_layout.addWidget(adcp_plot_control_groupbox, adcp_row, 0, 1, 2)
+        adcp_row += 1
+
+        adcp_import_export_groupbox = QGroupBox("ADCP Import/Export")
+        adcp_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        adcp_import_export_layout = QVBoxLayout(adcp_import_export_groupbox)
+        adcp_import_export_layout.setSpacing(0)
+        adcp_import_export_layout.setContentsMargins(9, 9, 9, 9)
+
+        self.adcp_import_btn = QPushButton("Import ADCP Cal")
+        self.adcp_import_btn.clicked.connect(self._import_adcp_cal)
+        adcp_import_export_layout.addWidget(self.adcp_import_btn)
+        adcp_import_export_layout.addSpacing(3)
+
+        adcp_gmrt_row = QWidget()
+        adcp_gmrt_row_layout = QHBoxLayout(adcp_gmrt_row)
+        adcp_gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
+        adcp_gmrt_row_layout.setSpacing(6)
+        self.adcp_download_gmrt_checkbox = QCheckBox("Download GMRT")
+        self.adcp_download_gmrt_checkbox.setChecked(False)
+        self.adcp_download_gmrt_checkbox.setToolTip(
+            "When enabled, importing an ADCP calibration downloads a GMRT bathymetry GeoTIFF "
+            "(buffer in degrees around the plan) and loads it."
+        )
+        adcp_gmrt_row_layout.addWidget(self.adcp_download_gmrt_checkbox)
+        self.adcp_gmrt_buffer_spin = QDoubleSpinBox()
+        self.adcp_gmrt_buffer_spin.setRange(0.01, 10.0)
+        self.adcp_gmrt_buffer_spin.setSingleStep(0.1)
+        self.adcp_gmrt_buffer_spin.setValue(0.5)
+        self.adcp_gmrt_buffer_spin.setDecimals(2)
+        self.adcp_gmrt_buffer_spin.setMinimumWidth(60)
+        adcp_gmrt_row_layout.addWidget(self.adcp_gmrt_buffer_spin)
+        self.adcp_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
+        self.adcp_split_topo_depths_checkbox.setChecked(True)
+        self.adcp_split_topo_depths_checkbox.setEnabled(self.adcp_download_gmrt_checkbox.isChecked())
+        self.adcp_download_gmrt_checkbox.toggled.connect(self.adcp_split_topo_depths_checkbox.setEnabled)
+        adcp_gmrt_row_layout.addWidget(self.adcp_split_topo_depths_checkbox)
+        adcp_gmrt_row_layout.addStretch()
+        adcp_import_export_layout.addWidget(adcp_gmrt_row)
+        adcp_import_export_layout.addSpacing(3)
+
+        self.adcp_export_btn = QPushButton("Export ADCP Cal")
+        self.adcp_export_btn.clicked.connect(self._export_adcp_cal_files)
+        self.adcp_export_btn.setEnabled(False)
+        adcp_import_export_layout.addWidget(self.adcp_export_btn)
+        adcp_import_export_layout.addSpacing(3)
+
+        adcp_export_name_frame = QWidget()
+        adcp_export_name_layout = QGridLayout(adcp_export_name_frame)
+        adcp_export_name_layout.setSpacing(0)
+        adcp_export_name_layout.setContentsMargins(0, 0, 0, 0)
+        adcp_export_name_layout.setColumnStretch(0, 1)
+        adcp_export_name_layout.setColumnStretch(1, 2)
+        adcp_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
+        self.adcp_export_name_entry = QLineEdit(self._build_adcp_export_basename())
+        adcp_export_name_layout.addWidget(self.adcp_export_name_entry, 0, 1)
+        adcp_import_export_layout.addWidget(adcp_export_name_frame)
+
+        adcp_layout.addWidget(adcp_import_export_groupbox, adcp_row, 0, 1, 2)
+        adcp_layout.setRowStretch(adcp_row, 0)
+        adcp_row += 1
+        adcp_layout.setRowStretch(adcp_row, 1)
 
         # --- 2. Main Plot Area (right side) ---
         self.plot_frame = QWidget()

@@ -48,6 +48,7 @@ a = Analysis(
         'sat_planner.mixins.calibration_mixin',
         'sat_planner.mixins.line_planning_mixin',
         'sat_planner.mixins.performance_mixin',
+        'sat_planner.mixins.adcp_mixin',
         'sat_planner.performance_import_dialog',
         'sat_planner.mixins.profiles_mixin',
         'sat_planner.mixins.map_interaction_mixin',

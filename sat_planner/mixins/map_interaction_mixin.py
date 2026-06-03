@@ -295,6 +295,8 @@ class MapInteractionMixin:
             self._schedule_eez_hover_lookup(clicked_lat, clicked_lon)
             self.canvas.draw_idle()
             return
+        if getattr(self, '_handle_adcp_plot_click', lambda e: False)(event):
+            return
         if getattr(self, '_handle_line_planning_plot_click', lambda e: False)(event):
             return
         if self.pick_pitch_line_mode:
@@ -1108,7 +1110,7 @@ class MapInteractionMixin:
         flashing "No lines to zoom to" dialogs.
 
         Tab order (see ``app_core._setup_layout``):
-            0: Calibration, 1: Accuracy, 2: Line, 3: Backscatter, 4: Performance
+            0: Calibration, 1: Accuracy, 2: Line, 3: Backscatter, 4: Performance, 5: ADCP
         """
         if not hasattr(self, "param_notebook"):
             return
@@ -1151,6 +1153,10 @@ class MapInteractionMixin:
             )
             if has_lines and hasattr(self, "_zoom_to_performance_lines"):
                 self._zoom_to_performance_lines()
+        elif tab_index == 5:
+            if self._adcp_plan_has_any_geometry() if hasattr(self, "_adcp_plan_has_any_geometry") else False:
+                if hasattr(self, "_zoom_to_adcp_cal"):
+                    self._zoom_to_adcp_cal()
 
     def _zoom_to_any_lines(self):
         # Collect all points from pitch line and heading lines
