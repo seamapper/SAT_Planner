@@ -1961,18 +1961,28 @@ class CalibrationMixin:
                 try:
                     if params.get('line_offset') is not None:
                         imported_line_offset = params.get('line_offset')
-                        self.cal_line_offset_entry.setText(str(params['line_offset']))
+                        self._set_deferred_field_by_attr(
+                            'cal_line_offset_entry', params['line_offset']
+                        )
                     if params.get('export_name'):
-                        self.cal_export_name_entry.setText(params['export_name'])
+                        self._set_deferred_field_by_attr(
+                            'cal_export_name_entry', params['export_name']
+                        )
                         self._cal_export_name_locked_to_params = True
                     else:
                         self._cal_export_name_locked_to_params = False
                     if params.get('survey_speed') is not None:
-                        self.cal_survey_speed_entry.setText(str(params['survey_speed']))
-                    if params.get('lead_in_m') is not None and hasattr(self, 'cal_lead_in_entry'):
-                        self.cal_lead_in_entry.setText(str(params['lead_in_m']))
-                    if params.get('turn_time') is not None and hasattr(self, 'cal_turn_time_entry'):
-                        self.cal_turn_time_entry.setText(str(params['turn_time']))
+                        self._set_deferred_field_by_attr(
+                            'cal_survey_speed_entry', params['survey_speed']
+                        )
+                    if params.get('lead_in_m') is not None:
+                        self._set_deferred_field_by_attr(
+                            'cal_lead_in_entry', params['lead_in_m']
+                        )
+                    if params.get('turn_time') is not None:
+                        self._set_deferred_field_by_attr(
+                            'cal_turn_time_entry', params['turn_time']
+                        )
                     if params.get('geotiff_nan_value') is not None and hasattr(self, '_set_geotiff_nan_cutoff'):
                         self._set_geotiff_nan_cutoff(params.get('geotiff_nan_value'), update_entry=True)
                     if 'show_contours_var' in params:
@@ -1981,9 +1991,12 @@ class CalibrationMixin:
                             self.show_contours_checkbox.blockSignals(True)
                             self.show_contours_checkbox.setChecked(self.show_contours_var)
                             self.show_contours_checkbox.blockSignals(False)
-                    if params.get('contour_interval_m') is not None and hasattr(self, 'contour_interval_entry'):
+                    if params.get('contour_interval_m') is not None:
                         try:
-                            self.contour_interval_entry.setText(f"{float(params.get('contour_interval_m')):g}")
+                            self._set_deferred_field_by_attr(
+                                'contour_interval_entry',
+                                f"{float(params.get('contour_interval_m')):g}",
+                            )
                         except Exception:
                             pass
                 except Exception:
@@ -2026,6 +2039,8 @@ class CalibrationMixin:
             # Suggested export name: from params, else from loaded GeoTIFF, else defer if GMRT download, else pitch-line or generic
             if not params or not isinstance(params, dict) or not params.get('export_name'):
                 self._set_cal_export_name_after_import()
+            if hasattr(self, '_deferred_sync_all_bound_params'):
+                self._deferred_sync_all_bound_params()
             self._update_pitch_line_button_states()
             self._update_roll_line_button_states()
             if hasattr(self, 'add_heading_lines_btn'):
@@ -2721,7 +2736,9 @@ class CalibrationMixin:
             value = float(offset_m)
         except (TypeError, ValueError):
             return
-        if hasattr(self, "cal_line_offset_entry"):
+        if hasattr(self, "_set_deferred_field_by_attr"):
+            self._set_deferred_field_by_attr("cal_line_offset_entry", f"{value:.2f}")
+        elif hasattr(self, "cal_line_offset_entry"):
             self.cal_line_offset_entry.setText(f"{value:.2f}")
         self._cal_line_offset_locked_to_import = True
 

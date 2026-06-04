@@ -80,6 +80,17 @@ class DeferredParamsMixin:
         for widget in self._deferred_bound_widgets:
             self._deferred_mark_applied(widget)
 
+    def _set_deferred_field_by_attr(self, attr_name: str, value) -> None:
+        """Set a bound QLineEdit from import/code without pending (amber) styling."""
+        if value is None:
+            return
+        widget = getattr(self, attr_name, None)
+        if widget is None:
+            return
+        text = str(value).strip()
+        self._init_deferred_params()
+        self._deferred_set_line_edit(widget, text)
+
     def _apply_cal_survey_info_commit(self, _widget=None) -> None:
         if hasattr(self, "_apply_cal_lead_in_change"):
             self._apply_cal_lead_in_change()

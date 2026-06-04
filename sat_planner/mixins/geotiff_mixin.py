@@ -517,14 +517,18 @@ class GeoTIFFMixin:
                 self.backscatter_survey_speed_kn = float(params.get("backscatter_survey_speed_kn", self.backscatter_survey_speed_kn))
                 self.backscatter_swath_ang_deg = float(params.get("backscatter_swath_ang_deg", self.backscatter_swath_ang_deg))
                 self.backscatter_sv_mps = float(params.get("backscatter_sv_mps", self.backscatter_sv_mps))
-                if hasattr(self, "backscatter_lead_in_entry"):
-                    self.backscatter_lead_in_entry.setText(f"{self.backscatter_lead_in_m:g}")
-                if hasattr(self, "backscatter_survey_speed_entry"):
-                    self.backscatter_survey_speed_entry.setText(f"{self.backscatter_survey_speed_kn:g}")
-                if hasattr(self, "backscatter_swath_ang_entry"):
-                    self.backscatter_swath_ang_entry.setText(f"{self.backscatter_swath_ang_deg:g}")
-                if hasattr(self, "backscatter_sv_entry"):
-                    self.backscatter_sv_entry.setText(f"{self.backscatter_sv_mps:g}")
+                self._set_deferred_field_by_attr(
+                    "backscatter_lead_in_entry", f"{self.backscatter_lead_in_m:g}"
+                )
+                self._set_deferred_field_by_attr(
+                    "backscatter_survey_speed_entry", f"{self.backscatter_survey_speed_kn:g}"
+                )
+                self._set_deferred_field_by_attr(
+                    "backscatter_swath_ang_entry", f"{self.backscatter_swath_ang_deg:g}"
+                )
+                self._set_deferred_field_by_attr(
+                    "backscatter_sv_entry", f"{self.backscatter_sv_mps:g}"
+                )
             else:
                 self.backscatter_box_centerline = (points[0], points[-1])
                 self.backscatter_box_half_width_m = 0.0
@@ -539,9 +543,12 @@ class GeoTIFFMixin:
                     self.show_contours_checkbox.blockSignals(True)
                     self.show_contours_checkbox.setChecked(self.show_contours_var)
                     self.show_contours_checkbox.blockSignals(False)
-            if params.get("contour_interval_m") is not None and hasattr(self, "contour_interval_entry"):
+            if params.get("contour_interval_m") is not None:
                 try:
-                    self.contour_interval_entry.setText(f"{float(params.get('contour_interval_m')):g}")
+                    self._set_deferred_field_by_attr(
+                        "contour_interval_entry",
+                        f"{float(params.get('contour_interval_m')):g}",
+                    )
                 except Exception:
                     pass
 
@@ -608,10 +615,12 @@ class GeoTIFFMixin:
                 self.backscatter_depth_filter_checkbox.blockSignals(True)
                 self.backscatter_depth_filter_checkbox.setChecked(bool(self.backscatter_depth_filter_enabled_var))
                 self.backscatter_depth_filter_checkbox.blockSignals(False)
-            if hasattr(self, "backscatter_depth_min_m_entry"):
-                self.backscatter_depth_min_m_entry.setText(f"{self.backscatter_depth_min_m:g}")
-            if hasattr(self, "backscatter_depth_max_m_entry"):
-                self.backscatter_depth_max_m_entry.setText(f"{self.backscatter_depth_max_m:g}")
+            self._set_deferred_field_by_attr(
+                "backscatter_depth_min_m_entry", f"{self.backscatter_depth_min_m:g}"
+            )
+            self._set_deferred_field_by_attr(
+                "backscatter_depth_max_m_entry", f"{self.backscatter_depth_max_m:g}"
+            )
 
             if "backscatter_min_area_enabled_var" in params:
                 self.backscatter_min_area_enabled_var = bool(params.get("backscatter_min_area_enabled_var"))
@@ -624,8 +633,9 @@ class GeoTIFFMixin:
                 self.backscatter_min_area_checkbox.blockSignals(True)
                 self.backscatter_min_area_checkbox.setChecked(bool(self.backscatter_min_area_enabled_var))
                 self.backscatter_min_area_checkbox.blockSignals(False)
-            if hasattr(self, "backscatter_min_area_m2_entry"):
-                self.backscatter_min_area_m2_entry.setText(f"{self.backscatter_min_area_m2:g}")
+            self._set_deferred_field_by_attr(
+                "backscatter_min_area_m2_entry", f"{self.backscatter_min_area_m2:g}"
+            )
 
             if "backscatter_extent_filter_enabled_var" in params:
                 self.backscatter_extent_filter_enabled_var = bool(params.get("backscatter_extent_filter_enabled_var"))
@@ -643,10 +653,12 @@ class GeoTIFFMixin:
                 self.backscatter_extent_checkbox.blockSignals(True)
                 self.backscatter_extent_checkbox.setChecked(bool(self.backscatter_extent_filter_enabled_var))
                 self.backscatter_extent_checkbox.blockSignals(False)
-            if hasattr(self, "backscatter_min_width_m_entry"):
-                self.backscatter_min_width_m_entry.setText(f"{self.backscatter_min_width_m:g}")
-            if hasattr(self, "backscatter_min_height_m_entry"):
-                self.backscatter_min_height_m_entry.setText(f"{self.backscatter_min_height_m:g}")
+            self._set_deferred_field_by_attr(
+                "backscatter_min_width_m_entry", f"{self.backscatter_min_width_m:g}"
+            )
+            self._set_deferred_field_by_attr(
+                "backscatter_min_height_m_entry", f"{self.backscatter_min_height_m:g}"
+            )
 
             if "backscatter_percent_clip_enabled" in params:
                 self.backscatter_percent_clip_enabled = bool(params.get("backscatter_percent_clip_enabled"))
@@ -664,10 +676,12 @@ class GeoTIFFMixin:
                 self.backscatter_percent_clip_checkbox.blockSignals(True)
                 self.backscatter_percent_clip_checkbox.setChecked(bool(self.backscatter_percent_clip_enabled))
                 self.backscatter_percent_clip_checkbox.blockSignals(False)
-            if hasattr(self, "backscatter_percent_clip_min_entry"):
-                self.backscatter_percent_clip_min_entry.setText(f"{self.backscatter_percent_clip_min:g}")
-            if hasattr(self, "backscatter_percent_clip_max_entry"):
-                self.backscatter_percent_clip_max_entry.setText(f"{self.backscatter_percent_clip_max:g}")
+            self._set_deferred_field_by_attr(
+                "backscatter_percent_clip_min_entry", f"{self.backscatter_percent_clip_min:g}"
+            )
+            self._set_deferred_field_by_attr(
+                "backscatter_percent_clip_max_entry", f"{self.backscatter_percent_clip_max:g}"
+            )
 
             if "show_backscatter_var" in params:
                 self.show_backscatter_var = bool(params.get("show_backscatter_var"))
@@ -697,6 +711,8 @@ class GeoTIFFMixin:
                 self._draw_current_profile()
             self._update_backscatter_export_name_default()
             self._sync_backscatter_box_width_entry()
+            if hasattr(self, "_deferred_sync_all_bound_params"):
+                self._deferred_sync_all_bound_params()
             self._update_backscatter_area_button_states()
             if getattr(self, "backscatter_download_gmrt_checkbox", None) and self.backscatter_download_gmrt_checkbox.isChecked():
                 self._download_and_load_gmrt_after_backscatter_import()
@@ -1040,10 +1056,13 @@ class GeoTIFFMixin:
         except (TypeError, ValueError):
             return False
         self.geotiff_nan_value = cutoff
-        if update_entry and hasattr(self, "geotiff_nan_entry"):
-            self.geotiff_nan_entry.blockSignals(True)
-            self.geotiff_nan_entry.setText(f"{cutoff:g}")
-            self.geotiff_nan_entry.blockSignals(False)
+        if update_entry:
+            if hasattr(self, "_set_deferred_field_by_attr"):
+                self._set_deferred_field_by_attr("geotiff_nan_entry", f"{cutoff:g}")
+            elif hasattr(self, "geotiff_nan_entry"):
+                self.geotiff_nan_entry.blockSignals(True)
+                self.geotiff_nan_entry.setText(f"{cutoff:g}")
+                self.geotiff_nan_entry.blockSignals(False)
         return True
 
     def _apply_geotiff_nan_filter(self, data_array):
@@ -1062,10 +1081,13 @@ class GeoTIFFMixin:
         except (TypeError, ValueError):
             return False
         self.backscatter_nan_value = cutoff
-        if update_entry and hasattr(self, "backscatter_nan_entry"):
-            self.backscatter_nan_entry.blockSignals(True)
-            self.backscatter_nan_entry.setText(f"{cutoff:g}")
-            self.backscatter_nan_entry.blockSignals(False)
+        if update_entry:
+            if hasattr(self, "_set_deferred_field_by_attr"):
+                self._set_deferred_field_by_attr("backscatter_nan_entry", f"{cutoff:g}")
+            elif hasattr(self, "backscatter_nan_entry"):
+                self.backscatter_nan_entry.blockSignals(True)
+                self.backscatter_nan_entry.setText(f"{cutoff:g}")
+                self.backscatter_nan_entry.blockSignals(False)
         return True
 
     def _apply_backscatter_nan_filter(self, data_array):
@@ -2404,7 +2426,12 @@ class GeoTIFFMixin:
             if half_w is not None:
                 half_w = float(half_w)
                 if half_w > 0.0:
-                    self.backscatter_box_width_entry.setText(f"{2.0 * half_w:g}")
+                    if hasattr(self, "_set_deferred_field_by_attr"):
+                        self._set_deferred_field_by_attr(
+                            "backscatter_box_width_entry", f"{2.0 * half_w:g}"
+                        )
+                    else:
+                        self.backscatter_box_width_entry.setText(f"{2.0 * half_w:g}")
                     return
             self.backscatter_box_width_entry.clear()
         except (TypeError, ValueError):

@@ -633,6 +633,9 @@ class PerformanceMixin:
             n = idx + 1
             p_s = lines[idx][0]
             p_e = lines[idx][1]
+            fwd_az, back_az, _ = geod.inv(p_s[1], p_s[0], p_e[1], p_e[0])
+            heading_deg = float(fwd_az) % 360.0
+            reciprocal_deg = float(back_az) % 360.0
             sw_out = dist_m(p_s[0], p_s[1], p_e[0], p_e[1])
             sw_back = dist_m(p_e[0], p_e[1], p_s[0], p_s[1])
             if has_bist:
@@ -649,6 +652,8 @@ class PerformanceMixin:
             per_line_rows.append(
                 {
                     "n": n,
+                    "heading_deg": heading_deg,
+                    "reciprocal_deg": reciprocal_deg,
                     "sw_out": sw_out,
                     "sw_back": sw_back,
                     "b_out": b_out,
@@ -717,6 +722,8 @@ class PerformanceMixin:
         for row in per_line_rows:
             n = row["n"]
             t.append(f"Line {n}:\n")
+            t.append(f"  Heading: {row['heading_deg']:.1f}°\n")
+            t.append(f"  Reciprocal heading: {row['reciprocal_deg']:.1f}°\n")
             t.append(f"  P{n}S → P{n}E (swath out):     {row['sw_out']:.1f} m")
             if speed_mps > 0:
                 t.append(f"  |  {fmt_time_min_hr(leg_time_sec(row['sw_out']))}\n")
