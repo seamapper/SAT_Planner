@@ -80,18 +80,6 @@ class DeferredParamsMixin:
         for widget in self._deferred_bound_widgets:
             self._deferred_mark_applied(widget)
 
-    def _apply_performance_param_commit(self, _widget=None) -> None:
-        if hasattr(self, "_update_performance_ping_time"):
-            self._update_performance_ping_time()
-        if hasattr(self, "_update_performance_total_test_time"):
-            self._update_performance_total_test_time()
-        if hasattr(self, "_update_performance_line_length"):
-            self._update_performance_line_length()
-        if hasattr(self, "_update_performance_export_name"):
-            self._update_performance_export_name()
-        if hasattr(self, "_run_autoplot_performance_test_lines"):
-            self._run_autoplot_performance_test_lines()
-
     def _apply_cal_survey_info_commit(self, _widget=None) -> None:
         if hasattr(self, "_apply_cal_lead_in_change"):
             self._apply_cal_lead_in_change()
@@ -179,7 +167,6 @@ class DeferredParamsMixin:
             if w is not None and fn is not None:
                 self._bind_deferred_param(w, lambda _widget, f=fn: f())
 
-        perf_commit = self._apply_performance_param_commit
         for name in (
             "performance_central_lat_entry",
             "performance_central_lon_entry",
@@ -195,7 +182,10 @@ class DeferredParamsMixin:
         ):
             w = getattr(self, name, None)
             if w is not None:
-                self._bind_deferred_param(w, lambda _widget, f=perf_commit: f())
+                if hasattr(self, "_bind_performance_deferred_param"):
+                    self._bind_performance_deferred_param(w)
+                else:
+                    self._bind_deferred_param(w, self._apply_performance_param_commit)
 
         cal_export = getattr(self, "cal_export_name_entry", None)
         if cal_export is not None:

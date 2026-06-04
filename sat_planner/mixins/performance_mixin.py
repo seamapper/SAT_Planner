@@ -14,6 +14,7 @@ from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import QFileDialog, QDialog
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj
+from sat_planner.deferred_params import PENDING_LINEEDIT_STYLE, _NORMAL_STYLE_PROPERTY
 from sat_planner.performance_import_dialog import PerformanceLineAssignmentDialog
 from sat_planner.utils_geo import decimal_degrees_to_ddm, lat_lon_decimal_from_survey_csv_row
 from sat_planner.utils_ui import show_statistics_dialog
@@ -306,7 +307,83 @@ class PerformanceMixin:
             },
         )
         # endregion
-        self._schedule_autoplot_performance_test_lines(400)
+        if not getattr(self, "_performance_suppress_scheduled_autoplot", False):
+            self._schedule_autoplot_performance_test_lines(400)
+
+    def _cancel_performance_autoplot_timer(self):
+        timer = getattr(self, "_performance_autoplot_timer", None)
+        if timer is not None:
+            timer.stop()
+
+    def _bind_performance_deferred_param(self, widget):
+        """Bind a Performance QLineEdit; on commit refresh derived fields, export name, and replot."""
+        self._init_deferred_params()
+        key = id(widget)
+        if widget.property(_NORMAL_STYLE_PROPERTY) is None:
+            widget.setProperty(_NORMAL_STYLE_PROPERTY, widget.styleSheet() or "")
+        if widget not in self._deferred_bound_widgets:
+            self._deferred_bound_widgets.append(widget)
+
+        def _on_user_commit(_widget=None):
+            self._cancel_performance_autoplot_timer()
+            self._apply_performance_param_commit(_widget)
+
+        self._deferred_commit_handlers[key] = _on_user_commit
+
+        def _refresh_style():
+            if widget.signalsBlocked():
+                return
+            normal = widget.property(_NORMAL_STYLE_PROPERTY) or ""
+            if widget.text() != self._deferred_applied_values.get(key):
+                widget.setStyleSheet(PENDING_LINEEDIT_STYLE)
+            else:
+                widget.setStyleSheet(normal)
+
+        def _commit():
+            if widget.signalsBlocked():
+                return
+            if widget.text() == self._deferred_applied_values.get(key):
+                return
+            self._deferred_applied_values[key] = widget.text()
+            widget.setStyleSheet(widget.property(_NORMAL_STYLE_PROPERTY) or "")
+            _on_user_commit(widget)
+
+        widget.textChanged.connect(_refresh_style)
+        widget.editingFinished.connect(_commit)
+        widget.returnPressed.connect(_commit)
+        self._deferred_mark_applied(widget)
+
+    def _perf_set_deferred_field(self, attr_name, value):
+        """Set a Performance QLineEdit from import/code without pending (amber) styling."""
+        if value is None:
+            return
+        widget = getattr(self, attr_name, None)
+        if widget is None:
+            return
+        text = str(value).strip()
+        if hasattr(self, "_deferred_set_line_edit"):
+            self._deferred_set_line_edit(widget, text)
+        else:
+            widget.setText(text)
+
+    def _replot_performance_imported_geometry(self, quiet=False):
+        """Redraw map/profile from existing performance_test_lines_data (no param regeneration)."""
+        lines = getattr(self, "performance_test_lines_data", []) or []
+        if len(lines) != 4:
+            return False
+        if getattr(self, "geotiff_data_array", None) is None:
+            if not quiet:
+                self._show_message(
+                    "warning",
+                    "No GeoTIFF",
+                    "Load a GeoTIFF first to display performance test lines.",
+                )
+            return False
+        self.performance_profile_line = lines[0]
+        self._plot_survey_plan(preserve_view_limits=True)
+        if hasattr(self, "_draw_performance_profile"):
+            self._draw_performance_profile()
+        return True
 
     def _update_performance_center_from_pick(self, clicked_lat, clicked_lon):
         """Update Performance tab center fields from map pick-center click."""
@@ -335,7 +412,17 @@ class PerformanceMixin:
         self._performance_autoplot_timer.start(int(delay_ms))
 
     def _run_autoplot_performance_test_lines(self):
-        self._plot_performance_test_lines(quiet=True)
+        if not self._plot_performance_test_lines(quiet=True):
+            self._plot_performance_test_lines(quiet=False)
+
+    def _apply_performance_param_commit(self, _widget=None):
+        """Apply committed Performance fields: refresh derived values and replot from parameters."""
+        if hasattr(self, "_update_performance_ping_time"):
+            self._update_performance_ping_time()
+        if hasattr(self, "_update_performance_export_name"):
+            self._update_performance_export_name()
+        if not self._plot_performance_test_lines(quiet=True):
+            self._plot_performance_test_lines(quiet=False)
 
     def _update_performance_depth_from_pick(self, z_value):
         """Update Performance tab depth field from picked GeoTIFF z-value."""
@@ -395,7 +482,7 @@ class PerformanceMixin:
         depth_m = abs(zf)
         if depth_m <= 0:
             return
-        self.performance_test_depth_entry.setText(f"{depth_m:.1f}")
+        self._perf_set_deferred_field("performance_test_depth_entry", f"{depth_m:.1f}")
         if hasattr(self, "_update_performance_export_name"):
             self._update_performance_export_name()
 
@@ -432,15 +519,16 @@ class PerformanceMixin:
         """Plot 4 performance test lines from center/length/swell and draw profile for line 1.
 
         If quiet is True, skip message boxes (used for debounced auto-plot after parameter edits).
+        Returns True if lines were generated and drawn.
         """
         if not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
             if not quiet:
                 self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot plot test lines.")
-            return
+            return False
         if getattr(self, "geotiff_data_array", None) is None:
             if not quiet:
                 self._show_message("warning", "No GeoTIFF", "Load a GeoTIFF first to plot performance test lines.")
-            return
+            return False
 
         if hasattr(self, "performance_swell_direction_entry"):
             if not self.performance_swell_direction_entry.text().strip():
@@ -463,24 +551,24 @@ class PerformanceMixin:
                     "Invalid Inputs",
                     "Provide valid Central Latitude, Central Longitude, Swell Direction, Test Speed, and calculated Line Length (m).",
                 )
-            return
+            return False
 
         if line_length_m is None or not np.isfinite(line_length_m) or line_length_m <= 0:
             if not quiet:
                 self._show_message("warning", "Invalid Line Length", "Line Length (m) must be greater than zero.")
-            return
+            return False
         if not np.isfinite(center_lat) or not np.isfinite(center_lon):
             if not quiet:
                 self._show_message("warning", "Invalid Center", "Central Latitude/Longitude values are not valid.")
-            return
+            return False
         if bist_min < 0 or not np.isfinite(bist_min):
             if not quiet:
                 self._show_message("warning", "Invalid BIST Time", "BIST Time (min) must be zero or greater.")
-            return
+            return False
         if speed_kts < 0 or not np.isfinite(speed_kts):
             if not quiet:
                 self._show_message("warning", "Invalid Test Speed", "Test Speed (kts) must be zero or greater.")
-            return
+            return False
 
         geod = pyproj.Geod(ellps="WGS84")
         half_length = line_length_m / 2.0
@@ -507,6 +595,7 @@ class PerformanceMixin:
         self._plot_survey_plan(preserve_view_limits=True)
         if hasattr(self, "_draw_performance_profile"):
             self._draw_performance_profile()
+        return True
 
     def _build_performance_test_info_text(self, lines, bist_segs, speed_kts, turn_min):
         """Build the full Performance Test Info text block used by dialog and exported *_info.txt."""
@@ -885,7 +974,10 @@ class PerformanceMixin:
         if not hasattr(self, "performance_export_name_entry"):
             return
         try:
-            self.performance_export_name_entry.setText(self._build_performance_export_basename())
+            self._perf_set_deferred_field(
+                "performance_export_name_entry",
+                self._build_performance_export_basename(),
+            )
         except Exception:
             pass
 
@@ -1120,34 +1212,26 @@ class PerformanceMixin:
             all_pts.extend(ln)
         for seg in getattr(self, "performance_bist_segments_data", []) or []:
             all_pts.extend(seg)
+        self._cancel_performance_autoplot_timer()
+        self._performance_suppress_scheduled_autoplot = True
         try:
             if params:
-                if params.get("central_lat") is not None and hasattr(self, "performance_central_lat_entry"):
-                    self.performance_central_lat_entry.setText(str(params["central_lat"]))
-                if params.get("central_lon") is not None and hasattr(self, "performance_central_lon_entry"):
-                    self.performance_central_lon_entry.setText(str(params["central_lon"]))
+                self._perf_set_deferred_field("performance_central_lat_entry", params.get("central_lat"))
+                self._perf_set_deferred_field("performance_central_lon_entry", params.get("central_lon"))
                 td = params.get("test_depth_m")
                 if td is None:
                     td = params.get("test_depth")
-                if td is not None and hasattr(self, "performance_test_depth_entry"):
-                    self.performance_test_depth_entry.setText(str(td).strip())
-                if params.get("swell_direction_deg") is not None and hasattr(self, "performance_swell_direction_entry"):
-                    self.performance_swell_direction_entry.setText(str(params["swell_direction_deg"]))
-                if params.get("swath_angle_deg") is not None and hasattr(self, "performance_swath_angle_entry"):
-                    self.performance_swath_angle_entry.setText(str(params["swath_angle_deg"]))
-                if params.get("bist_time_min") is not None and hasattr(self, "performance_bist_time_entry"):
-                    self.performance_bist_time_entry.setText(str(params["bist_time_min"]))
-                if params.get("turn_time_min") is not None and hasattr(self, "performance_turn_time_entry"):
-                    self.performance_turn_time_entry.setText(str(params["turn_time_min"]))
-                if params.get("test_speed_kts") is not None and hasattr(self, "performance_test_speed_entry"):
-                    self.performance_test_speed_entry.setText(str(params["test_speed_kts"]))
-                if params.get("num_pings") is not None and hasattr(self, "performance_num_pings_entry"):
-                    self.performance_num_pings_entry.setText(str(params["num_pings"]))
-                if params.get("sound_velocity") is not None and hasattr(self, "performance_sound_velocity_entry"):
-                    self.performance_sound_velocity_entry.setText(str(params["sound_velocity"]))
-                en = params.get("export_name")
-                if en and hasattr(self, "performance_export_name_entry"):
-                    self.performance_export_name_entry.setText(str(en))
+                self._perf_set_deferred_field("performance_test_depth_entry", td)
+                self._perf_set_deferred_field(
+                    "performance_swell_direction_entry", params.get("swell_direction_deg")
+                )
+                self._perf_set_deferred_field("performance_swath_angle_entry", params.get("swath_angle_deg"))
+                self._perf_set_deferred_field("performance_bist_time_entry", params.get("bist_time_min"))
+                self._perf_set_deferred_field("performance_turn_time_entry", params.get("turn_time_min"))
+                self._perf_set_deferred_field("performance_test_speed_entry", params.get("test_speed_kts"))
+                self._perf_set_deferred_field("performance_num_pings_entry", params.get("num_pings"))
+                self._perf_set_deferred_field("performance_sound_velocity_entry", params.get("sound_velocity"))
+                self._perf_set_deferred_field("performance_export_name_entry", params.get("export_name"))
                 if params.get("geotiff_nan_value") is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
                     self._set_geotiff_nan_cutoff(params.get("geotiff_nan_value"), update_entry=True)
                 if "show_contours_var" in params:
@@ -1158,7 +1242,11 @@ class PerformanceMixin:
                         self.show_contours_checkbox.blockSignals(False)
                 if params.get("contour_interval_m") is not None and hasattr(self, "contour_interval_entry"):
                     try:
-                        self.contour_interval_entry.setText(f"{float(params.get('contour_interval_m')):g}")
+                        interval_text = f"{float(params.get('contour_interval_m')):g}"
+                        if hasattr(self, "_deferred_set_line_edit"):
+                            self._deferred_set_line_edit(self.contour_interval_entry, interval_text)
+                        else:
+                            self.contour_interval_entry.setText(interval_text)
                     except Exception:
                         pass
                 gtp = params.get("geotiff_path")
@@ -1170,23 +1258,30 @@ class PerformanceMixin:
                 all_lons = [p[1] for p in all_pts]
                 c_lat = (min(all_lats) + max(all_lats)) / 2.0
                 c_lon = (min(all_lons) + max(all_lons)) / 2.0
-                if hasattr(self, "performance_central_lat_entry"):
-                    self.performance_central_lat_entry.setText(f"{c_lat:.6f}")
-                if hasattr(self, "performance_central_lon_entry"):
-                    self.performance_central_lon_entry.setText(f"{c_lon:.6f}")
+                self._perf_set_deferred_field("performance_central_lat_entry", f"{c_lat:.6f}")
+                self._perf_set_deferred_field("performance_central_lon_entry", f"{c_lon:.6f}")
                 fl = lines[0]
                 lat1, lon1 = fl[0]
                 lat2, lon2 = fl[1]
                 try:
-                    fwd_az, _, dist = geod.inv(lon1, lat1, lon2, lat2)
-                    if hasattr(self, "performance_swell_direction_entry") and not self.performance_swell_direction_entry.text().strip():
-                        self.performance_swell_direction_entry.setText(f"{(fwd_az % 360):.1f}")
+                    fwd_az, _, _dist = geod.inv(lon1, lat1, lon2, lat2)
+                    if hasattr(self, "performance_swell_direction_entry"):
+                        if not self.performance_swell_direction_entry.text().strip():
+                            self._perf_set_deferred_field(
+                                "performance_swell_direction_entry", f"{(fwd_az % 360):.1f}"
+                            )
                 except Exception:
                     pass
-                if hasattr(self, "performance_export_name_entry") and not self.performance_export_name_entry.text().strip():
-                    self.performance_export_name_entry.setText(base_name)
+                if hasattr(self, "performance_export_name_entry"):
+                    if not self.performance_export_name_entry.text().strip():
+                        self._perf_set_deferred_field("performance_export_name_entry", base_name)
         except Exception as e:
             print(f"Warning: performance post-import field update: {e}")
+        finally:
+            self._performance_suppress_scheduled_autoplot = False
+
+        if hasattr(self, "_deferred_sync_all_bound_params"):
+            self._deferred_sync_all_bound_params()
 
         perf_lat, perf_lon = None, None
         if hasattr(self, "performance_central_lat_entry") and hasattr(self, "performance_central_lon_entry"):
@@ -1203,10 +1298,8 @@ class PerformanceMixin:
             all_lons = [p[1] for p in all_pts]
             perf_lat = (min(all_lats) + max(all_lats)) / 2.0
             perf_lon = (min(all_lons) + max(all_lons)) / 2.0
-            if hasattr(self, "performance_central_lat_entry"):
-                self.performance_central_lat_entry.setText(f"{perf_lat:.6f}")
-            if hasattr(self, "performance_central_lon_entry"):
-                self.performance_central_lon_entry.setText(f"{perf_lon:.6f}")
+            self._perf_set_deferred_field("performance_central_lat_entry", f"{perf_lat:.6f}")
+            self._perf_set_deferred_field("performance_central_lon_entry", f"{perf_lon:.6f}")
         if perf_lat is None or perf_lon is None:
             (la0, lo0), (la1, lo1) = lines[0][0], lines[0][1]
             perf_lat = (la0 + la1) / 2.0
@@ -1339,6 +1432,7 @@ class PerformanceMixin:
                 if swath is not None:
                     self.performance_test_lines_data = swath
                     self.performance_bist_segments_data = bist if bist else []
+                    self.performance_profile_line = swath[0]
                     self._perf_import_post_import(file_path)
                     return
                 self._show_message(
@@ -1356,6 +1450,7 @@ class PerformanceMixin:
                 if swath is not None:
                     self.performance_test_lines_data = swath
                     self.performance_bist_segments_data = bist if bist else []
+                    self.performance_profile_line = swath[0]
                     nan_cutoff = (geojson_data.get("properties") or {}).get("geotiff_nan_value")
                     if nan_cutoff is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
                         self._set_geotiff_nan_cutoff(nan_cutoff, update_entry=True)
@@ -1380,8 +1475,8 @@ class PerformanceMixin:
                                     pass
                         if spd is not None:
                             break
-                    if spd is not None and hasattr(self, "performance_test_speed_entry"):
-                        self.performance_test_speed_entry.setText(str(spd))
+                    if spd is not None:
+                        self._perf_set_deferred_field("performance_test_speed_entry", spd)
                     self._perf_import_post_import(file_path)
                     return
                 imported_lines = self._geojson_to_unassigned_segments(geojson_data)
