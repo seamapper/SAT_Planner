@@ -1537,7 +1537,7 @@ class GeoTIFFMixin:
 
         # Update dynamic resolution button
         if hasattr(self, 'dynamic_resolution_btn'):
-            self.dynamic_resolution_btn.setText(f"Dynamic Resolution: {status}")
+            self.dynamic_resolution_btn.setText(f"Dyn Res: {status}")
 
         # Update info text
         if hasattr(self, 'set_cal_info_text'):

@@ -17,7 +17,7 @@ SHADED_RELIEF_CMAP_OPTIONS = (
     ("CnBu", "BuGn_r"),
     ("Greys", "Greys_r"),
     ("RdYlBu", "RdYlBu"),
-    ("Spectral", "Spectral"),
+    ("Spectral", "Spectral_r"),
     ("hsv", "hsv_r"),
     ("jet", "jet"),
     ("winter", "winter"),

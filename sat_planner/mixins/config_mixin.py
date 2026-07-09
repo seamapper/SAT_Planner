@@ -404,6 +404,8 @@ class ConfigMixin:
         return [cmap_name for _label, cmap_name in SHADED_RELIEF_CMAP_OPTIONS]
 
     def _normalize_shaded_relief_cmap(self, cmap_name):
+        if cmap_name == "Spectral":
+            cmap_name = "Spectral_r"
         valid = self._valid_shaded_relief_cmap_names()
         if cmap_name in valid:
             return cmap_name
