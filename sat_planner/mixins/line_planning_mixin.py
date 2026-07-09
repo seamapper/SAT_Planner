@@ -574,6 +574,7 @@ class LinePlanningMixin:
                         getattr(self, "visualization_shapefile_paths", []) or []
                     ),
                 }
+                self._add_geotiff_viz_params_to_params(params_payload)
                 with open(params_json_path, "w", encoding="utf-8") as f:
                     json.dump(params_payload, f, indent=2)
             except Exception:
@@ -883,6 +884,7 @@ class LinePlanningMixin:
                         self.contour_interval_entry.setText(f"{float(sidecar_params.get('contour_interval_m')):g}")
                 except Exception:
                     pass
+                self._apply_geotiff_viz_params_from_params(sidecar_params)
                 try:
                     gtp = sidecar_params.get("geotiff_path")
                     if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):

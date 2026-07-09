@@ -908,6 +908,7 @@ class AdcpMixin:
                     else 200.0
                 ),
             }
+            self._add_geotiff_viz_params_to_params(meta)
             export_utils.remove_export_file(json_metadata_path)
             with open(json_metadata_path, "w", encoding="utf-8") as f:
                 json.dump(meta, f, indent=2)
@@ -1153,6 +1154,7 @@ class AdcpMixin:
             self._adcp_apply_show_direction_from_meta(params)
             if params.get("geotiff_nan_value") is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
                 self._set_geotiff_nan_cutoff(params.get("geotiff_nan_value"), update_entry=True)
+            self._apply_geotiff_viz_params_from_params(params)
             gtp = params.get("geotiff_path")
             if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                 self._load_geotiff_from_path(gtp)
@@ -1344,6 +1346,7 @@ class AdcpMixin:
                     self.adcp_circle2_start = tuple(params["circle2_start"])
                 if params.get("circle_diameter_m") is not None:
                     self._adcp_set_deferred_field("adcp_circle_diameter_entry", params.get("circle_diameter_m"))
+                self._apply_geotiff_viz_params_from_params(params)
                 self._adcp_rebuild_all_circles()
                 self._adcp_import_post_import(meta_path)
                 return

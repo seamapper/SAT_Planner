@@ -374,27 +374,66 @@ class PlottingMixin:
             if not has_any_colorbar and hasattr(self, '_axes_pos_with_colorbar'):
                 delattr(self, '_axes_pos_with_colorbar')
 
-    def _calculate_adaptive_vert_exag(self, data_array):
+    def _calculate_adaptive_vert_exag(self, data_array, inverted=False):
         """
         Calculate adaptive vertical exaggeration based on elevation range.
         Returns a vert_exag value that adapts to the relief in the data.
         """
         valid_data = data_array[~np.isnan(data_array)]
         if len(valid_data) == 0:
-            return 0.1  # Default if no valid data
+            table = getattr(self, "vert_exag_table", None) or self._default_vert_exag_table()
+            key = "shaded_relief_dyn" if inverted else "shaded_relief"
+            return table[0][key]
 
         elevation_range = np.max(valid_data) - np.min(valid_data)
+        if inverted:
+            return self._interp_shaded_relief_dyn_vert_exag(elevation_range)
+        return self._interp_shaded_relief_vert_exag(elevation_range)
 
-        if elevation_range < 20:
-            vert_exag = 1.5 + (elevation_range / 20) * 1.5  # 1.5 at 0m, 3.0 at 20m
-        elif elevation_range < 50:
-            vert_exag = 0.8 + ((elevation_range - 20) / 30) * 0.7  # 0.8 at 20m, 1.5 at 50m
-        elif elevation_range < 200:
-            vert_exag = 0.4 + ((elevation_range - 50) / 150) * 0.4  # 0.4 at 50m, 0.8 at 200m
-        else:
-            vert_exag = max(0.05, 0.1 - ((elevation_range - 200) / 800) * 0.05)  # 0.1 down to 0.05
+    def _interp_shaded_relief_vert_exag(self, elevation_range):
+        """Piecewise Shaded Relief vertical exaggeration from configured breakpoints."""
+        table = getattr(self, "vert_exag_table", None) or self._default_vert_exag_table()
+        breakpoints = [row["elevation_range"] for row in table]
+        values = [row["shaded_relief"] for row in table]
+        amps = (1.5, 0.7, 0.4)
 
-        return vert_exag
+        if elevation_range < breakpoints[1]:
+            span = breakpoints[1] - breakpoints[0]
+            if span <= 0:
+                return values[0]
+            return values[0] + (elevation_range - breakpoints[0]) / span * amps[0]
+        if elevation_range < breakpoints[2]:
+            span = breakpoints[2] - breakpoints[1]
+            if span <= 0:
+                return values[1]
+            return values[1] + (elevation_range - breakpoints[1]) / span * amps[1]
+        if elevation_range < breakpoints[3]:
+            span = breakpoints[3] - breakpoints[2]
+            if span <= 0:
+                return values[2]
+            return values[2] + (elevation_range - breakpoints[2]) / span * amps[2]
+        if elevation_range < breakpoints[4]:
+            span = breakpoints[4] - breakpoints[3]
+            if span <= 0:
+                return values[4]
+            decay = max(0.0, values[3] - values[4])
+            return max(values[4], values[3] - (elevation_range - breakpoints[3]) / span * decay)
+        return values[4]
+
+    def _interp_shaded_relief_dyn_vert_exag(self, elevation_range):
+        """Piecewise Shaded Relief Dyn vertical exaggeration from configured breakpoints."""
+        table = getattr(self, "vert_exag_table", None) or self._default_vert_exag_table()
+        breakpoints = [row["elevation_range"] for row in table]
+        values = [row["shaded_relief_dyn"] for row in table]
+
+        for idx in range(len(breakpoints) - 1):
+            if elevation_range < breakpoints[idx + 1]:
+                span = breakpoints[idx + 1] - breakpoints[idx]
+                if span <= 0:
+                    return values[idx]
+                frac = (elevation_range - breakpoints[idx]) / span
+                return values[idx] + frac * (values[idx + 1] - values[idx])
+        return values[-1]
 
     def _calculate_consistent_plot_limits(self):
         """Calculate plot limits that maintain consistent window size regardless of GeoTIFF dimensions."""
@@ -610,16 +649,20 @@ class PlottingMixin:
                     masked_data = np.ma.array(self.geotiff_data_array, mask=np.isnan(self.geotiff_data_array))
                     data_for_hillshade = np.nan_to_num(masked_data.filled(np.nanmin(self.geotiff_data_array)))
                     # Calculate adaptive vertical exaggeration based on elevation range
-                    vert_exag = self._calculate_adaptive_vert_exag(self.geotiff_data_array)
+                    # Hillshade-based display modes use the dyn V.E. curve.
+                    use_inverted_vert_exag = self.geotiff_display_mode in ("elevation_dyn", "hillshade_only", "slope")
+                    vert_exag = self._calculate_adaptive_vert_exag(
+                        self.geotiff_data_array, inverted=use_inverted_vert_exag)
                     # Log vertical exaggeration to activity log (once per plot cycle)
+                    vert_exag_label = "Hillshade vertical exaggeration (dyn)" if use_inverted_vert_exag else "Hillshade vertical exaggeration"
                     if hasattr(self, 'param_notebook'):
                         current_tab = self.param_notebook.currentIndex()
                         if current_tab == 0 and hasattr(self, 'set_cal_info_text'):
-                            self.set_cal_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                            self.set_cal_info_text(f"{vert_exag_label}: {vert_exag:.3f}")
                         elif current_tab == 1 and hasattr(self, 'set_ref_info_text'):
-                            self.set_ref_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                            self.set_ref_info_text(f"{vert_exag_label}: {vert_exag:.3f}")
                         elif current_tab == 2 and hasattr(self, 'set_line_info_text'):
-                            self.set_line_info_text(f"Hillshade vertical exaggeration: {vert_exag:.3f}")
+                            self.set_line_info_text(f"{vert_exag_label}: {vert_exag:.3f}")
                     self._vert_exag_logged_this_cycle = True
                     azimuths = [45, 135, 225, 315]
                     altitude = 45
@@ -637,9 +680,11 @@ class PlottingMixin:
                                                                 zorder=-2)  # Plot beneath everything
 
                     # Restored: Conditional plotting for elevation or slope overlay
-                    if self.geotiff_display_mode == "elevation":
+                    if self.geotiff_display_mode in ("elevation", "elevation_dyn"):
                         display_data = self.geotiff_data_array
-                        cmap = 'rainbow'  # Change to rainbow
+                        cmap = self._normalize_shaded_relief_cmap(
+                            getattr(self, "shaded_relief_cmap", None)
+                        )
 
                         # Calculate min/max for the displayed elevation data (ignoring NaNs) in the current plot window
                         xlim = self.ax.get_xlim()
@@ -712,7 +757,7 @@ class PlottingMixin:
                         display_data = np.clip(slope_degrees, 0, max_slope_for_cmap)
 
                         # Add hillshade underlay from a single direction (315, 45)
-                        vert_exag = self._calculate_adaptive_vert_exag(self.geotiff_data_array)
+                        vert_exag = self._calculate_adaptive_vert_exag(self.geotiff_data_array, inverted=True)
                         if not getattr(self, '_vert_exag_logged_this_cycle', True):
                             if hasattr(self, 'param_notebook'):
                                 current_tab = self.param_notebook.currentIndex()
@@ -1750,7 +1795,7 @@ class PlottingMixin:
             self._remove_colorbar('elevation_colorbar')
 
             # Restored: geotiff_display_mode reset
-            self.geotiff_display_mode = "elevation"
+            self.geotiff_display_mode = "elevation_dyn"
             # Update combo box if it exists
             if hasattr(self, 'elevation_slope_combo'):
                 self._update_display_mode_combo()

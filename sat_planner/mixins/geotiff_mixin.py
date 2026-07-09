@@ -23,7 +23,9 @@ from PyQt6.QtCore import Qt, QTimer
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+from sat_planner.dyn_vert_exag_dialog import DynVertExagDialog
 from sat_planner.constants import (
+    DEFAULT_SHADED_RELIEF_CMAP,
     GEOSPATIAL_LIBS_AVAILABLE,
     LineString,
     RasterioIOError,
@@ -537,6 +539,7 @@ class GeoTIFFMixin:
             # Restore saved NaN sentinel and backscatter criteria (when present).
             if params.get("geotiff_nan_value") is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
                 self._set_geotiff_nan_cutoff(params.get("geotiff_nan_value"), update_entry=True)
+            self._apply_geotiff_viz_params_from_params(params)
             if "show_contours_var" in params:
                 self.show_contours_var = bool(params.get("show_contours_var"))
                 if hasattr(self, "show_contours_checkbox"):
@@ -987,6 +990,7 @@ class GeoTIFFMixin:
                     else 200.0
                 ),
             }
+            self._add_geotiff_viz_params_to_params(payload)
             export_utils.remove_export_file(params_json_path)
             with open(params_json_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
@@ -1462,6 +1466,70 @@ class GeoTIFFMixin:
         if hasattr(self, '_panning_mode'):
             del self._panning_mode
 
+    def _open_dyn_vert_exag_dialog(self):
+        """Open dialog to edit dynamic vertical exaggeration breakpoint tables."""
+        defaults = self._default_vert_exag_table()
+        current = getattr(self, "vert_exag_table", None) or defaults
+        dialog = DynVertExagDialog(self, current, defaults)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        self.vert_exag_table = self._normalize_vert_exag_table(dialog.get_table_rows())
+        self._save_vert_exag_table()
+
+        if hasattr(self, "set_cal_info_text") and hasattr(self, "param_notebook") and self.param_notebook.currentIndex() == 0:
+            self.set_cal_info_text("Dynamic vertical exaggeration table updated.")
+        elif hasattr(self, "set_ref_info_text") and hasattr(self, "param_notebook") and self.param_notebook.currentIndex() == 1:
+            self.set_ref_info_text("Dynamic vertical exaggeration table updated.")
+        elif hasattr(self, "set_line_info_text") and hasattr(self, "param_notebook") and self.param_notebook.currentIndex() == 2:
+            self.set_line_info_text("Dynamic vertical exaggeration table updated.")
+
+        if self.geotiff_data_array is not None and self.hillshade_vs_slope_viz_mode == "hillshade":
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan()
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+
+    def _update_shaded_relief_cmap_button(self):
+        if hasattr(self, "shaded_relief_cmap_btn"):
+            label = self._shaded_relief_cmap_label()
+            self.shaded_relief_cmap_btn.setText(f"CMap: {label}")
+
+    def _cycle_shaded_relief_cmap(self):
+        """Cycle Shaded Relief elevation overlay colormap."""
+        cmap_names = self._valid_shaded_relief_cmap_names()
+        current = self._normalize_shaded_relief_cmap(getattr(self, "shaded_relief_cmap", DEFAULT_SHADED_RELIEF_CMAP))
+        try:
+            idx = cmap_names.index(current)
+        except ValueError:
+            idx = -1
+        self.shaded_relief_cmap = cmap_names[(idx + 1) % len(cmap_names)]
+        self._save_shaded_relief_cmap()
+        self._update_shaded_relief_cmap_button()
+
+        cmap_label = self._shaded_relief_cmap_label()
+        msg = f"Shaded Relief colormap: {cmap_label}"
+        if hasattr(self, "param_notebook"):
+            current_tab = self.param_notebook.currentIndex()
+            if current_tab == 0 and hasattr(self, "set_cal_info_text"):
+                self.set_cal_info_text(msg)
+            elif current_tab == 1 and hasattr(self, "set_ref_info_text"):
+                self.set_ref_info_text(msg)
+            elif current_tab == 2 and hasattr(self, "set_line_info_text"):
+                self.set_line_info_text(msg)
+
+        if self.geotiff_data_array is not None and self.geotiff_display_mode in ("elevation", "elevation_dyn"):
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan()
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+
     def _toggle_dynamic_resolution(self):
         """Toggle dynamic resolution feature on/off."""
         self.dynamic_resolution_enabled = not self.dynamic_resolution_enabled
@@ -1838,7 +1906,7 @@ class GeoTIFFMixin:
 
         # Map combo box text to internal display modes
         if mode_text == "Shaded Relief":
-            self.geotiff_display_mode = "elevation"
+            self.geotiff_display_mode = "elevation_dyn"
             self.hillshade_vs_slope_viz_mode = "hillshade"
         elif mode_text == "Shaded Slope":
             self.geotiff_display_mode = "slope"
@@ -1873,7 +1941,7 @@ class GeoTIFFMixin:
             return
 
         # Map internal display mode to combo box text
-        if self.geotiff_display_mode == "elevation":
+        if self.geotiff_display_mode in ("elevation", "elevation_dyn"):
             mode_text = "Shaded Relief"
         elif self.geotiff_display_mode == "slope":
             mode_text = "Shaded Slope"
@@ -2542,7 +2610,7 @@ class GeoTIFFMixin:
         else:
             self.hillshade_vs_slope_viz_mode = "hillshade"
             # Re-enable combo box
-            self.geotiff_display_mode = "elevation"  # Reset to elevation when going back to hillshade view
+            self.geotiff_display_mode = "elevation_dyn"  # Reset to Shaded Relief when going back to hillshade view
             if hasattr(self, 'elevation_slope_combo'):
                 self.elevation_slope_combo.setEnabled(True)
                 self._update_display_mode_combo()
@@ -4198,7 +4266,7 @@ class GeoTIFFMixin:
             return
         if not hasattr(self, 'geotiff_extent') or self.geotiff_extent is None:
             return
-        if not hasattr(self, 'geotiff_display_mode') or self.geotiff_display_mode != 'elevation':
+        if not hasattr(self, 'geotiff_display_mode') or self.geotiff_display_mode not in ('elevation', 'elevation_dyn'):
             return
         if not hasattr(self, 'geotiff_image_plot') or self.geotiff_image_plot is None:
             return

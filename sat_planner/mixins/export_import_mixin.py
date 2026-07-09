@@ -195,8 +195,9 @@ class ExportImportMixin:
                 ),
                 'offset_direction': self.offset_direction_var,
                 'line_length_multiplier': self.line_length_multiplier,
-                    'dist_between_lines_multiplier': self.dist_between_lines_multiplier
+                'dist_between_lines_multiplier': self.dist_between_lines_multiplier
             }
+            self._add_geotiff_viz_params_to_params(params)
 
             # Save to JSON file
             with open(file_path, 'w') as f:
@@ -256,6 +257,8 @@ class ExportImportMixin:
                     self.contour_interval_entry.setText(f"{float(params.get('contour_interval_m')):g}")
                 except Exception:
                     pass
+
+            self._apply_geotiff_viz_params_from_params(params)
 
             # Restore bathymetry GeoTIFF and optional backscatter GeoTIFF (if present).
             # This is best-effort: if geotiff paths are missing or incompatible, we continue.
@@ -691,7 +694,9 @@ class ExportImportMixin:
                     params['dist_between_lines_multiplier'] = self.dist_between_lines_multiplier
                 except:
                     params['dist_between_lines_multiplier'] = 1.0  # Default
-                
+
+                self._add_geotiff_viz_params_to_params(params)
+
                 # Save metadata
                 export_utils.remove_export_file(json_metadata_path)
                 with open(json_metadata_path, 'w', encoding='utf-8') as f:
@@ -1077,6 +1082,7 @@ class ExportImportMixin:
                     pmeta["line_length_m_label"] = ll.text().strip()
             except Exception:
                 pass
+            self._add_geotiff_viz_params_to_params(pmeta)
             export_utils.remove_export_file(json_metadata_path)
             with open(json_metadata_path, "w", encoding="utf-8") as f:
                 json.dump(pmeta, f, indent=2)

@@ -1256,6 +1256,7 @@ class PerformanceMixin:
                             self.contour_interval_entry.setText(interval_text)
                     except Exception:
                         pass
+                self._apply_geotiff_viz_params_from_params(params)
                 gtp = params.get("geotiff_path")
                 if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                     self._load_geotiff_from_path(gtp)

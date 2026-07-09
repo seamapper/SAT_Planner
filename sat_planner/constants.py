@@ -4,9 +4,25 @@ Single source of truth for version, config path, and geospatial availability.
 """
 import os
 
-__version__ = "2026.34"
+__version__ = "2026.35"
 
 CONFIG_FILENAME = os.path.join(os.path.expanduser("~"), ".cal_ref_planner_config.json")
+
+# Shaded Relief elevation overlay colormaps: (button label, matplotlib cmap name)
+SHADED_RELIEF_CMAP_OPTIONS = (
+    ("rainbow", "rainbow"),
+    ("viridis", "viridis"),
+    ("cividis", "cividis"),
+    ("turbo", "turbo"),
+    ("CnBu", "BuGn_r"),
+    ("Greys", "Greys_r"),
+    ("RdYlBu", "RdYlBu"),
+    ("Spectral", "Spectral"),
+    ("hsv", "hsv_r"),
+    ("jet", "jet"),
+    ("winter", "winter"),
+)
+DEFAULT_SHADED_RELIEF_CMAP = "rainbow"
 
 # Conditional imports for geospatial libraries (re-exported for use by SAT_Planner_PyQt)
 GEOSPATIAL_LIBS_AVAILABLE = True

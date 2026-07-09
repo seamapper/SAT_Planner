@@ -29,6 +29,7 @@ import re
 import threading
 import time
 
+from .constants import DEFAULT_SHADED_RELIEF_CMAP
 from . import __version__, CONFIG_FILENAME, GEOSPATIAL_LIBS_AVAILABLE
 from .utils_ui import show_message as _show_message_fn, ask_yes_no as _ask_yes_no_fn, ask_ok_cancel as _ask_ok_cancel_fn
 from .utils_geo import decimal_degrees_to_ddm
@@ -108,7 +109,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.geotiff_nan_value = -11000.0  # Values below this threshold are treated as NaN
 
         # Restored: Variable for controlling elevation/slope overlay
-        self.geotiff_display_mode = "elevation"  # "elevation" or "slope"
+        self.geotiff_display_mode = "elevation_dyn"  # Shaded Relief (dyn V.E. curve + elevation overlay)
 
         self.hillshade_vs_slope_viz_mode = "hillshade"  # "hillshade" or "slope_viz" (for main underlay)
 
@@ -527,6 +528,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.last_adcp_import_dir = os.path.expanduser("~")
         self.last_shapefile_dir = os.path.expanduser("~")
         self.export_type_options = self._default_export_type_options()
+        self.vert_exag_table = self._default_vert_exag_table()
+        self.shaded_relief_cmap = DEFAULT_SHADED_RELIEF_CMAP
         self._load_last_used_dir()
         self._load_last_geotiff_dir()
         self._load_last_backscatter_dir()
@@ -541,6 +544,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_last_adcp_import_dir()
         self._load_last_shapefile_dir()
         self._load_export_type_options()
+        self._load_vert_exag_table()
+        self._load_shaded_relief_cmap()
+        if hasattr(self, "_update_shaded_relief_cmap_button"):
+            self._update_shaded_relief_cmap_button()
         if hasattr(self, "_refresh_visualization_shapefile_button_state"):
             self._refresh_visualization_shapefile_button_state()
 
@@ -1005,11 +1012,23 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.elevation_slope_combo.currentTextChanged.connect(self._on_geotiff_display_mode_changed)
         self.elevation_slope_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         display_layout.addWidget(self.elevation_slope_combo)
+        self.dyn_vert_exag_btn = QPushButton("V.E.")
+        self.dyn_vert_exag_btn.clicked.connect(self._open_dyn_vert_exag_dialog)
+        self.dyn_vert_exag_btn.setMinimumWidth(0)
+        self.dyn_vert_exag_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        display_layout.addWidget(self.dyn_vert_exag_btn)
         self.dynamic_resolution_btn = QPushButton("Dynamic Resolution: ON")
         self.dynamic_resolution_btn.clicked.connect(self._toggle_dynamic_resolution)
         self.dynamic_resolution_btn.setMinimumWidth(0)
         self.dynamic_resolution_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         display_layout.addWidget(self.dynamic_resolution_btn)
+        self.shaded_relief_cmap_btn = QPushButton("CMap")
+        self.shaded_relief_cmap_btn.clicked.connect(self._cycle_shaded_relief_cmap)
+        self.shaded_relief_cmap_btn.setMinimumWidth(0)
+        self.shaded_relief_cmap_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        display_layout.addWidget(self.shaded_relief_cmap_btn)
+        if hasattr(self, "_update_shaded_relief_cmap_button"):
+            self._update_shaded_relief_cmap_button()
         display_layout.addStretch()
         geotiff_layout.addWidget(display_frame)
         geotiff_layout.addSpacing(3)

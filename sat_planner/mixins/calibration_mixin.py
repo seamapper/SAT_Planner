@@ -1382,6 +1382,7 @@ class CalibrationMixin:
                     else 200.0
                 )
                 params['visualization_shapefile_paths'] = list(getattr(self, 'visualization_shapefile_paths', []) or [])
+                self._add_geotiff_viz_params_to_params(params)
                 json_metadata_path = os.path.join(export_dir, f"{export_name}_params.json")
                 export_utils.remove_export_file(json_metadata_path)
                 with open(json_metadata_path, 'w', encoding='utf-8') as f:
@@ -1999,6 +2000,7 @@ class CalibrationMixin:
                             )
                         except Exception:
                             pass
+                    self._apply_geotiff_viz_params_from_params(params)
                 except Exception:
                     pass
             elif imported_geojson_nan_cutoff is not None and hasattr(self, '_set_geotiff_nan_cutoff'):

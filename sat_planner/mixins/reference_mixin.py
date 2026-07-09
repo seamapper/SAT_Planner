@@ -725,6 +725,7 @@ class ReferenceMixin:
                     self._depth_at_picked_point = None
                     if hasattr(self, 'central_pt_depth_value_label'):
                         self.central_pt_depth_value_label.setText("-")
+                self._apply_geotiff_viz_params_from_params(params)
             else:
                 if pyproj is not None:
                     geod = pyproj.Geod(ellps="WGS84")
@@ -1218,6 +1219,7 @@ class ReferenceMixin:
                         self._depth_at_picked_point = None
                         if hasattr(self, 'central_pt_depth_value_label'):
                             self.central_pt_depth_value_label.setText("-")
+                    self._apply_geotiff_viz_params_from_params(params)
                 else:
                     # Calculate parameters from imported lines
                     if pyproj is not None:
