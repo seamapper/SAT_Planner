@@ -5,6 +5,7 @@ import os
 import csv
 import json
 import datetime
+import re
 import xml.etree.ElementTree as ET
 import numpy as np
 from PyQt6.QtWidgets import (
@@ -366,8 +367,13 @@ class GeoTIFFMixin:
         show_statistics_dialog(self, "Survey Info", stats_text)
 
     def _update_backscatter_export_name_default(self):
-        """Set default backscatter export name: BS_YYYYMMDD_<mean depth along line>."""
+        """Set default backscatter export name: BS_YYYYMMDD_<mean depth along line>.
+        User-customized names are left untouched.
+        """
         if not hasattr(self, "backscatter_export_name_entry"):
+            return
+        current = (self.backscatter_export_name_entry.text() or "").strip()
+        if current and not re.match(r"^BS_\d{8}_-?\d+(?:\.\d+)?$", current, re.IGNORECASE):
             return
         date_str = datetime.datetime.now().strftime("%Y%m%d")
         mean_depth_m = 0.0

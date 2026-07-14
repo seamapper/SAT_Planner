@@ -5,6 +5,7 @@ Performance tab behavior: swath ping-time calculations and pick-center field upd
 import csv
 import json
 import os
+import re
 import time
 import xml.etree.ElementTree as ET
 
@@ -977,8 +978,20 @@ class PerformanceMixin:
 
         return f"perf_swell{swell_int}_depth{depth_int}m"
 
+    # Auto-generated Performance export name patterns (legacy and current).
+    _AUTO_PERFORMANCE_EXPORT_NAME_RE = re.compile(
+        r"^(?:Performance_\d+deg_[\d.]+_kts|perf_swell\d+_depth\d+m)$",
+        re.IGNORECASE,
+    )
+
     def _update_performance_export_name(self):
+        """Refresh Export Name when blank or still an auto-generated pattern.
+        User-customized names are left untouched.
+        """
         if not hasattr(self, "performance_export_name_entry"):
+            return
+        current = (self.performance_export_name_entry.text() or "").strip()
+        if current and not self._AUTO_PERFORMANCE_EXPORT_NAME_RE.match(current):
             return
         try:
             self._perf_set_deferred_field(

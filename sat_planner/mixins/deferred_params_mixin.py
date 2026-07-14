@@ -129,9 +129,11 @@ class DeferredParamsMixin:
                     )
                     self._bind_deferred_param(w, lambda _widget, f=fn: f())
 
+            # Amber highlight while typing; do not regenerate the name on Enter/blur
+            # (custom names must stick; auto names update from plan/depth/heading changes).
             export_entry = getattr(self, "export_name_entry", None)
-            if export_entry is not None and hasattr(self, "_update_export_name"):
-                self._bind_deferred_param(export_entry, lambda _w: self._update_export_name())
+            if export_entry is not None:
+                self._bind_deferred_param(export_entry, lambda _w: None)
 
         for name, handler in (
             ("geotiff_nan_entry", "_on_geotiff_nan_value_changed"),
@@ -189,7 +191,6 @@ class DeferredParamsMixin:
             "performance_bist_time_entry",
             "performance_test_speed_entry",
             "performance_turn_time_entry",
-            "performance_export_name_entry",
         ):
             w = getattr(self, name, None)
             if w is not None:
@@ -197,6 +198,11 @@ class DeferredParamsMixin:
                     self._bind_performance_deferred_param(w)
                 else:
                     self._bind_deferred_param(w, self._apply_performance_param_commit)
+
+        # Amber highlight while typing; do not regenerate export name on Enter/blur.
+        perf_export = getattr(self, "performance_export_name_entry", None)
+        if perf_export is not None:
+            self._bind_deferred_param(perf_export, lambda _w: None)
 
         cal_export = getattr(self, "cal_export_name_entry", None)
         if cal_export is not None:

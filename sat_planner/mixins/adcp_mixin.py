@@ -6,6 +6,7 @@ import csv
 import datetime
 import json
 import os
+import re
 
 import numpy as np
 from PyQt6.QtCore import Qt
@@ -73,8 +74,20 @@ class AdcpMixin:
         date_str = datetime.datetime.now().strftime("%Y%m%d")
         return f"ADCP_Cal_Circle{d_int}m_{date_str}"
 
+    # Auto-generated ADCP export name pattern (date suffix may change day-to-day).
+    _AUTO_ADCP_EXPORT_NAME_RE = re.compile(
+        r"^ADCP_Cal_Circle\d+m_\d{8}$",
+        re.IGNORECASE,
+    )
+
     def _update_adcp_export_name(self):
+        """Refresh Export Name when blank or still an auto-generated pattern.
+        User-customized names are left untouched.
+        """
         if not hasattr(self, "adcp_export_name_entry"):
+            return
+        current = (self.adcp_export_name_entry.text() or "").strip()
+        if current and not self._AUTO_ADCP_EXPORT_NAME_RE.match(current):
             return
         name = self._build_adcp_export_basename()
         if hasattr(self, "_deferred_set_line_edit"):

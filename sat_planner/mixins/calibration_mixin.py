@@ -2969,13 +2969,25 @@ class CalibrationMixin:
 
         return f"cal_depth{depth_int}m_pitch{heading}deg"
 
+    # Auto-generated Calibration export name patterns (legacy and current).
+    _AUTO_CALIBRATION_EXPORT_NAME_RE = re.compile(
+        r"^(?:Calibration_\d+m_\d+deg|cal_depth\d+m_pitch\d+deg)$",
+        re.IGNORECASE,
+    )
+
     def _update_cal_export_name_from_pitch_line(self):
-        """Update calibration export name from pitch-line mean depth and heading."""
+        """Update calibration export name from pitch-line mean depth and heading.
+        User-customized names are left untouched (unless import-locked, which
+        also skips updates).
+        """
         if getattr(self, "_cal_export_name_locked_to_params", False):
             return
         if not hasattr(self, "cal_export_name_entry"):
             return
         if not hasattr(self, "pitch_line_points") or len(self.pitch_line_points) != 2:
+            return
+        current = (self.cal_export_name_entry.text() or "").strip()
+        if current and not self._AUTO_CALIBRATION_EXPORT_NAME_RE.match(current):
             return
         try:
             self.cal_export_name_entry.setText(self._build_calibration_export_basename())

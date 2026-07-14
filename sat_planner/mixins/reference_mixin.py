@@ -2229,7 +2229,13 @@ class ReferenceMixin:
         return f"acc_depth{depth_int}m_cross{cross_int}deg"
 
     def _update_export_name(self):
+        """Refresh Export Name from depth/crossline heading when blank or still
+        an auto-generated pattern. User-customized names are left untouched.
+        """
         if not hasattr(self, "export_name_entry"):
+            return
+        current = (self.export_name_entry.text() or "").strip()
+        if current and not self._AUTO_ACCURACY_EXPORT_NAME_RE.match(current):
             return
         try:
             self.export_name_entry.setText(self._build_accuracy_export_basename())
@@ -2237,13 +2243,8 @@ class ReferenceMixin:
             pass
 
     def _regenerate_auto_accuracy_export_name(self):
-        """If the current Export Name is blank or matches an auto-generated
-        pattern, rebuild it from central depth and crossline heading.
+        """Rebuild auto Export Name after Accuracy import when needed.
         User-customized names are left untouched.
-        Intended to be called at the end of an Accuracy import, after depth,
-        heading, and (when available) the GeoTIFF have been restored from the
-        saved params, so legacy saved names that encoded line spacing get
-        migrated to the new depth-based form.
 
         If ``_depth_at_picked_point`` is not set (older surveys saved without
         ``central_point_depth_m`` in ``*_params.json``), this method also tries
