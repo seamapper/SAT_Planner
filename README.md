@@ -27,6 +27,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **Elevation Profiles**: View elevation and slope profiles for drawn lines
 - **Activity Log**: Collapsible side panel below the map (expand/collapse strip)
 - **Export Capabilities**: Export survey plans in CSV, Shapefile, GeoJSON, asciiplan, LNW, PNG (high and/or low resolution), and companion text/statistics formats (varies by tab)
+- **Export Name**: Suggested basenames update automatically when blank or still matching the auto-generated pattern; **custom Export Names are preserved** and are not overwritten on Enter/blur or when plan parameters regenerate (Accuracy, Performance, Calibration, ADCP, Backscatter)
 - **Export Types** dialog (button on import/export panels): Toggle optional export products by format; choices are saved in `~/.cal_ref_planner_config.json` under `export_type_options`
 - **Survey Import**: Import calibration, accuracy, performance, and line plans from DDD, DMS, DMM, LNW, CSV, GeoJSON, GPX, shapefile (`.shp`), or GeoPackage (`.gpkg`) (performance, calibration, and accuracy imports use an assignment dialog when geometry is ambiguous; shapefile/GPKG geometry is reprojected from its source CRS to WGS84 automatically)
 - **EEZ Overlay**: EEZ layer with opacity control (default 80%) and hover `GEONAME` tooltip lookup
@@ -53,6 +54,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Comprehensive statistics with survey time, transit time, and turn time breakdowns
 - Validation warning when heading line offset exceeds 2x shallowest depth
 - Export calibration survey plans with detailed statistics (shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`)
+- Default **Export Name** format: `cal_depth<m>m_pitch<deg>deg`; custom names are preserved when the pitch line / offset updates
 
 ### Accuracy Survey Planning
 - Generate parallel survey lines with customizable parameters
@@ -64,6 +66,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Calculate comprehensive survey statistics with time breakdowns
 - Survey time breakdown showing main lines, crossline, transit, and turn times
 - Export accuracy survey plans with detailed statistics (shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`)
+- Default **Export Name** format: `acc_depth<m>m_cross<deg>deg`; a typed custom name is kept unless Reset clears the plan
 
 ### Performance (Swath) Survey Planning
 - **Purpose**: Support **swath performance** evaluation with **four legs** on headings **0°, 45°, 90°, and 135° relative to swell direction** (different aspects into/across/with/oblique to the seas). Each leg combines **swath collection** along the main segment (P1S–P4E) with **RX noise BIST** on the map extension from each line end when BIST time is non-zero.
@@ -72,7 +75,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - In **Calculated Time & Distance**, total test time is shown on one line (`min` + `hr`) and line length is shown on one line (`m`, `km`, `nm`)
 - **Auto-plot** (debounced) after editing test parameters or after performance pick-center when inputs are valid.
 - **Profile** (Performance tab): line 1 swath + first BIST segment; **sienna** / **gold** to match the map.
-- **Performance Import/Export**: same product family as Accuracy exports plus `{name}_performance_params.json`; optional **Download GMRT** on import; assignment dialog when import geometry is ambiguous. Default export basename: `Performance_<swell_direction>deg_<speed>_kts`.
+- **Performance Import/Export**: same product family as Accuracy exports plus `{name}_performance_params.json`; optional **Download GMRT** on import; assignment dialog when import geometry is ambiguous. Default export basename: `perf_swell<deg>_depth<m>m` (custom Export Names are preserved)
 - **Map markers**: **Perf Central Pt** vs **Acc Central Pt** (green accuracy center only when an accuracy plan is loaded).
 
 ### Line Planning
@@ -96,6 +99,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Centerline with lead-in/lead-out and area width planning; map labels include `BS1LI`, `BS1S`, `BS1E`, `BS1LO`
 - **Show Area Stats** and **Survey Info** / `*_info.txt` include line/area metrics, **Normalization Area Width** (full width = `2 × half_width_m`), and waypoint sections in DMM/DDD
 - Import/export backscatter line products (respects **Export Types** toggles, including map/profile PNG high and low); exports include `{name}_backscatter_stats.png` (+ optional `*_low` copy) when map PNG export is enabled
+- Default **Export Name** format: `BS_YYYYMMDD_<mean depth>`; custom names are preserved when geometry regenerates the suggested name
 - Optional GMRT download after import
 
 ### GeoTIFF Visualization
@@ -174,7 +178,7 @@ The application is organized as a package plus a launcher:
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `SAT_Planner_v2026.35.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
+- `SAT_Planner_v2026.36.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
 - `SAT_Planner.app` (macOS) — if available
 
 No installation required - just run the executable or app bundle.
@@ -360,6 +364,7 @@ Open **Export Types** on the tab’s import/export panel to enable or disable:
 Backscatter **map** PNG toggles also control `{name}_backscatter_stats.png` (+ optional `*_backscatter_stats_low.png`). Legacy configs that only stored `map_png` / `profiles_png` are migrated to set both high and low to the former value.
 
 ### Other export notes
+- **Export Name preservation**: Auto-suggested names update only when the field is blank or still matches a known auto pattern (e.g. `acc_depth…`, `perf_swell…`, `cal_depth…`, `ADCP_Cal_Circle…`, `BS_YYYYMMDD_…`). User-edited custom names are not reset on Enter/blur or when related plan parameters regenerate.
 - **CSV (DDD/DMM/DMS)**: Row format: line number, line name, point label, lat, lon (decimal degrees in file; DMM/DMS writers convert as needed)
 - **Calibration `{name}_params.json`**: **`survey_speed`**, **`turn_time`**, **`lead_in_m`**, **`line_offset`**, **`export_name`**, plus optional **`vert_exag_table`** and **`shaded_relief_cmap`**
 - **Accuracy `{name}_params.json`**: Includes **`geotiff_path`**, survey parameters, and optional **`vert_exag_table`** / **`shaded_relief_cmap`**
@@ -406,6 +411,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.36**: Export Name fields no longer snap back to the default suggested basename after editing. **Accuracy** and **Performance** no longer regenerate the name on Enter/blur; **Calibration**, **ADCP**, and **Backscatter** keep custom names when pitch/offset, diameter, or geometry updates would previously overwrite them. Blank names and names that still match the auto-generated pattern continue to refresh as parameters change.
 - **v2026.35**: GeoTIFF display and visualization controls. **Shaded Relief** is now the single elevation-overlay mode (former **Shaded Relief Dyn** behavior): dynamic V.E. curve with multidirectional hillshade and semi-transparent elevation colors. Display dropdown: Shaded Relief, Shaded Slope, Hillshade, Slope. New **V.E.** button opens an editable breakpoint table (elevation range minima and Shaded Relief values; Shaded Relief Dyn auto-derived); defaults and user edits persist in `~/.cal_ref_planner_config.json` and survey `*_params.json`. New **CMap** button cycles Shaded Relief elevation colormaps (rainbow default; viridis, cividis, turbo, inverted CnBu/Greys/Spectral/hsv, RdYlBu, jet, winter); colormap persists between sessions and in params sidecars. **Hillshade** and **Shaded Slope** hillshade layers use the same dynamic V.E. curve as Shaded Relief. **Dynamic Resolution** button label shortened to **Dyn Res:** ON/OFF; **V.E.** button uses compact fixed width.
 - **v2026.31**: Calibration tab layout cleanup and post-import zoom fix. The pitch-line, heading-line, and roll-line controls in the Calibration parameter panel are now paired on three compact rows: **Draw Pitch Line** + **Edit Pitch Line** share a row at 50/50 width, **Add Heading Lines** + **Line Offset (m)** share the next row at 50/50, and **Draw Roll Line** + **Edit Roll Line** share the row below at 50/50. The `Heading Line Offset (m)` label was shortened to **`Line Offset (m)`** to match the more compact column. Button text in active modes was simplified: `Draw a Pitch Line` -> `Draw Pitch Line`, `Draw a Roll Line` -> `Draw Roll Line`, `Drawing Pitch Line: Click Start Point` -> `Left Click Pitch Start Point`, `Drawing Pitch Line: Click End Point` -> `Click Pitch End Point`, `Drawing Roll Line: Click Start Point` -> `Click Roll Line Start Point`, `Drawing Roll Line: Click End Point` -> `Click Roll Line End Point`, and the in-edit labels `Click to Stop Editing Pitch Line` / `Click to Stop Editing Roll Line` were both shortened to `Click to Stop Editing`. The Draw Pitch Line, Draw Roll Line, Edit Pitch Line, and Edit Roll Line buttons now share a single visual convention while their mode is active: orange + bold text (`rgb(255, 165, 0)`, `font-weight: bold`), reverting to the default stylesheet when the action completes or is cancelled. While Edit mode is active for either pitch or roll, the other "next logical action" buttons (e.g. Add Heading Lines / Draw Roll Line) have their orange + bold highlighting snapshotted and reset to neutral; on exit those snapshots are restored so the highlighting comes back exactly as it was. The post-import GMRT zoom now lands on the bounds of the imported plan instead of the bounds of the downloaded GMRT grid: `_load_geotiff_from_path` accepts `auto_zoom_to_geotiff=False`, the GMRT post-download callback uses it, and a new `_zoom_to_tab_plan(tab_index=...)` dispatcher routes to the per-tab zoom helper (Calibration -> `_zoom_to_any_lines`, Accuracy -> `_zoom_to_plan`, Line -> `_zoom_to_line`, Backscatter -> a new `_zoom_to_backscatter_line_or_area`, Performance -> `_zoom_to_performance_lines`). The tab that started the import is recorded when the download begins, so the right zoom still fires even if the user switches tabs while the download is running.
 - **v2026.30**: GMRT-download UX and Calibration-import polish. When **Download GMRT** is enabled and an import-survey button kicks off a download, the per-tab import button now repaints in orange and changes its label to **"Downloading GMRT - Click to Cancel"** for the duration of the transfer; the button stays enabled, so a second click cancels the in-flight worker, deletes any partial GeoTIFF, and restores the button to its normal state. The same cancel/restore path runs on transport failures, with the user notified via popup. Calibration import now also sources the **Heading Line Offset** from the imported geometry: if the imported file contains a pitch line plus heading line(s) and no `line_offset` is supplied in a `*_params.json` sidecar, SAT Planner computes the perpendicular distance from the pitch line to the heading-line midpoints (via `pyproj.Geod`) and uses that value, "locking" the offset entry so a subsequent GeoTIFF or GMRT load does not overwrite it with the depth-driven recommendation. The export-name composer reads the locked value, so the suggested name becomes `Calibration_<actual_offset>m_<heading>deg` instead of `Calibration_0m_<heading>deg`. The lock releases automatically as soon as the user picks a new pitch line, edits an existing pitch line, or starts a fresh calibration, at which point the field returns to depth-based recommendation behavior; the Pitch Line Info depth labels are still refreshed from the GeoTIFF either way.
