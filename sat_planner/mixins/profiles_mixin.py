@@ -71,7 +71,7 @@ class ProfilesMixin:
         selection = combo.currentText().strip() if combo is not None else "Crossline"
         segment = None
         title = "Crossline Elevation Profile"
-        color = "darkorchid"
+        color = "navy"
 
         if selection.startswith("Main Line"):
             try:
@@ -460,7 +460,7 @@ class ProfilesMixin:
         self._profile_dists = dists
         self._profile_elevations = elevations
         self._profile_slopes = slopes
-        self.profile_ax.plot(dists, elevations, color='darkorchid', lw=1, label='Elevation')
+        self.profile_ax.plot(dists, elevations, color='navy', lw=1, label='Elevation')
         if self._show_slope_on_profile():
             slope_ax = self.profile_ax.twinx()
             slope_ax.plot(dists, slopes, color='teal', lw=1, linestyle='--', label='Slope (deg)')

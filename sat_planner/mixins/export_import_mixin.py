@@ -558,7 +558,7 @@ class ExportImportMixin:
 
                 # Crossline profile first (when crossline is enabled/present in the active plan)
                 if include_crossline and self.cross_line_data and len(self.cross_line_data) == 2:
-                    self._draw_segment_profile(self.cross_line_data, "Crossline Elevation Profile", "darkorchid")
+                    self._draw_segment_profile(self.cross_line_data, "Crossline Elevation Profile", "navy")
                     crossline_profile_png_path = os.path.join(export_dir, f"{export_name}_profile_crossline.png")
                     self._save_export_profile_png(
                         crossline_profile_png_path, dpi=300, bbox_inches='tight', facecolor='white'

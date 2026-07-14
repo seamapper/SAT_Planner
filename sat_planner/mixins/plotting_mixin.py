@@ -1177,17 +1177,17 @@ class PlottingMixin:
             if self.cross_line_data:
                 latitudes = [p[0] for p in self.cross_line_data]
                 longitudes = [p[1] for p in self.cross_line_data]
-                self.ax.plot(longitudes, latitudes, color='darkorchid', linestyle='-', linewidth=1.5,
+                self.ax.plot(longitudes, latitudes, color='navy', linestyle='-', linewidth=1.5,
                              label='Crossline')
 
                 # Add labels for crossline points
                 self.ax.annotate('CLS', (longitudes[0], latitudes[0]),
                                 xytext=(5, 5), textcoords='offset points',
-                                fontsize=8, color='darkorchid', weight='bold',
+                                fontsize=8, color='navy', weight='bold',
                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
                 self.ax.annotate('CLE', (longitudes[1], latitudes[1]),
                                 xytext=(5, 5), textcoords='offset points',
-                                fontsize=8, color='darkorchid', weight='bold',
+                                fontsize=8, color='navy', weight='bold',
                                 bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
             # Plot accuracy central point only when an accuracy plan has set it (not shared with performance central)
@@ -1336,7 +1336,7 @@ class PlottingMixin:
                     latitudes = [p[0] for p in line]
                     longitudes = [p[1] for p in line]
                     label = 'Heading1' if i == 0 else 'Heading2'
-                    heading_color = 'hotpink' if i == 0 else 'deeppink'
+                    heading_color = 'darkgreen' if i == 0 else 'deeppink'
                     self.ax.plot(longitudes, latitudes, color=heading_color, linewidth=2, linestyle='-', marker='x', label=label)
                     if callable(build_cal_points) and cal_lead_in_m > 0:
                         heading_key = 'heading1' if i == 0 else 'heading2'
