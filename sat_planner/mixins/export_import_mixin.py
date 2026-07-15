@@ -7,7 +7,7 @@ import datetime
 import json
 import os
 
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtWidgets import QFileDialog, QDialogButtonBox, QPushButton
 
 from sat_planner import GEOSPATIAL_LIBS_AVAILABLE, decimal_degrees_to_ddm
 from sat_planner.constants import LineString, fiona, pyproj
@@ -21,6 +21,39 @@ except ImportError:
 
 class ExportImportMixin:
     """Mixin for save/load survey parameters and export survey files."""
+
+    def _select_export_directory(self, start_dir=None, title="Select Export Directory"):
+        """Directory picker with an Export Types button; returns path or None."""
+        start = start_dir or getattr(self, "last_export_dir", None) or os.path.expanduser("~")
+        if not os.path.isdir(start):
+            start = os.path.expanduser("~")
+
+        dialog = QFileDialog(self, title, start)
+        dialog.setFileMode(QFileDialog.FileMode.Directory)
+        dialog.setOption(QFileDialog.Option.ShowDirsOnly, True)
+        dialog.setOption(QFileDialog.Option.DontUseNativeDialog, True)
+
+        export_types_btn = QPushButton("Export Types")
+        if hasattr(self, "_show_export_type_dialog"):
+            export_types_btn.clicked.connect(self._show_export_type_dialog)
+        else:
+            export_types_btn.setEnabled(False)
+
+        button_box = dialog.findChild(QDialogButtonBox)
+        if button_box is not None:
+            button_box.addButton(export_types_btn, QDialogButtonBox.ButtonRole.ActionRole)
+        else:
+            layout = dialog.layout()
+            if layout is not None:
+                layout.addWidget(export_types_btn)
+
+        if dialog.exec() != QFileDialog.DialogCode.Accepted:
+            return None
+        selected = dialog.selectedFiles()
+        if not selected:
+            return None
+        path = selected[0]
+        return path if os.path.isdir(path) else None
 
     def _gpkg_path_for_shapefile(self, shapefile_path):
         """Return the .gpkg companion path for a given shapefile path."""
@@ -329,7 +362,7 @@ class ExportImportMixin:
             self._show_message("warning","No Data", "No survey lines to export. Generate them first.")
             return
 
-        export_dir = QFileDialog.getExistingDirectory(self, "Select Export Directory", self.last_export_dir)
+        export_dir = self._select_export_directory(self.last_export_dir)
         if not export_dir:
             return
         self.last_export_dir = export_dir
@@ -835,7 +868,7 @@ class ExportImportMixin:
             export_name = export_name.replace(c, "_")
         export_name = export_name.strip().strip(".")
 
-        export_dir = QFileDialog.getExistingDirectory(self, "Select Export Directory", self.last_export_dir)
+        export_dir = self._select_export_directory(self.last_export_dir)
         if not export_dir:
             return
         self.last_export_dir = export_dir

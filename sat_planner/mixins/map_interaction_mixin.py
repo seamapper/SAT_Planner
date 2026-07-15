@@ -83,16 +83,32 @@ class MapInteractionMixin:
             self.backscatter_draw_info_text = None
 
     def _update_measurement_button_state(self):
-        """Refresh measurement button text/style from mode state."""
+        """Refresh measurement tool icon from mode state."""
         btn = getattr(self, "measurement_tool_btn", None)
         if btn is None:
             return
-        if getattr(self, "measurement_tool_mode", False):
+        active = bool(getattr(self, "measurement_tool_mode", False))
+        icon_off = getattr(self, "_measurement_icon_off", None)
+        icon_on = getattr(self, "_measurement_icon_on", None)
+        if icon_off is not None and icon_on is not None:
+            btn.setIcon(icon_on if active else icon_off)
+        elif active:
             btn.setText("Click to Stop")
             btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
         else:
             btn.setText("Measurement Tool")
             btn.setStyleSheet("")
+        self._update_bottom_strip_prompt()
+
+    def _update_bottom_strip_prompt(self):
+        """Show or clear the left-side bottom-strip user prompt."""
+        label = getattr(self, "bottom_strip_prompt_label", None)
+        if label is None:
+            return
+        if getattr(self, "measurement_tool_mode", False):
+            label.setText("Click the Measure icon on the map to deactivate.")
+        else:
+            label.setText("")
 
     def _clear_measurement_line_overlay(self):
         """Remove temporary/final measurement line from plot."""

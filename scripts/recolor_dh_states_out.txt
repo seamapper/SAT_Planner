@@ -1,0 +1,10 @@
+Master from C:\Users\pjohnson\.cursor\projects\c-Users-pjohnson-Dropbox-Documents-Python-SAT-Planner\assets\_distance_heading_master_cyan.png size=(1024, 1024) mode=RGB
+Building OFF (light grey)...
+  converted 136435 accent pixels
+Wrote C:\Users\pjohnson\.cursor\projects\c-Users-pjohnson-Dropbox-Documents-Python-SAT-Planner\assets\distance_heading_map_icon.png
+Building ON (orange)...
+  converted 136435 accent pixels
+Wrote C:\Users\pjohnson\.cursor\projects\c-Users-pjohnson-Dropbox-Documents-Python-SAT-Planner\assets\distance_heading_map_icon_active.png
+Pair dimensions match: (1024, 1024)
+Copied to media/
+Cyan master kept at C:\Users\pjohnson\.cursor\projects\c-Users-pjohnson-Dropbox-Documents-Python-SAT-Planner\assets\_distance_heading_master_cyan.png

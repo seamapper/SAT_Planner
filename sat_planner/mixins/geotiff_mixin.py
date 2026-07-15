@@ -738,10 +738,8 @@ class GeoTIFFMixin:
         if hasattr(self, "backscatter_export_name_entry"):
             export_name = self.backscatter_export_name_entry.text().strip() or export_name
             self.backscatter_export_name_entry.setText(export_name)
-        export_dir = QFileDialog.getExistingDirectory(
-            self,
-            "Select Export Directory",
-            getattr(self, "last_backscatter_export_dir", None) or self.last_export_dir,
+        export_dir = self._select_export_directory(
+            getattr(self, "last_backscatter_export_dir", None) or self.last_export_dir
         )
         if not export_dir:
             return
@@ -1502,7 +1500,7 @@ class GeoTIFFMixin:
     def _update_shaded_relief_cmap_button(self):
         if hasattr(self, "shaded_relief_cmap_btn"):
             label = self._shaded_relief_cmap_label()
-            self.shaded_relief_cmap_btn.setText(f"CMap: {label}")
+            self.shaded_relief_cmap_btn.setText(f"Color Map: {label}")
 
     def _cycle_shaded_relief_cmap(self):
         """Cycle Shaded Relief elevation overlay colormap."""
@@ -2086,25 +2084,76 @@ class GeoTIFFMixin:
         except Exception:
             pass  # Silently handle errors
 
-    def _on_slope_overlay_min_changed(self):
+    def _on_slope_overlay_min_changed(self, band_idx=0):
         """Handle slope overlay min entry change with a short typing debounce."""
-        if not hasattr(self, '_slope_overlay_min_update_timer'):
-            self._slope_overlay_min_update_timer = QTimer()
-            self._slope_overlay_min_update_timer.setSingleShot(True)
-            self._slope_overlay_min_update_timer.timeout.connect(self._apply_slope_overlay_min_changed)
-        self._slope_overlay_min_update_timer.start(450)
+        timers = getattr(self, "_slope_overlay_min_update_timers", None)
+        if timers is None:
+            self._slope_overlay_min_update_timers = {}
+            timers = self._slope_overlay_min_update_timers
+        if band_idx not in timers:
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda i=band_idx: self._apply_slope_overlay_bound_changed(i))
+            timers[band_idx] = timer
+        timers[band_idx].start(450)
 
-    def _apply_slope_overlay_min_changed(self):
-        """Apply slope overlay min updates after debounce delay."""
+    def _on_slope_overlay_max_changed(self, band_idx=0):
+        """Handle slope overlay max entry change with a short typing debounce."""
+        timers = getattr(self, "_slope_overlay_max_update_timers", None)
+        if timers is None:
+            self._slope_overlay_max_update_timers = {}
+            timers = self._slope_overlay_max_update_timers
+        if band_idx not in timers:
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda i=band_idx: self._apply_slope_overlay_bound_changed(i))
+            timers[band_idx] = timer
+        timers[band_idx].start(450)
+
+    def _parse_slope_overlay_bound_text(self, text):
+        """Parse a slope bound field; '-' / blank → None, else float."""
+        raw = str(text or "").strip()
+        if not raw or raw == "-":
+            return None
+        return float(raw)
+
+    def _format_slope_overlay_bound(self, value):
+        if value is None:
+            return "-"
         try:
-            if hasattr(self, 'slope_overlay_min_entry') and self.slope_overlay_min_entry:
-                min_val = float(self.slope_overlay_min_entry.text())
-                self.slope_overlay_min_var = min_val
-        except (ValueError, AttributeError):
-            pass  # Silently handle invalid input
+            return f"{float(value):g}"
+        except (TypeError, ValueError):
+            return "-"
 
-        # Only trigger redraw if slope overlay is currently visible.
-        if not (hasattr(self, 'show_slope_overlay_var') and self.show_slope_overlay_var):
+    def _sync_slope_overlay_legacy_vars(self):
+        """Keep band-0 aliases in sync for older code paths."""
+        bands = getattr(self, "slope_overlay_bands", None) or []
+        if not bands:
+            return
+        band0 = bands[0]
+        self.slope_overlay_min_var = band0.get("min")
+        self.slope_overlay_max_var = band0.get("max")
+        self.slope_overlay_color_hex = band0.get("color_hex", "#00ff00")
+
+    def _apply_slope_overlay_bound_changed(self, band_idx=0):
+        """Apply slope overlay min/max updates after debounce delay."""
+        bands = getattr(self, "slope_overlay_bands", None)
+        if not bands or band_idx < 0 or band_idx >= len(bands):
+            return
+        min_entries = getattr(self, "slope_overlay_min_entries", None) or []
+        max_entries = getattr(self, "slope_overlay_max_entries", None) or []
+        try:
+            if band_idx < len(min_entries):
+                bands[band_idx]["min"] = self._parse_slope_overlay_bound_text(min_entries[band_idx].text())
+            if band_idx < len(max_entries):
+                bands[band_idx]["max"] = self._parse_slope_overlay_bound_text(max_entries[band_idx].text())
+        except (ValueError, AttributeError):
+            pass
+        self._sync_slope_overlay_legacy_vars()
+        if hasattr(self, "_save_slope_overlay_bands"):
+            self._save_slope_overlay_bands()
+
+        if not (hasattr(self, "show_slope_overlay_var") and self.show_slope_overlay_var):
             return
         if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
             return
@@ -2120,40 +2169,143 @@ class GeoTIFFMixin:
         except Exception:
             pass
 
-    def _on_slope_overlay_max_changed(self):
-        """Handle slope overlay max entry change with a short typing debounce."""
-        if not hasattr(self, '_slope_overlay_max_update_timer'):
-            self._slope_overlay_max_update_timer = QTimer()
-            self._slope_overlay_max_update_timer.setSingleShot(True)
-            self._slope_overlay_max_update_timer.timeout.connect(self._apply_slope_overlay_max_changed)
-        self._slope_overlay_max_update_timer.start(450)
-
-    def _apply_slope_overlay_max_changed(self):
-        """Apply slope overlay max updates after debounce delay."""
+    def _normalize_slope_overlay_color_hex(self, color_value, fallback="#00ff00"):
+        """Normalize a #rrggbb slope overlay color string."""
+        text = str(color_value or "").strip()
+        if not text:
+            return fallback
+        if not text.startswith("#"):
+            text = f"#{text}"
+        if len(text) != 7:
+            return fallback
         try:
-            if hasattr(self, 'slope_overlay_max_entry') and self.slope_overlay_max_entry:
-                max_val = float(self.slope_overlay_max_entry.text())
-                self.slope_overlay_max_var = max_val
-        except (ValueError, AttributeError):
-            pass  # Silently handle invalid input
+            int(text[1:], 16)
+            return text.lower()
+        except ValueError:
+            return fallback
 
-        # Only trigger redraw if slope overlay is currently visible.
-        if not (hasattr(self, 'show_slope_overlay_var') and self.show_slope_overlay_var):
+    def _sync_slope_overlay_band_widgets(self):
+        """Push slope_overlay_bands into min/max/color widgets."""
+        bands = getattr(self, "slope_overlay_bands", None)
+        if not bands:
+            return
+        min_entries = getattr(self, "slope_overlay_min_entries", None) or []
+        max_entries = getattr(self, "slope_overlay_max_entries", None) or []
+        color_btns = getattr(self, "slope_overlay_color_btns", None) or []
+        for i, band in enumerate(bands):
+            if i < len(min_entries):
+                min_entries[i].blockSignals(True)
+                min_entries[i].setText(self._format_slope_overlay_bound(band.get("min")))
+                min_entries[i].blockSignals(False)
+            if i < len(max_entries):
+                max_entries[i].blockSignals(True)
+                max_entries[i].setText(self._format_slope_overlay_bound(band.get("max")))
+                max_entries[i].blockSignals(False)
+            if i < len(color_btns):
+                color_hex = self._normalize_slope_overlay_color_hex(
+                    band.get("color_hex"),
+                    fallback=("#00ff00", "#1e90ff", "#ff4500")[min(i, 2)],
+                )
+                band["color_hex"] = color_hex
+                color_btns[i].setStyleSheet(
+                    f"QPushButton {{ background-color: {color_hex}; border: 1px solid #555; }}"
+                )
+        self._sync_slope_overlay_legacy_vars()
+
+    def _update_slope_overlay_color_button(self, band_idx=None):
+        """Refresh GeoTIFF slope overlay color swatch button(s)."""
+        if band_idx is None:
+            self._sync_slope_overlay_band_widgets()
+            return
+        bands = getattr(self, "slope_overlay_bands", None) or []
+        color_btns = getattr(self, "slope_overlay_color_btns", None) or []
+        if band_idx < 0 or band_idx >= len(bands) or band_idx >= len(color_btns):
+            return
+        fallback = ("#00ff00", "#1e90ff", "#ff4500")[min(band_idx, 2)]
+        color_hex = self._normalize_slope_overlay_color_hex(bands[band_idx].get("color_hex"), fallback=fallback)
+        bands[band_idx]["color_hex"] = color_hex
+        color_btns[band_idx].setStyleSheet(
+            f"QPushButton {{ background-color: {color_hex}; border: 1px solid #555; }}"
+        )
+        self._sync_slope_overlay_legacy_vars()
+
+    def _on_slope_overlay_color_button_clicked(self, band_idx=0):
+        """Pick GeoTIFF slope overlay color for a band and redraw if visible."""
+        bands = getattr(self, "slope_overlay_bands", None) or []
+        if band_idx < 0 or band_idx >= len(bands):
+            return
+        chosen = QColorDialog.getColor(parent=self, title=f"Choose Slope Overlay Color (Range {band_idx + 1})")
+        if not chosen.isValid():
+            return
+        fallback = ("#00ff00", "#1e90ff", "#ff4500")[min(band_idx, 2)]
+        bands[band_idx]["color_hex"] = self._normalize_slope_overlay_color_hex(chosen.name(), fallback=fallback)
+        self._update_slope_overlay_color_button(band_idx)
+        if hasattr(self, "_save_slope_overlay_bands"):
+            self._save_slope_overlay_bands()
+        if not getattr(self, "show_slope_overlay_var", False):
             return
         if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
             return
-
         try:
             xlim = self.ax.get_xlim()
             ylim = self.ax.get_ylim()
             self._plot_survey_plan(preserve_view_limits=True)
-            # Restore previous plot area if valid
             if xlim and ylim:
                 self.ax.set_xlim(xlim)
                 self.ax.set_ylim(ylim)
             self.canvas.draw_idle()
         except Exception:
-            pass  # Silently handle errors
+            pass
+
+    def _on_slope_overlay_opacity_changed(self, value):
+        """Update GeoTIFF slope overlay opacity and redraw if visible."""
+        try:
+            opacity = max(0, min(100, int(value)))
+        except (TypeError, ValueError):
+            opacity = 40
+        self.slope_overlay_opacity = opacity
+        if hasattr(self, "slope_overlay_opacity_label"):
+            self.slope_overlay_opacity_label.setText(f"Opacity: {opacity}%")
+        if hasattr(self, "_save_slope_overlay_bands"):
+            self._save_slope_overlay_bands()
+        if not getattr(self, "show_slope_overlay_var", False):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _sync_slope_overlay_opacity_widget(self):
+        """Push saved opacity into the slider/label."""
+        try:
+            opacity = max(0, min(100, int(getattr(self, "slope_overlay_opacity", 40))))
+        except (TypeError, ValueError):
+            opacity = 40
+        self.slope_overlay_opacity = opacity
+        slider = getattr(self, "slope_overlay_opacity_slider", None)
+        if slider is not None:
+            slider.blockSignals(True)
+            slider.setValue(opacity)
+            slider.blockSignals(False)
+        label = getattr(self, "slope_overlay_opacity_label", None)
+        if label is not None:
+            label.setText(f"Opacity: {opacity}%")
+
+    def _apply_slope_overlay_min_changed(self):
+        """Backward-compatible alias for band 0 min updates."""
+        self._apply_slope_overlay_bound_changed(0)
+
+    def _apply_slope_overlay_max_changed(self):
+        """Backward-compatible alias for band 0 max updates."""
+        self._apply_slope_overlay_bound_changed(0)
 
     def _on_backscatter_slope_areas_checkbox_changed(self):
         """Show/hide Backscatter bathymetry slope band overlay (magenta)."""

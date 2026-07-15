@@ -43,6 +43,13 @@ SHADED_RELIEF_CMAP_OPTIONS = (
 )
 DEFAULT_SHADED_RELIEF_CMAP = "rainbow"
 
+# GeoTIFF slope overlay bands: min/max in degrees (None = undefined), color as #rrggbb
+DEFAULT_SLOPE_OVERLAY_BANDS = (
+    {"min": 10.0, "max": 20.0, "color_hex": "#00ff00"},
+    {"min": None, "max": None, "color_hex": "#1e90ff"},  # dodgerblue
+    {"min": None, "max": None, "color_hex": "#ff4500"},  # orangered
+)
+
 # Conditional imports for geospatial libraries (re-exported for use by SAT_Planner_PyQt)
 GEOSPATIAL_LIBS_AVAILABLE = True
 rasterio = None

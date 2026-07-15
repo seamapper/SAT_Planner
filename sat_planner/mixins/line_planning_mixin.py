@@ -396,7 +396,7 @@ class LinePlanningMixin:
         if not self.line_planning_points or len(self.line_planning_points) < 2:
             self._show_message("warning", "No Line", "Draw a line with at least two points before exporting.")
             return
-        export_dir = QFileDialog.getExistingDirectory(self, "Select Export Directory", self.last_used_dir)
+        export_dir = self._select_export_directory(self.last_used_dir)
         if not export_dir:
             return
         self.last_used_dir = export_dir

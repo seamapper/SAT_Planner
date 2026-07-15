@@ -245,6 +245,8 @@ class AdcpMixin:
             self.line_planning_mode = False
         if hasattr(self, "measurement_tool_mode"):
             self.measurement_tool_mode = False
+            if hasattr(self, "_update_measurement_button_state"):
+                self._update_measurement_button_state()
         if hasattr(self, "pick_center_btn"):
             self.pick_center_btn.setStyleSheet("")
             self.pick_center_btn.setText("Pick Center from GeoTIFF")
@@ -717,10 +719,8 @@ class AdcpMixin:
             export_name = export_name.replace(c, "_")
         export_name = export_name.strip().strip(".")
 
-        export_dir = QFileDialog.getExistingDirectory(
-            self,
-            "Select Export Directory",
-            getattr(self, "last_adcp_import_dir", os.path.expanduser("~")),
+        export_dir = self._select_export_directory(
+            getattr(self, "last_adcp_import_dir", os.path.expanduser("~"))
         )
         if not export_dir:
             return

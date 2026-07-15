@@ -962,21 +962,6 @@ class PlottingMixin:
             if (self.geotiff_data_array is not None and self.geotiff_extent is not None and
                 hasattr(self, 'show_slope_overlay_var') and self.show_slope_overlay_var):
                 try:
-                    # Get min/max values from entry fields
-                    min_slope = 10.0  # Default
-                    max_slope = 20.0  # Default
-                    try:
-                        if hasattr(self, 'slope_overlay_min_var'):
-                            min_slope = float(self.slope_overlay_min_var)
-                        if hasattr(self, 'slope_overlay_max_var'):
-                            max_slope = float(self.slope_overlay_max_var)
-                        if min_slope >= max_slope:
-                            # Keep user-entered bounds by normalizing order
-                            min_slope, max_slope = min(max_slope, min_slope), max(max_slope, min_slope)
-                    except (ValueError, AttributeError):
-                        min_slope = 10.0
-                        max_slope = 20.0
-
                     # Remove previous slope overlay plot if it exists
                     if hasattr(self, 'slope_overlay_image_plot') and self.slope_overlay_image_plot is not None:
                         try:
@@ -1003,24 +988,60 @@ class PlottingMixin:
                     slope_degrees = np.degrees(slope_rad)
                     slope_degrees[np.isnan(self.geotiff_data_array)] = np.nan
 
-                    # Create mask for slopes between min and max
-                    mask = (slope_degrees >= min_slope) & (slope_degrees <= max_slope)
-                    # Create green overlay with transparency
-                    overlay = np.zeros((slope_degrees.shape[0], slope_degrees.shape[1], 4), dtype=np.float32)
-                    overlay[mask, 0] = 0.0  # Red channel
-                    overlay[mask, 1] = 1.0  # Green channel
-                    overlay[mask, 2] = 0.0  # Blue channel
-                    overlay[mask, 3] = 0.4  # Alpha channel (40% transparency)
-                    overlay[~mask, 3] = 0.0  # Transparent outside range
+                    bands = getattr(self, "slope_overlay_bands", None)
+                    if not bands:
+                        bands = [{
+                            "min": getattr(self, "slope_overlay_min_var", 10.0),
+                            "max": getattr(self, "slope_overlay_max_var", 20.0),
+                            "color_hex": getattr(self, "slope_overlay_color_hex", "#00ff00"),
+                        }]
 
-                    # Plot the overlay
-                    self.slope_overlay_image_plot = self.ax.imshow(
-                        overlay,
-                        extent=tuple(self.geotiff_extent),
-                        origin='upper',
-                        zorder=11,  # Above other layers but below contours
-                        interpolation='bilinear'
-                    )
+                    overlay = np.zeros((slope_degrees.shape[0], slope_degrees.shape[1], 4), dtype=np.float32)
+                    any_band = False
+                    for band in bands:
+                        try:
+                            min_slope = band.get("min")
+                            max_slope = band.get("max")
+                            if min_slope is None or max_slope is None:
+                                continue
+                            min_slope = float(min_slope)
+                            max_slope = float(max_slope)
+                            if min_slope >= max_slope:
+                                min_slope, max_slope = min(max_slope, min_slope), max(max_slope, min_slope)
+                        except (TypeError, ValueError):
+                            continue
+
+                        color_hex = str(band.get("color_hex", "#00ff00") or "#00ff00").strip()
+                        if not color_hex.startswith("#"):
+                            color_hex = f"#{color_hex}"
+                        try:
+                            r = int(color_hex[1:3], 16) / 255.0
+                            g = int(color_hex[3:5], 16) / 255.0
+                            b = int(color_hex[5:7], 16) / 255.0
+                        except Exception:
+                            r, g, b = 0.0, 1.0, 0.0
+
+                        mask = (slope_degrees >= min_slope) & (slope_degrees <= max_slope)
+                        if not np.any(mask):
+                            continue
+                        any_band = True
+                        alpha = max(
+                            0.0,
+                            min(1.0, float(getattr(self, "slope_overlay_opacity", 40)) / 100.0),
+                        )
+                        overlay[mask, 0] = r
+                        overlay[mask, 1] = g
+                        overlay[mask, 2] = b
+                        overlay[mask, 3] = alpha
+
+                    if any_band:
+                        self.slope_overlay_image_plot = self.ax.imshow(
+                            overlay,
+                            extent=tuple(self.geotiff_extent),
+                            origin='upper',
+                            zorder=11,
+                            interpolation='bilinear'
+                        )
                 except Exception as e:
                     # Silently fail if slope overlay plotting fails
                     if hasattr(self, 'slope_overlay_image_plot') and self.slope_overlay_image_plot is not None:

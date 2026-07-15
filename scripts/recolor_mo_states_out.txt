@@ -1,0 +1,9 @@
+Master size=(1024, 1024) mode=RGB
+Building OFF (light grey)...
+  converted 310166 accent pixels
+Wrote C:\Users\pjohnson\.cursor\projects\c-Users-pjohnson-Dropbox-Documents-Python-SAT-Planner\assets\map_options_icon.png
+Building ON (orange)...
+  converted 310166 accent pixels
+Wrote C:\Users\pjohnson\.cursor\projects\c-Users-pjohnson-Dropbox-Documents-Python-SAT-Planner\assets\map_options_icon_active.png
+Pair dimensions match: (1024, 1024)
+Copied to media/

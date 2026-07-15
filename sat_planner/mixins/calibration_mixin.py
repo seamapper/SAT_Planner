@@ -1211,7 +1211,7 @@ class CalibrationMixin:
             self._show_message("warning","No Data", "No calibration lines to export. Define at least one line.")
             return
         export_name = self.cal_export_name_entry.text().strip() or "calibration_survey"
-        export_dir = QFileDialog.getExistingDirectory(self, "Select Export Directory", self.last_export_dir)
+        export_dir = self._select_export_directory(self.last_export_dir)
         if not export_dir:
             return
         self.last_export_dir = export_dir

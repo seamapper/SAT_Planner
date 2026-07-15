@@ -9,8 +9,8 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QScrollArea, QTabWidget, QFileDialog, QMessageBox, QDialog,
                              QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar, QGroupBox,
                              QDoubleSpinBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat, QPixmap
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QEvent, QSize
+from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat, QPixmap, QIcon
 import matplotlib
 matplotlib.use('QtAgg')
 import matplotlib.pyplot as plt
@@ -29,7 +29,7 @@ import re
 import threading
 import time
 
-from .constants import DEFAULT_SHADED_RELIEF_CMAP
+from .constants import DEFAULT_SHADED_RELIEF_CMAP, DEFAULT_SLOPE_OVERLAY_BANDS
 from . import __version__, CONFIG_FILENAME, GEOSPATIAL_LIBS_AVAILABLE
 from .utils_ui import show_message as _show_message_fn, ask_yes_no as _ask_yes_no_fn, ask_ok_cancel as _ask_ok_cancel_fn
 from .utils_geo import decimal_degrees_to_ddm
@@ -49,6 +49,7 @@ from .mixins.export_import_mixin import ExportImportMixin
 from .mixins.config_mixin import ConfigMixin
 from .mixins.deferred_params_mixin import DeferredParamsMixin
 from .gmrt_dialog import GMRTGrabber
+from .map_options_dialog import MapOptionsDialog
 
 
 class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, PerformanceMixin, AdcpMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, DeferredParamsMixin, QMainWindow):
@@ -119,8 +120,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # Slope overlay display variables
         self.show_slope_overlay_var = False  # Default to off
-        self.slope_overlay_min_var = 10.0  # Default min slope in degrees
-        self.slope_overlay_max_var = 20.0  # Default max slope in degrees
+        self.slope_overlay_bands = [dict(band) for band in DEFAULT_SLOPE_OVERLAY_BANDS]
+        self.slope_overlay_min_var = self.slope_overlay_bands[0]["min"]
+        self.slope_overlay_max_var = self.slope_overlay_bands[0]["max"]
+        self.slope_overlay_color_hex = self.slope_overlay_bands[0]["color_hex"]
+        self.slope_overlay_opacity = 40  # percent; matches former fixed alpha 0.4
         self.slope_overlay_image_plot = None  # Store slope overlay plot object for removal/update
 
         # Backscatter bathymetry analysis: slope band overlay (magenta), separate from GeoTIFF "Slopes" overlay
@@ -404,14 +408,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self.add_shapefile_btn = QPushButton("Add Shapefile")
             self.add_shapefile_btn.clicked.connect(self._on_visualization_shapefile_button_clicked)
             self.add_shapefile_btn.setToolTip("Load a polygon/line shapefile for map visualization only.")
-            self.measurement_tool_btn = QPushButton("Measurement Tool")
-            self.measurement_tool_btn.clicked.connect(self._toggle_measurement_tool_mode)
-            self.measurement_tool_btn.setToolTip("Toggle map distance/heading measurement mode.")
-
-        # Export type/About buttons (only create once)
-        if not hasattr(self, "export_type_btn"):
-            self.export_type_btn = QPushButton("Export Types")
-            self.export_type_btn.clicked.connect(self._show_export_type_dialog)
 
         # About button (only create once)
         if not hasattr(self, 'about_btn'):
@@ -419,6 +415,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self.about_btn.clicked.connect(self._show_about_dialog)
 
         self._setup_layout()
+        self._setup_map_options_overlay()
 
         # Connect Matplotlib click event for 'Pick Center from GeoTIFF'
         self.cid_click = self.canvas.mpl_connect('button_press_event', self._on_plot_click)
@@ -548,6 +545,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_shaded_relief_cmap()
         if hasattr(self, "_update_shaded_relief_cmap_button"):
             self._update_shaded_relief_cmap_button()
+        self._load_slope_overlay_bands()
+        if hasattr(self, "_sync_slope_overlay_band_widgets"):
+            self._sync_slope_overlay_band_widgets()
+        if hasattr(self, "_sync_slope_overlay_opacity_widget"):
+            self._sync_slope_overlay_opacity_widget()
         if hasattr(self, "_refresh_visualization_shapefile_button_state"):
             self._refresh_visualization_shapefile_button_state()
 
@@ -733,6 +735,136 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         """Toggle activity log panel visibility."""
         self._set_activity_log_collapsed(not getattr(self, 'activity_log_collapsed', False))
 
+    def _media_path(self, filename):
+        """Return absolute path to a file in the project media directory."""
+        pkg_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(os.path.dirname(pkg_dir), "media", filename)
+
+    def _setup_map_options_overlay(self):
+        """Map overlay icons (options, measurement) and non-modal options dialog."""
+        if not hasattr(self, "plot_frame"):
+            return
+
+        self.map_options_dialog = None
+        self._map_options_icon_active = False
+        self._map_overlay_icon_size = 36
+        icon_size = self._map_overlay_icon_size
+        btn_style = "QPushButton { border: none; background: transparent; padding: 0px; }"
+
+        map_options_off = self._media_path("options_off.png")
+        map_options_on = self._media_path("options_on.png")
+        self._map_options_icon_off = QIcon(map_options_off) if os.path.exists(map_options_off) else QIcon()
+        self._map_options_icon_on = QIcon(map_options_on) if os.path.exists(map_options_on) else QIcon()
+
+        self.map_options_btn = QPushButton(self.plot_frame)
+        self.map_options_btn.setFlat(True)
+        self.map_options_btn.setFixedSize(icon_size, icon_size)
+        self.map_options_btn.setIconSize(QSize(icon_size, icon_size))
+        self.map_options_btn.setToolTip("Map Options")
+        self.map_options_btn.setStyleSheet(btn_style)
+        self.map_options_btn.clicked.connect(self._toggle_map_options_dialog)
+        self._set_map_options_icon_active(False)
+
+        measure_off = self._media_path("dh_t_off.png")
+        measure_on = self._media_path("dh_t_on.png")
+        self._measurement_icon_off = QIcon(measure_off) if os.path.exists(measure_off) else QIcon()
+        self._measurement_icon_on = QIcon(measure_on) if os.path.exists(measure_on) else QIcon()
+
+        self.measurement_tool_btn = QPushButton(self.plot_frame)
+        self.measurement_tool_btn.setFlat(True)
+        self.measurement_tool_btn.setFixedSize(icon_size, icon_size)
+        self.measurement_tool_btn.setIconSize(QSize(icon_size, icon_size))
+        self.measurement_tool_btn.setToolTip("Measurement Tool")
+        self.measurement_tool_btn.setStyleSheet(btn_style)
+        self.measurement_tool_btn.clicked.connect(self._toggle_measurement_tool_mode)
+        if hasattr(self, "_update_measurement_button_state"):
+            self._update_measurement_button_state()
+
+        self.plot_frame.installEventFilter(self)
+        self._position_map_overlay_buttons()
+
+    def _set_map_options_icon_active(self, active):
+        """Switch Map Options icon between off and on states."""
+        self._map_options_icon_active = bool(active)
+        if not hasattr(self, "map_options_btn"):
+            return
+        icon = self._map_options_icon_on if self._map_options_icon_active else self._map_options_icon_off
+        self.map_options_btn.setIcon(icon)
+
+    def _position_map_overlay_buttons(self):
+        """Keep map overlay icons anchored to the lower-left of the map frame."""
+        if not hasattr(self, "plot_frame"):
+            return
+        margin = 8
+        gap = 4
+        size = getattr(self, "_map_overlay_icon_size", 36)
+        y = max(margin, self.plot_frame.height() - size - margin)
+
+        if hasattr(self, "map_options_btn") and self.map_options_btn is not None:
+            self.map_options_btn.move(margin, y)
+            self.map_options_btn.raise_()
+
+        if hasattr(self, "measurement_tool_btn") and self.measurement_tool_btn is not None:
+            x = margin + size + gap
+            self.measurement_tool_btn.move(x, y)
+            self.measurement_tool_btn.raise_()
+
+    def _position_map_options_button(self):
+        """Backward-compatible alias for overlay button positioning."""
+        self._position_map_overlay_buttons()
+
+    def _toggle_map_options_dialog(self):
+        """Open or close the non-modal Map Options dialog."""
+        if self.map_options_dialog is None:
+            self.map_options_dialog = MapOptionsDialog(
+                self,
+                self.imagery_basemap_checkbox,
+                self.noaa_charts_checkbox,
+                self.noaa_charts_opacity_label,
+                self.noaa_charts_opacity_slider,
+                self.eez_checkbox,
+                self.eez_opacity_label,
+                self.eez_opacity_slider,
+                self.add_shapefile_btn,
+                self.show_contours_checkbox,
+                self.contour_interval_entry,
+                self.show_slope_overlay_checkbox,
+                list(zip(
+                    self.slope_overlay_min_entries,
+                    self.slope_overlay_max_entries,
+                    self.slope_overlay_color_btns,
+                )),
+                self.slope_overlay_opacity_label,
+                self.slope_overlay_opacity_slider,
+                self.dyn_vert_exag_btn,
+                self.dynamic_resolution_btn,
+            )
+            self.map_options_dialog.finished.connect(self._on_map_options_dialog_finished)
+
+        if self.map_options_dialog.isVisible():
+            self.map_options_dialog.close()
+            return
+
+        self._set_map_options_icon_active(True)
+        self.map_options_dialog.show()
+        self.map_options_dialog.adjustSize()
+        btn = self.map_options_btn
+        global_pos = btn.mapToGlobal(btn.rect().topLeft())
+        dlg_h = self.map_options_dialog.frameGeometry().height()
+        self.map_options_dialog.move(global_pos.x(), max(0, global_pos.y() - dlg_h - 4))
+        self.map_options_dialog.raise_()
+        self.map_options_dialog.activateWindow()
+
+    def _on_map_options_dialog_finished(self, _result=None):
+        """Reset Map Options icon when the dialog closes."""
+        self._set_map_options_icon_active(False)
+
+    def eventFilter(self, obj, event):
+        if hasattr(self, "plot_frame") and obj is self.plot_frame:
+            if event.type() == QEvent.Type.Resize:
+                self._position_map_overlay_buttons()
+        return super().eventFilter(obj, event)
+
     def _setup_layout(self):
         try:
             # Create vertical layout for right side (map + profile)
@@ -754,31 +886,14 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 # Horizontal layout for checkbox and About button
                 checkbox_button_layout = QHBoxLayout()
                 checkbox_button_layout.setContentsMargins(0, 0, 0, 0)
+                self.bottom_strip_prompt_label = QLabel("")
+                self.bottom_strip_prompt_label.setWordWrap(False)
+                self.bottom_strip_prompt_label.setStyleSheet(
+                    "QLabel { color: rgb(255, 165, 0); font-weight: bold; padding-left: 6px; }"
+                )
+                checkbox_button_layout.addWidget(self.bottom_strip_prompt_label, 1)
                 checkbox_button_layout.addWidget(self.slope_profile_checkbox)
-                if hasattr(self, 'imagery_basemap_checkbox'):
-                    checkbox_button_layout.addWidget(self.imagery_basemap_checkbox)
-                if hasattr(self, 'noaa_charts_checkbox'):
-                    checkbox_button_layout.addWidget(self.noaa_charts_checkbox)
-                    if hasattr(self, 'noaa_charts_opacity_label'):
-                        checkbox_button_layout.addWidget(self.noaa_charts_opacity_label)
-                    if hasattr(self, 'noaa_charts_opacity_slider'):
-                        self.noaa_charts_opacity_slider.setMaximumWidth(100)
-                        checkbox_button_layout.addWidget(self.noaa_charts_opacity_slider)
-                if hasattr(self, 'eez_checkbox'):
-                    checkbox_button_layout.addWidget(self.eez_checkbox)
-                    if hasattr(self, 'eez_opacity_label'):
-                        checkbox_button_layout.addWidget(self.eez_opacity_label)
-                    if hasattr(self, 'eez_opacity_slider'):
-                        self.eez_opacity_slider.setMaximumWidth(100)
-                        checkbox_button_layout.addWidget(self.eez_opacity_slider)
-                if hasattr(self, 'add_shapefile_btn'):
-                    checkbox_button_layout.addWidget(self.add_shapefile_btn)
-                if hasattr(self, 'measurement_tool_btn'):
-                    checkbox_button_layout.addWidget(self.measurement_tool_btn)
-                checkbox_button_layout.addStretch()
                 if hasattr(self, 'about_btn'):
-                    if hasattr(self, "export_type_btn"):
-                        checkbox_button_layout.addWidget(self.export_type_btn)
                     checkbox_button_layout.addWidget(self.about_btn)
                 profile_layout.addLayout(checkbox_button_layout)
                 profile_widget = QWidget()
@@ -1005,23 +1120,21 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         display_frame = QWidget()
         display_layout = QHBoxLayout(display_frame)
         display_layout.setContentsMargins(0, 0, 0, 0)
-        display_layout.addWidget(QLabel("Display:"))
+        display_layout.addWidget(QLabel("Map Display:"))
         self.elevation_slope_combo = QComboBox()
         self.elevation_slope_combo.addItems(["Shaded Relief", "Shaded Slope", "Hillshade", "Slope"])
         self.elevation_slope_combo.setCurrentText("Shaded Relief")  # Set default
         self.elevation_slope_combo.currentTextChanged.connect(self._on_geotiff_display_mode_changed)
         self.elevation_slope_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         display_layout.addWidget(self.elevation_slope_combo)
-        self.dyn_vert_exag_btn = QPushButton("V.E.")
+        self.dyn_vert_exag_btn = QPushButton("Vertical Exaggeration")
         self.dyn_vert_exag_btn.clicked.connect(self._open_dyn_vert_exag_dialog)
         self.dyn_vert_exag_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        display_layout.addWidget(self.dyn_vert_exag_btn)
         self.dynamic_resolution_btn = QPushButton("Dyn Res: ON")
         self.dynamic_resolution_btn.clicked.connect(self._toggle_dynamic_resolution)
         self.dynamic_resolution_btn.setMinimumWidth(0)
         self.dynamic_resolution_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        display_layout.addWidget(self.dynamic_resolution_btn)
-        self.shaded_relief_cmap_btn = QPushButton("CMap")
+        self.shaded_relief_cmap_btn = QPushButton("Color Map")
         self.shaded_relief_cmap_btn.clicked.connect(self._cycle_shaded_relief_cmap)
         self.shaded_relief_cmap_btn.setMinimumWidth(0)
         self.shaded_relief_cmap_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -1032,30 +1145,43 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         geotiff_layout.addWidget(display_frame)
         geotiff_layout.addSpacing(3)
 
-        # Show Contours/Slopes controls on same row
-        contours_interval_frame = QWidget()
-        contours_interval_layout = QHBoxLayout(contours_interval_frame)
-        contours_interval_layout.setContentsMargins(0, 0, 0, 0)
+        # Contours / slope overlay controls (hosted in Map Options dialog)
         self.show_contours_checkbox = QCheckBox("Contours (m)")
         self.show_contours_checkbox.setChecked(self.show_contours_var)
         self.show_contours_checkbox.stateChanged.connect(self._on_contour_checkbox_changed)
-        contours_interval_layout.addWidget(self.show_contours_checkbox)
         self.contour_interval_entry = QLineEdit("200")
-        self.contour_interval_entry.setMaximumWidth(80)  # Limit width of entry field
-        contours_interval_layout.addWidget(self.contour_interval_entry)
         self.show_slope_overlay_checkbox = QCheckBox("Slopes")
         self.show_slope_overlay_checkbox.setChecked(self.show_slope_overlay_var)
         self.show_slope_overlay_checkbox.stateChanged.connect(self._on_slope_overlay_checkbox_changed)
-        contours_interval_layout.addWidget(self.show_slope_overlay_checkbox)
-        self.slope_overlay_min_entry = QLineEdit("10")
-        self.slope_overlay_min_entry.setMaximumWidth(60)  # Limit width of entry field
-        contours_interval_layout.addWidget(self.slope_overlay_min_entry)
-        contours_interval_layout.addWidget(QLabel("To"))
-        self.slope_overlay_max_entry = QLineEdit("20")
-        self.slope_overlay_max_entry.setMaximumWidth(60)  # Limit width of entry field
-        contours_interval_layout.addWidget(self.slope_overlay_max_entry)
-        contours_interval_layout.addStretch()
-        geotiff_layout.addWidget(contours_interval_frame)
+        self.slope_overlay_min_entries = []
+        self.slope_overlay_max_entries = []
+        self.slope_overlay_color_btns = []
+        for band_idx in range(len(DEFAULT_SLOPE_OVERLAY_BANDS)):
+            min_entry = QLineEdit("-")
+            max_entry = QLineEdit("-")
+            color_btn = QPushButton("")
+            color_btn.setFixedSize(22, 22)
+            color_btn.setToolTip(f"Slope overlay range {band_idx + 1} color")
+            color_btn.clicked.connect(
+                lambda _checked=False, i=band_idx: self._on_slope_overlay_color_button_clicked(i)
+            )
+            self.slope_overlay_min_entries.append(min_entry)
+            self.slope_overlay_max_entries.append(max_entry)
+            self.slope_overlay_color_btns.append(color_btn)
+        # Legacy aliases for band 0 (deferred bindings / older references)
+        self.slope_overlay_min_entry = self.slope_overlay_min_entries[0]
+        self.slope_overlay_max_entry = self.slope_overlay_max_entries[0]
+        self.slope_overlay_color_btn = self.slope_overlay_color_btns[0]
+        if hasattr(self, "_sync_slope_overlay_band_widgets"):
+            self._sync_slope_overlay_band_widgets()
+        self.slope_overlay_opacity = int(getattr(self, "slope_overlay_opacity", 40))
+        self.slope_overlay_opacity_label = QLabel(f"Opacity: {self.slope_overlay_opacity}%")
+        self.slope_overlay_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.slope_overlay_opacity_slider.setMinimum(0)
+        self.slope_overlay_opacity_slider.setMaximum(100)
+        self.slope_overlay_opacity_slider.setValue(self.slope_overlay_opacity)
+        self.slope_overlay_opacity_slider.setToolTip("Slope overlay opacity")
+        self.slope_overlay_opacity_slider.valueChanged.connect(self._on_slope_overlay_opacity_changed)
 
         param_layout.addWidget(geotiff_groupbox)
 

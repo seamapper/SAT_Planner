@@ -322,7 +322,7 @@ class ReferenceMixin:
             self._show_message("warning","No Data", "No survey lines to export. Generate them first.")
             return
 
-        export_dir = QFileDialog.getExistingDirectory(self, "Select Export Directory", self.last_export_dir)
+        export_dir = self._select_export_directory(self.last_export_dir)
         if not export_dir:
             return
         self.last_export_dir = export_dir

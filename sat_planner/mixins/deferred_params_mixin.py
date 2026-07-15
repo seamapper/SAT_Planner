@@ -138,13 +138,22 @@ class DeferredParamsMixin:
         for name, handler in (
             ("geotiff_nan_entry", "_on_geotiff_nan_value_changed"),
             ("contour_interval_entry", "_on_contour_interval_changed"),
-            ("slope_overlay_min_entry", "_on_slope_overlay_min_changed"),
-            ("slope_overlay_max_entry", "_on_slope_overlay_max_changed"),
         ):
             w = getattr(self, name, None)
             fn = getattr(self, handler, None)
             if w is not None and fn is not None:
                 self._bind_deferred_param(w, lambda _widget, f=fn: f())
+
+        min_entries = getattr(self, "slope_overlay_min_entries", None) or []
+        max_entries = getattr(self, "slope_overlay_max_entries", None) or []
+        for band_idx, entry in enumerate(min_entries):
+            self._bind_deferred_param(
+                entry, lambda _w, i=band_idx: self._on_slope_overlay_min_changed(i)
+            )
+        for band_idx, entry in enumerate(max_entries):
+            self._bind_deferred_param(
+                entry, lambda _w, i=band_idx: self._on_slope_overlay_max_changed(i)
+            )
 
         cal_lead = getattr(self, "cal_lead_in_entry", None)
         if cal_lead is not None:
