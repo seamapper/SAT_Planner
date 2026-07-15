@@ -1,0 +1,5 @@
+Source: C:\Users\pjohnson\.cursor\projects\c-Users-pjohnson-Dropbox-Documents-Python-SAT-Planner\assets\distance_heading_map_icon.png exists=True
+Source size=(1024, 1024) mode=RGB
+Wrote C:\Users\pjohnson\.cursor\projects\c-Users-pjohnson-Dropbox-Documents-Python-SAT-Planner\assets\distance_heading_map_icon_active.png (1024x1024), converted 78717 accent pixels
+Pair dimensions match: (1024, 1024)
+Wrote C:\Users\pjohnson\Dropbox\Documents\Python\SAT_Planner\media\distance_heading_map_icon_active.png (1024x1024), converted 78717 accent pixels

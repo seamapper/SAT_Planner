@@ -9,8 +9,8 @@ from PIL import Image
 def convert_png_to_ico():
     """Convert CCOM.png to CCOM.ico with multiple sizes"""
     
-    png_path = 'ccom_logo_no_text_dark_background.png'
-    ico_path = 'CCOM.ico'
+    png_path = 'Map_Layers_T_G.png'
+    ico_path = 'Map_Layers_T_G.ico'
     
     if not os.path.exists(png_path):
         print(f"Error: {png_path} not found")
