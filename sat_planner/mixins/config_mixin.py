@@ -406,6 +406,12 @@ class ConfigMixin:
     def _normalize_shaded_relief_cmap(self, cmap_name):
         if cmap_name == "Spectral":
             cmap_name = "Spectral_r"
+        elif cmap_name == "RdYlBu":
+            cmap_name = "RdYlBu_r"
+        elif cmap_name == "hsv_shift":
+            cmap_name = "hsv_r"
+        elif cmap_name == "ice_shift":
+            cmap_name = "ice"
         valid = self._valid_shaded_relief_cmap_names()
         if cmap_name in valid:
             return cmap_name

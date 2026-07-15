@@ -8,6 +8,24 @@ __version__ = "2026.37"
 
 CONFIG_FILENAME = os.path.join(os.path.expanduser("~"), ".cal_ref_planner_config.json")
 
+# Register third-party colormaps with matplotlib (via colormaps package).
+_COLORMAPS_EXTRA = ()
+try:
+    import colormaps as cmaps
+
+    _ = cmaps.ice
+    _ = cmaps.arctic
+    _ = cmaps.sapphire
+    _ = cmaps.torch
+    _COLORMAPS_EXTRA = (
+        ("ice", "ice"),
+        ("arctic", "arctic"),
+        ("sapphire", "sapphire"),
+        ("torch", "torch"),
+    )
+except ImportError:
+    pass
+
 # Shaded Relief elevation overlay colormaps: (button label, matplotlib cmap name)
 SHADED_RELIEF_CMAP_OPTIONS = (
     ("rainbow", "rainbow"),
@@ -16,7 +34,8 @@ SHADED_RELIEF_CMAP_OPTIONS = (
     ("turbo", "turbo"),
     ("CnBu", "BuGn_r"),
     ("Greys", "Greys_r"),
-    ("RdYlBu", "RdYlBu"),
+    *_COLORMAPS_EXTRA,
+    ("RdYlBu", "RdYlBu_r"),
     ("Spectral", "Spectral_r"),
     ("hsv", "hsv_r"),
     ("jet", "jet"),
