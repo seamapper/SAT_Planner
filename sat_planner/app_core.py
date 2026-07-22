@@ -751,22 +751,22 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         icon_size = self._map_overlay_icon_size
         btn_style = "QPushButton { border: none; background: transparent; padding: 0px; }"
 
-        map_options_off = self._media_path("options_off.png")
-        map_options_on = self._media_path("options_on.png")
-        self._map_options_icon_off = QIcon(map_options_off) if os.path.exists(map_options_off) else QIcon()
-        self._map_options_icon_on = QIcon(map_options_on) if os.path.exists(map_options_on) else QIcon()
+        map_options_off = self._media_path("layers_t_off.png")
+        map_options_on = self._media_path("layers_t_on.png")
+        self._map_options_icon_off = QIcon(map_options_off) if os.path.exists(map_options_on) else QIcon()
+        self._map_options_icon_on = QIcon(map_options_on) if os.path.exists(map_options_off) else QIcon()
 
         self.map_options_btn = QPushButton(self.plot_frame)
         self.map_options_btn.setFlat(True)
         self.map_options_btn.setFixedSize(icon_size, icon_size)
         self.map_options_btn.setIconSize(QSize(icon_size, icon_size))
-        self.map_options_btn.setToolTip("Map Options")
+        self.map_options_btn.setToolTip("Layer Options")
         self.map_options_btn.setStyleSheet(btn_style)
         self.map_options_btn.clicked.connect(self._toggle_map_options_dialog)
         self._set_map_options_icon_active(False)
 
-        measure_off = self._media_path("dh_t_off.png")
-        measure_on = self._media_path("dh_t_on.png")
+        measure_off = self._media_path("dht_t_grey_off.png")
+        measure_on = self._media_path("dht_t_grey_on.png")
         self._measurement_icon_off = QIcon(measure_off) if os.path.exists(measure_off) else QIcon()
         self._measurement_icon_on = QIcon(measure_on) if os.path.exists(measure_on) else QIcon()
 
@@ -1156,9 +1156,15 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.slope_overlay_min_entries = []
         self.slope_overlay_max_entries = []
         self.slope_overlay_color_btns = []
+        slope_range_tooltip = (
+            "Enter min and max slope in degrees. "
+            "Use '-' for min and/or max to leave this range undefined (it will not be shown)."
+        )
         for band_idx in range(len(DEFAULT_SLOPE_OVERLAY_BANDS)):
             min_entry = QLineEdit("-")
             max_entry = QLineEdit("-")
+            min_entry.setToolTip(slope_range_tooltip)
+            max_entry.setToolTip(slope_range_tooltip)
             color_btn = QPushButton("")
             color_btn.setFixedSize(22, 22)
             color_btn.setToolTip(f"Slope overlay range {band_idx + 1} color")

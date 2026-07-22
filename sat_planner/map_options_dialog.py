@@ -43,7 +43,7 @@ class MapOptionsDialog(QDialog):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
 
-        layers_group = QGroupBox("Map Layers")
+        layers_group = QGroupBox("Map Overlay Options")
         layers_layout = QVBoxLayout(layers_group)
         layers_layout.setSpacing(6)
         layers_layout.addWidget(imagery_basemap_checkbox)
@@ -65,7 +65,7 @@ class MapOptionsDialog(QDialog):
         layers_layout.addWidget(add_shapefile_btn)
         layout.addWidget(layers_group)
 
-        geotiff_group = QGroupBox("GeoTIFF Overlays")
+        geotiff_group = QGroupBox("GeoTIFF Overlay Options")
         geotiff_layout = QVBoxLayout(geotiff_group)
         geotiff_layout.setSpacing(6)
 

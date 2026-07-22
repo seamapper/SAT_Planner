@@ -6,6 +6,7 @@ import traceback
 
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QColor, QCursor, QPainter, QPen, QPixmap
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, rowcol
 from sat_planner.utils_geo import decimal_degrees_to_ddm
@@ -142,6 +143,27 @@ class MapInteractionMixin:
             [start_lon, end_lon], [start_lat, end_lat], **line_kwargs
         )
 
+    def _measurement_cursor(self):
+        """Return a thick orange cross cursor centered on its hotspot."""
+        cursor = getattr(self, "_measurement_cross_cursor", None)
+        if cursor is not None:
+            return cursor
+
+        size = 32
+        center = size // 2
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.setPen(QPen(QColor(255, 165, 0), 3))
+        painter.drawLine(center, 2, center, size - 3)
+        painter.drawLine(2, center, size - 3, center)
+        painter.end()
+
+        self._measurement_cross_cursor = QCursor(pixmap, center, center)
+        return self._measurement_cross_cursor
+
     def _toggle_measurement_tool_mode(self):
         """Enable/disable interactive map measurement mode."""
         self.measurement_tool_mode = not bool(getattr(self, "measurement_tool_mode", False))
@@ -151,7 +173,7 @@ class MapInteractionMixin:
             self.measurement_start_point = None
             self.measurement_end_point = None
             self._clear_measurement_line_overlay()
-            self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
+            self.canvas_widget.setCursor(self._measurement_cursor())
         else:
             self.measurement_start_point = None
             self.measurement_end_point = None

@@ -2266,7 +2266,9 @@ class GeoTIFFMixin:
         self.slope_overlay_opacity = opacity
         if hasattr(self, "slope_overlay_opacity_label"):
             self.slope_overlay_opacity_label.setText(f"Opacity: {opacity}%")
-        if hasattr(self, "_save_slope_overlay_bands"):
+        if hasattr(self, "_save_slope_overlay_opacity"):
+            self._save_slope_overlay_opacity()
+        elif hasattr(self, "_save_slope_overlay_bands"):
             self._save_slope_overlay_bands()
         if not getattr(self, "show_slope_overlay_var", False):
             return

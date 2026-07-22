@@ -529,13 +529,31 @@ class ConfigMixin:
                         self.slope_overlay_opacity = 40
             if hasattr(self, "_sync_slope_overlay_legacy_vars"):
                 self._sync_slope_overlay_legacy_vars()
-            if hasattr(self, "_sync_slope_overlay_opacity_widget"):
-                self._sync_slope_overlay_opacity_widget()
         except Exception:
             self.slope_overlay_bands = self._default_slope_overlay_bands()
             self.slope_overlay_opacity = 40
             if hasattr(self, "_sync_slope_overlay_legacy_vars"):
                 self._sync_slope_overlay_legacy_vars()
+        if hasattr(self, "_sync_slope_overlay_opacity_widget"):
+            self._sync_slope_overlay_opacity_widget()
+
+    def _save_slope_overlay_opacity(self):
+        """Persist slope overlay opacity to the session config file."""
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            try:
+                opacity = max(0, min(100, int(getattr(self, "slope_overlay_opacity", 40))))
+            except (TypeError, ValueError):
+                opacity = 40
+            self.slope_overlay_opacity = opacity
+            config["slope_overlay_opacity"] = opacity
+            with open(self.CONFIG_FILENAME, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
 
     def _save_slope_overlay_bands(self):
         try:
@@ -559,7 +577,8 @@ class ConfigMixin:
             with open(self.CONFIG_FILENAME, "w") as f:
                 json.dump(config, f, indent=2)
         except Exception:
-            pass
+            # Still try to persist opacity even if band save fails
+            self._save_slope_overlay_opacity()
 
     def _add_slope_overlay_bands_to_params(self, params):
         if isinstance(params, dict):
