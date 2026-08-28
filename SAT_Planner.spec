@@ -6,31 +6,57 @@ import os
 
 block_cipher = None
 
-# Ensure project root is on path so we can import version
+# Ensure project root is on path so we can import bundle helpers
 _spec_dir = os.path.dirname(os.path.abspath(SPEC))
 sys.path.insert(0, _spec_dir)
 
-from sat_planner.constants import __version__
+# Read version without importing sat_planner.constants (that imports geospatial libs).
+import re
+_constants_path = os.path.join(_spec_dir, 'sat_planner', 'constants.py')
+with open(_constants_path, encoding='utf-8') as _f:
+    _version_match = re.search(r'__version__\s*=\s*["\']([^"\']+)', _f.read())
+if not _version_match:
+    raise RuntimeError(f'Could not read __version__ from {_constants_path}')
+__version__ = _version_match.group(1)
 exe_name = 'SAT_Planner_v' + __version__  # e.g. SAT_Planner_v2026.01
 
 # Icon path relative to project root
 icon_path = os.path.join(_spec_dir, 'media', 'CCOM.ico')
 
-# Data files: same pattern as working old.spec (pyproj/fiona/shapely/rasterio need their data)
+# Data files: package data plus conda GDAL/PROJ share trees (not inside site-packages).
 from PyInstaller.utils.hooks import collect_data_files
+from pyi_geospatial_bundle import (
+    conda_library_dirs,
+    collect_gdal_dlls,
+    collect_gdal_proj_data,
+)
 
 datas = []
-for pkg in ('pyproj', 'fiona', 'shapely', 'rasterio', 'matplotlib'):
+for pkg in ('pyproj', 'fiona', 'shapely', 'rasterio', 'matplotlib', 'colormaps'):
     try:
         datas += collect_data_files(pkg)
     except Exception:
         pass
 datas += [(os.path.join(_spec_dir, 'media'), 'media')]
 
+binaries = []
+_conda_bin, _conda_share = conda_library_dirs()
+if _conda_share:
+    _gdal_proj_data = collect_gdal_proj_data(_conda_share)
+    datas += _gdal_proj_data
+    print(f'Bundling GDAL/PROJ data: {len(_gdal_proj_data)} director{"y" if len(_gdal_proj_data) == 1 else "ies"}')
+else:
+    print('WARNING: conda Library/share not found; GDAL/PROJ data will not be bundled.')
+if _conda_bin:
+    binaries += collect_gdal_dlls(_conda_bin)
+    print(f'Bundling GDAL/PROJ DLLs: {len(binaries)} file(s)')
+else:
+    print('WARNING: conda Library/bin not found; GDAL/PROJ DLLs will not be bundled.')
+
 a = Analysis(
     ['SAT_Planner_PyQt.py'],
     pathex=[_spec_dir],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=[
         # Refactored package
@@ -81,6 +107,7 @@ a = Analysis(
         'matplotlib.figure', 'matplotlib.colors', 'matplotlib.pyplot',
         'PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets',
         'requests',  # optional: for GMRT grid download on calibration import
+        'colormaps', 'colormaps.cmaps', 'colormaps._registry', 'colormaps.colormap',
     ],
     hookspath=[],
     hooksconfig={},
@@ -106,8 +133,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    upx_exclude=[],
+    upx=False,
     runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,

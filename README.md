@@ -21,17 +21,19 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
 - **GMRT Download**: Optional download of GMRT bathymetry GeoTIFF when importing surveys (Calibration, Accuracy, Performance, Line tabs; configurable buffer). While a download is in flight, the per-tab import button turns orange and changes to **"Downloading GMRT - Click to Cancel"**; clicking it again cancels the worker, removes any partial file, and notifies the user. Failures restore the button the same way.
 - **Download Data**: Source selector in GeoTIFF Controls (default `Select Source`; current source `GMRT`) opens the "Download GMRT Grid" dialog immediately on selection and keeps the selected source after successful download
-- **Dyn Res**: Automatically adjust GeoTIFF resolution based on zoom level (**Dyn Res: ON/OFF** button in GeoTIFF Controls)
+- **Map Display** / **Color Map**: Display mode dropdown and colormap cycle button remain in the Bathymetry GeoTIFF panel; **Vertical Exaggeration** and **Dyn Res** live in **Map Options**
+- **Map Options** (icon, lower-left of the map): Non-modal dialog for Imagery Basemap, NOAA ENC + opacity, EEZs + opacity, Add/Remove Shapefile, Vertical Exaggeration, Dyn Res, Contours, and multi-range Slopes overlay (Qt overlay icons are not included in exported map PNGs)
+- **Measurement Tool** (icon to the right of Map Options): Toggle distance/heading measure mode; orange thick `+` cursor while active; bottom-strip prompt explains how to deactivate
 - **Interactive Plotting**: Pan (middle mouse), zoom (scroll), and interact with survey plans on the map (no toolbar)
 - **Real-time Statistics**: Calculate survey distances, times, and comprehensive statistics
-- **Elevation Profiles**: View elevation and slope profiles for drawn lines
+- **Elevation Profiles**: View elevation and slope profiles for drawn lines; **Show Slope Profile** checkbox on the bottom strip (right side, next to About)
 - **Activity Log**: Collapsible side panel below the map (expand/collapse strip)
 - **Export Capabilities**: Export survey plans in CSV, Shapefile, GeoJSON, asciiplan, LNW, PNG (high and/or low resolution), and companion text/statistics formats (varies by tab)
 - **Export Name**: Suggested basenames update automatically when blank or still matching the auto-generated pattern; **custom Export Names are preserved** and are not overwritten on Enter/blur or when plan parameters regenerate (Accuracy, Performance, Calibration, ADCP, Backscatter)
-- **Export Types** dialog (button on import/export panels): Toggle optional export products by format; choices are saved in `~/.cal_ref_planner_config.json` under `export_type_options`
+- **Export Types**: Opened from the **Select Export Directory** dialog (Action button); toggle optional export products by format; choices are saved in `~/.cal_ref_planner_config.json` under `export_type_options`
 - **Survey Import**: Import calibration, accuracy, performance, and line plans from DDD, DMS, DMM, LNW, CSV, GeoJSON, GPX, shapefile (`.shp`), or GeoPackage (`.gpkg`) (performance, calibration, and accuracy imports use an assignment dialog when geometry is ambiguous; shapefile/GPKG geometry is reprojected from its source CRS to WGS84 automatically)
-- **EEZ Overlay**: EEZ layer with opacity control (default 80%) and hover `GEONAME` tooltip lookup
-- **Visualization Shapefile Toggle**: `Add Shapefile` button switches to `Remove Shapefile` after loading, allowing quick removal of visualization overlays
+- **EEZ Overlay**: EEZ layer with opacity control (default 80%) and hover `GEONAME` tooltip lookup (controls in Map Options)
+- **Visualization Shapefile Toggle**: `Add Shapefile` / `Remove Shapefile` in Map Options after loading, allowing quick removal of visualization overlays
 
 ### Calibration Survey Planning
 - Draw pitch and roll calibration lines interactively
@@ -88,7 +90,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **Survey Info** dialog and *_info.txt with **Line Plan Waypoints (DMM)** and **Line Plan Waypoints (DDD)** sections (WP1, WP2, …)
 - Calculate survey statistics for drawn lines
 - Export uses shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`
-- Line export writes `*_params.json` including line survey speed, GeoTIFF path, visualization shapefile path list, and optional **`vert_exag_table`** / **`shaded_relief_cmap`**
+- Line export writes `*_params.json` including line survey speed, GeoTIFF path, visualization shapefile path list, and optional **`vert_exag_table`** / **`shaded_relief_cmap`** / **`slope_overlay_bands`** / **`slope_overlay_opacity`**
 
 ### Backscatter Normalization Planning
 - Dedicated **Backscatter** tab with criteria controls and a line/area planning workflow
@@ -103,12 +105,15 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Optional GMRT download after import
 
 ### GeoTIFF Visualization
-- **Display modes** (dropdown): **Shaded Relief** (default), **Shaded Slope**, **Hillshade**, **Slope**
-- **Shaded Relief**: Multidirectional hillshade underlay plus semi-transparent elevation color overlay (default colormap **rainbow**); uses the **dynamic vertical exaggeration (V.E.)** curve (`shaded_relief_dyn` column)
-- **Shaded Slope** / **Hillshade**: Same dynamic V.E. curve as Shaded Relief for hillshade rendering; Shaded Slope adds a slope-degree overlay
-- **V.E.** button: Opens a dialog to edit elevation-range breakpoints and **Shaded Relief** V.E. values; **Shaded Relief Dyn** values update automatically from the offset table; **Reset to Defaults** restores built-in breakpoints; table is saved in `~/.cal_ref_planner_config.json` and in survey `*_params.json` sidecars
-- **CMap** button: Cycles the Shaded Relief elevation overlay colormap through rainbow, viridis, cividis, turbo, CnBu (inverted), Greys (inverted), RdYlBu, Spectral (inverted), hsv (inverted), jet, and winter; choice is saved between sessions and in survey `*_params.json`
-- **Dyn Res** button: Toggle dynamic resolution loading for performance
+- **Map Display** modes (dropdown in Bathymetry GeoTIFF): **Shaded Relief** (default), **Shaded Slope**, **Hillshade**, **Slope**
+- **Shaded Relief**: Multidirectional hillshade underlay plus semi-transparent elevation color overlay (default colormap **rainbow**); uses the **dynamic vertical exaggeration** curve (`shaded_relief_dyn` column)
+- **Shaded Slope** / **Hillshade**: Same dynamic vertical exaggeration curve as Shaded Relief for hillshade rendering; Shaded Slope adds a slope-degree overlay
+- **Color Map** button: Cycles the Shaded Relief elevation overlay colormap through rainbow, viridis, cividis, turbo, CnBu (inverted), Greys (inverted), ice / arctic / sapphire / torch (when the optional `colormaps` package is installed), RdYlBu (inverted), Spectral (inverted), hsv (inverted), jet, and winter; choice is saved between sessions and in survey `*_params.json`
+- **Map Options** dialog (map icon):
+  - **Vertical Exaggeration**: Opens the breakpoint table (**Shaded Relief** values; **Shaded Relief Dyn** auto-derived); **Reset to Defaults** restores built-in breakpoints; saved in config and `*_params.json`
+  - **Dyn Res: ON/OFF**: Toggle dynamic resolution loading for performance
+  - **Contours (m)** and interval
+  - **Slopes**: Up to **three slope ranges**, each with min/max (degrees), color swatch, and a shared opacity slider (default 40%). Use **`-`** for min and/or max to leave a range undefined (it is not drawn); tooltip on the fields explains this. Defaults: Range 1 = 10–20° green; Ranges 2–3 = undefined with dodgerblue / orangered. Bands, colors, and opacity persist between sessions and in `*_params.json` (import overrides session values)
 - Hillshade rendering for better terrain visualization
 - Support for various coordinate reference systems (CRS)
 - Survey plan axis labels in degrees–decimal minutes (DDM)
@@ -117,7 +122,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - EEZ overlay reloads on pan/zoom and supports paused-hover name lookup
 
 ### GeoJSON metadata (and sidecar JSON)
-- **All survey `*_params.json` sidecars** (Calibration, Accuracy, Line, Backscatter, Performance, ADCP as applicable) may include **`vert_exag_table`** and **`shaded_relief_cmap`** so hillshade V.E. and Shaded Relief colormap settings travel with the survey on export/import.
+- **All survey `*_params.json` sidecars** (Calibration, Accuracy, Line, Backscatter, Performance, ADCP as applicable) may include **`vert_exag_table`**, **`shaded_relief_cmap`**, **`slope_overlay_bands`**, and **`slope_overlay_opacity`** so hillshade V.E., Shaded Relief colormap, and slope-overlay settings travel with the survey on export/import.
 - **Calibration**: GeoJSON holds line geometry and `line_num` / `line_name` only. The FeatureCollection **`properties`** may include **`geotiff_path`** so a saved raster can be reopened on import. **Survey speed**, **turn time (min)**, **lead-in (m)**, **heading line offset**, and **export name** live in **`{export_name}_params.json`** next to the GeoJSON (not in the `.geojson`). On import, that sidecar is optional; if it is absent, the app uses defaults and may repopulate the heading offset from the pitch line after load.
 - **Accuracy**: GeoJSON exports include **`survey_speed`**; saved raster path is stored in **`{export_name}_params.json`** as **`geotiff_path`**.
 - **Line** GeoJSON exports can include **`survey_speed`** and **`geotiff_path`** (collection and/or feature properties as applicable).
@@ -144,6 +149,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 ### Optional
 - **Pillow (PIL)** – Imagery Basemap and NOAA ENC Charts overlays; preferred path for resizing exported `*_low.png` email copies
 - **requests** – GMRT bathymetry download (dialog and optional download on import)
+- **colormaps** – Extra Shaded Relief colormaps (ice, arctic, sapphire, torch); without it those options are omitted from the Color Map cycle
 
 ## Project structure
 
@@ -151,16 +157,17 @@ The application is organized as a package plus a launcher:
 
 - **`SAT_Planner_PyQt.py`** – Entry point; creates the main window and runs the app (`python SAT_Planner_PyQt.py`).
 - **`sat_planner/`** – Core package:
-  - **`constants.py`** – Version, config path, geospatial library availability, Shaded Relief colormap options.
+  - **`constants.py`** – Version, config path, geospatial library availability, Shaded Relief colormap options, default slope-overlay bands.
   - **`export_utils.py`** – Shared export writers: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points; PNG helpers (`save_export_png`, `*_low.png` email copies).
   - **`performance_import_dialog.py`** – Assignment dialog for mapping imported segments to Performance swath lines 1–4 and optional BIST 1–4.
-  - **`dyn_vert_exag_dialog.py`** – Dialog for editing dynamic vertical exaggeration breakpoint tables (V.E. button).
+  - **`dyn_vert_exag_dialog.py`** – Dialog for editing dynamic vertical exaggeration breakpoint tables (Map Options → Vertical Exaggeration).
+  - **`map_options_dialog.py`** – Non-modal Map Options dialog (layers, V.E., Dyn Res, contours, slope ranges).
   - **`utils_geo.py`** – Coordinate helpers (e.g. decimal degrees to DDM).
   - **`utils_ui.py`** – UI helpers (message boxes, confirmations).
   - **`gmrt_dialog/`** – Embedded GMRT Download dialog (config, workers, map_widget, main_window); GeoTIFF-only output, optional split into topo/bathy.
   - **`mixins/`** – Feature mixins used by the main window:
     - **BasemapMixin** – Imagery basemap and NOAA ENC Charts overlays.
-    - **GeoTIFFMixin** – Load/remove GeoTIFF, display mode, dynamic resolution, contours.
+    - **GeoTIFFMixin** – Load/remove GeoTIFF, display mode, dynamic resolution, contours, slope-overlay bands/opacity.
     - **PlottingMixin** – Survey plan plot, limits, colorbars, DDM axis labels.
     - **SurveyParsersMixin** – DDD/DMS/DMM/LNW parsers (lines and polylines), UTM zone dialog.
     - **GMRTDownloadMixin** – GMRT GridServer download and load GeoTIFF.
@@ -169,16 +176,16 @@ The application is organized as a package plus a launcher:
     - **LinePlanningMixin** – Line planning tab, draw/edit, profile, statistics, optional GMRT on import.
     - **PerformanceMixin** – Performance tab: ping/line-length math, pick center/depth, plot/info, import/export hooks, debounced auto-plot.
     - **ProfilesMixin** – Crossline, pitch, line-planning, and performance elevation profiles (performance: line 1 + BIST colors aligned with map).
-    - **MapInteractionMixin** – Click, scroll, pan, zoom, pick center/pitch/roll.
-    - **ExportImportMixin** – Save/load parameters, export accuracy survey files, export performance survey files.
-    - **ConfigMixin** – Last-used directories, config load/save, persisted **Export Types** options, **`vert_exag_table`**, and **`shaded_relief_cmap`** (with migration from legacy `map_png` / `profiles_png` keys).
+    - **MapInteractionMixin** – Click, scroll, pan, zoom, pick center/pitch/roll, measurement tool.
+    - **ExportImportMixin** – Save/load parameters, export survey files, **Select Export Directory** dialog with **Export Types** button.
+    - **ConfigMixin** – Last-used directories, config load/save, persisted **Export Types** options, **`vert_exag_table`**, **`shaded_relief_cmap`**, **`slope_overlay_bands`**, and **`slope_overlay_opacity`** (with migration from legacy `map_png` / `profiles_png` keys).
 
 ## Installation
 
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `SAT_Planner_v2026.36.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
+- `SAT_Planner_v2026.37.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
 - `SAT_Planner.app` (macOS) — if available
 
 No installation required - just run the executable or app bundle.
@@ -195,13 +202,14 @@ cd SAT_Planner
 
 **Using pip:**
 ```bash
-pip install PyQt6 matplotlib numpy rasterio pyproj shapely fiona Pillow requests
+pip install PyQt6 matplotlib numpy rasterio pyproj shapely fiona Pillow requests colormaps
 ```
-(`requests` is used for GMRT bathymetry download.)
+(`requests` is used for GMRT bathymetry download; `colormaps` is optional for ice/arctic/sapphire/torch.)
 
 **Using conda (recommended for Windows and macOS):**
 ```bash
 conda install -c conda-forge pyqt matplotlib numpy rasterio pyproj shapely fiona pillow
+pip install requests colormaps
 ```
 
 3. Run the application:
@@ -241,13 +249,13 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 ### Basic Workflow
 
 1. **Load GeoTIFF** (optional): Click "Load GeoTIFF" to load elevation data, or use **Download Data** -> **GMRT** to open the GMRT dialog and download bathymetry (GeoTIFF-only; if you use split, the app loads the bathy grid)
-2. **GeoTIFF display** (optional): Use the **Display** dropdown (Shaded Relief, Shaded Slope, Hillshade, Slope), **V.E.** for hillshade vertical exaggeration breakpoints, **CMap** to cycle Shaded Relief elevation colors, and **Dyn Res** for zoom-based resolution
-3. **Enable Map Overlays** (optional): Toggle Imagery Basemap or NOAA ENC Charts checkboxes and adjust opacity sliders
+2. **GeoTIFF display** (optional): Use **Map Display** (Shaded Relief, Shaded Slope, Hillshade, Slope) and **Color Map** in the Bathymetry GeoTIFF panel; open **Map Options** (map icon) for Vertical Exaggeration, Dyn Res, Contours, and Slopes
+3. **Map overlays / measure** (optional): Use **Map Options** for Imagery Basemap, NOAA ENC, EEZs, and shapefiles; use the **Measurement** icon for distance/heading
 4. **Select Planning Mode**: Choose Calibration, Accuracy, Performance, or Line tabs
 5. **Configure Parameters**: Set survey parameters in the appropriate tab
 6. **Generate/Plan**: Create survey lines based on parameters or draw interactively
 7. **View Statistics / test info**: Open **Calibration Survey Info**, **Accuracy Survey Info**, **Show Performance Test Info** (Performance tab), or **Survey Info** (Line tab)
-8. **Export**: Save survey plans using the Export buttons; use **Export Types** first if you want to limit optional formats (shapefile, text, Hypack, GPX, PNG resolutions, etc.)
+8. **Export**: Save survey plans using the Export buttons; in **Select Export Directory**, use **Export Types** if you want to limit optional formats (shapefile, text, Hypack, GPX, PNG resolutions, etc.)
 
 ### Calibration Survey Planning
 
@@ -313,29 +321,33 @@ Use **Download Data** -> **GMRT** in the GeoTIFF Control section to open the **D
 
 Downloads are always GeoTIFF. The dialog uses its own config: `~/.gmrtgrab_sat_planner_config.json`.
 
-### Map Overlays
+### Map Options and Measurement
 
-1. **Imagery Basemap**: Check the "Imagery Basemap" checkbox to overlay satellite imagery
-   - Adjust opacity using the slider (0-100%)
-   - The basemap updates automatically as you pan and zoom
-   - Large-area/global views use wrap-aware alignment for correct placement
+Map controls sit as **Qt icons on the lower-left of the map** (not drawn into export PNGs):
 
-2. **NOAA ENC Charts**: Check the "NOAA ENC Charts" checkbox to overlay navigational charts
-   - Adjust opacity using the slider (0-100%)
-   - Charts are requested with equal cell size and properly reprojected for display
-   - Charts update automatically as you pan and zoom
+1. **Map Options** (`options_off.png` / `options_on.png` while the dialog is open): Non-modal dialog with:
+   - **Imagery Basemap**, **NOAA ENC Charts** (+ opacity), **Show EEZs** (+ opacity), **Add/Remove Shapefile**
+   - **Vertical Exaggeration** and **Dyn Res**
+   - **Contours (m)** and **Slopes** (three ranges + shared opacity)
+   - Basemap/ENC/EEZ layers update as you pan and zoom; large-area views use wrap-aware basemap alignment
+
+2. **Measurement Tool** (`dh_t_off.png` / `dh_t_on.png` when active): Click two points for distance and heading; orange thick `+` cursor while measuring. Click the icon again to deactivate (prompt on the bottom strip while active).
+
+Bottom strip (under the profile): left-side prompts (e.g. measurement active), **Show Slope Profile**, **About This Program**.
 
 ## Configuration
 
 The application saves configuration in:
 - `~/.cal_ref_planner_config.json` (user preferences), including:
   - Last used directories
-  - **`export_type_options`**: per-format export toggles (`esri_shapefile`, `sis_asciiplan`, `gpx`, `text_csv`, `text_txt`, `hypack_lnw`, `map_png_high`, `map_png_low`, `profiles_png_high`, `profiles_png_low`; all default **on**)
+  - **`export_type_options`**: per-format export toggles (`esri_shapefile`, `gpkg`, `sis_asciiplan`, `gpx`, `text_csv`, `text_txt`, `hypack_lnw`, `map_png_high`, `map_png_low`, `profiles_png_high`, `profiles_png_low`; most default **on**, `gpkg` default **off**)
   - **`vert_exag_table`**: Shaded Relief dynamic vertical exaggeration breakpoints (elevation range minima and **Shaded Relief** / **Shaded Relief Dyn** values); default breakpoints 0, 20, 50, 200, 1000 m
   - **`shaded_relief_cmap`**: Last selected Shaded Relief elevation overlay colormap (default **rainbow**)
+  - **`slope_overlay_bands`**: Three slope-overlay ranges (min/max degrees or null, color hex)
+  - **`slope_overlay_opacity`**: Slope overlay opacity percent (default **40**)
   - Other saved UI/planning preferences as applicable
 
-Survey **`{name}_params.json`** sidecars (and tab-specific variants such as `{name}_performance_params.json`, `{name}_adcp_params.json`) also store **`vert_exag_table`** and **`shaded_relief_cmap`** when exported, and restore them on import when present.
+Survey **`{name}_params.json`** sidecars (and tab-specific variants such as `{name}_performance_params.json`, `{name}_adcp_params.json`) also store **`vert_exag_table`**, **`shaded_relief_cmap`**, **`slope_overlay_bands`**, and **`slope_overlay_opacity`** when exported, and restore them on import when present (params values override the session config).
 
 ## Export Formats
 
@@ -346,11 +358,12 @@ Regardless of **Export Types** settings (Accuracy, Calibration, Performance, Lin
 - **`*_info.txt`** statistics / survey-info reports
 
 ### Optional (controlled by Export Types)
-Open **Export Types** on the tab’s import/export panel to enable or disable:
+In the **Select Export Directory** dialog, click **Export Types** to enable or disable:
 
 | Toggle | Product |
 |--------|---------|
 | ESRI Shapefile | `.shp` (+ sidecars) |
+| GeoPackage | `.gpkg` (default off) |
 | SIS ASCIIplan | asciiplan file |
 | GPX | `.gpx` (and per-test GPX where applicable) |
 | Text (.csv) | DDD, DMM, DMS CSV |
@@ -366,9 +379,9 @@ Backscatter **map** PNG toggles also control `{name}_backscatter_stats.png` (+ o
 ### Other export notes
 - **Export Name preservation**: Auto-suggested names update only when the field is blank or still matches a known auto pattern (e.g. `acc_depth…`, `perf_swell…`, `cal_depth…`, `ADCP_Cal_Circle…`, `BS_YYYYMMDD_…`). User-edited custom names are not reset on Enter/blur or when related plan parameters regenerate.
 - **CSV (DDD/DMM/DMS)**: Row format: line number, line name, point label, lat, lon (decimal degrees in file; DMM/DMS writers convert as needed)
-- **Calibration `{name}_params.json`**: **`survey_speed`**, **`turn_time`**, **`lead_in_m`**, **`line_offset`**, **`export_name`**, plus optional **`vert_exag_table`** and **`shaded_relief_cmap`**
-- **Accuracy `{name}_params.json`**: Includes **`geotiff_path`**, survey parameters, and optional **`vert_exag_table`** / **`shaded_relief_cmap`**
-- **Backscatter `{name}_params.json`**: Centerline, half-width, lead-in, line settings, filter/overlay settings, related paths, and optional **`vert_exag_table`** / **`shaded_relief_cmap`**
+- **Calibration `{name}_params.json`**: **`survey_speed`**, **`turn_time`**, **`lead_in_m`**, **`line_offset`**, **`export_name`**, plus optional **`vert_exag_table`**, **`shaded_relief_cmap`**, **`slope_overlay_bands`**, **`slope_overlay_opacity`**
+- **Accuracy `{name}_params.json`**: Includes **`geotiff_path`**, survey parameters, and optional viz keys above
+- **Backscatter `{name}_params.json`**: Centerline, half-width, lead-in, line settings, filter/overlay settings, related paths, and optional viz keys above
 
 ## Navigation
 
@@ -411,6 +424,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.37**: Map chrome declutter. **Map Options** icon (lower-left of map) opens a non-modal dialog for basemap/ENC/EEZ/shapefile, **Vertical Exaggeration**, **Dyn Res**, Contours, and **Slopes** (three ranges with colors, shared opacity, `-` = undefined/off). **Measurement Tool** is a map icon with orange thick `+` cursor and bottom-strip deactivate prompt. Bathymetry panel keeps **Map Display** and **Color Map** (extra ice/arctic/sapphire/torch when `colormaps` is installed; RdYlBu inverted). **Export Types** moved into the **Select Export Directory** dialog. Slope overlay bands/opacity and colormap persist in config and `*_params.json`.
 - **v2026.36**: Export Name fields no longer snap back to the default suggested basename after editing. **Accuracy** and **Performance** no longer regenerate the name on Enter/blur; **Calibration**, **ADCP**, and **Backscatter** keep custom names when pitch/offset, diameter, or geometry updates would previously overwrite them. Blank names and names that still match the auto-generated pattern continue to refresh as parameters change.
 - **v2026.35**: GeoTIFF display and visualization controls. **Shaded Relief** is now the single elevation-overlay mode (former **Shaded Relief Dyn** behavior): dynamic V.E. curve with multidirectional hillshade and semi-transparent elevation colors. Display dropdown: Shaded Relief, Shaded Slope, Hillshade, Slope. New **V.E.** button opens an editable breakpoint table (elevation range minima and Shaded Relief values; Shaded Relief Dyn auto-derived); defaults and user edits persist in `~/.cal_ref_planner_config.json` and survey `*_params.json`. New **CMap** button cycles Shaded Relief elevation colormaps (rainbow default; viridis, cividis, turbo, inverted CnBu/Greys/Spectral/hsv, RdYlBu, jet, winter); colormap persists between sessions and in params sidecars. **Hillshade** and **Shaded Slope** hillshade layers use the same dynamic V.E. curve as Shaded Relief. **Dynamic Resolution** button label shortened to **Dyn Res:** ON/OFF; **V.E.** button uses compact fixed width.
 - **v2026.31**: Calibration tab layout cleanup and post-import zoom fix. The pitch-line, heading-line, and roll-line controls in the Calibration parameter panel are now paired on three compact rows: **Draw Pitch Line** + **Edit Pitch Line** share a row at 50/50 width, **Add Heading Lines** + **Line Offset (m)** share the next row at 50/50, and **Draw Roll Line** + **Edit Roll Line** share the row below at 50/50. The `Heading Line Offset (m)` label was shortened to **`Line Offset (m)`** to match the more compact column. Button text in active modes was simplified: `Draw a Pitch Line` -> `Draw Pitch Line`, `Draw a Roll Line` -> `Draw Roll Line`, `Drawing Pitch Line: Click Start Point` -> `Left Click Pitch Start Point`, `Drawing Pitch Line: Click End Point` -> `Click Pitch End Point`, `Drawing Roll Line: Click Start Point` -> `Click Roll Line Start Point`, `Drawing Roll Line: Click End Point` -> `Click Roll Line End Point`, and the in-edit labels `Click to Stop Editing Pitch Line` / `Click to Stop Editing Roll Line` were both shortened to `Click to Stop Editing`. The Draw Pitch Line, Draw Roll Line, Edit Pitch Line, and Edit Roll Line buttons now share a single visual convention while their mode is active: orange + bold text (`rgb(255, 165, 0)`, `font-weight: bold`), reverting to the default stylesheet when the action completes or is cancelled. While Edit mode is active for either pitch or roll, the other "next logical action" buttons (e.g. Add Heading Lines / Draw Roll Line) have their orange + bold highlighting snapshotted and reset to neutral; on exit those snapshots are restored so the highlighting comes back exactly as it was. The post-import GMRT zoom now lands on the bounds of the imported plan instead of the bounds of the downloaded GMRT grid: `_load_geotiff_from_path` accepts `auto_zoom_to_geotiff=False`, the GMRT post-download callback uses it, and a new `_zoom_to_tab_plan(tab_index=...)` dispatcher routes to the per-tab zoom helper (Calibration -> `_zoom_to_any_lines`, Accuracy -> `_zoom_to_plan`, Line -> `_zoom_to_line`, Backscatter -> a new `_zoom_to_backscatter_line_or_area`, Performance -> `_zoom_to_performance_lines`). The tab that started the import is recorded when the download begins, so the right zoom still fires even if the user switches tabs while the download is running.

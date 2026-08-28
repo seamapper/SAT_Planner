@@ -3,26 +3,27 @@ Shared constants for SAT Planner.
 Single source of truth for version, config path, and geospatial availability.
 """
 import os
+import sys
+import traceback
 
-__version__ = "2026.37"
+__version__ = "2026.38"
 
 CONFIG_FILENAME = os.path.join(os.path.expanduser("~"), ".cal_ref_planner_config.json")
 
 # Register third-party colormaps with matplotlib (via colormaps package).
+_OPTIONAL_COLORMAP_NAMES = ("ice", "arctic", "sapphire", "torch")
 _COLORMAPS_EXTRA = ()
 try:
     import colormaps as cmaps
 
-    _ = cmaps.ice
-    _ = cmaps.arctic
-    _ = cmaps.sapphire
-    _ = cmaps.torch
-    _COLORMAPS_EXTRA = (
-        ("ice", "ice"),
-        ("arctic", "arctic"),
-        ("sapphire", "sapphire"),
-        ("torch", "torch"),
-    )
+    _available = []
+    for _name in _OPTIONAL_COLORMAP_NAMES:
+        try:
+            getattr(cmaps, _name)
+            _available.append((_name, _name))
+        except (AttributeError, OSError, ValueError):
+            pass
+    _COLORMAPS_EXTRA = tuple(_available)
 except ImportError:
     pass
 
@@ -78,6 +79,18 @@ try:
     from pyproj.exceptions import CRSError
     from shapely.geometry import LineString
     import fiona
-except ImportError as e:
+except (ImportError, OSError) as e:
     GEOSPATIAL_LIBS_AVAILABLE = False
-    print(f"Warning: A geospatial library not found: {e}. GeoTIFF/Shapefile features will be disabled.")
+    _geo_msg = (
+        f"Warning: A geospatial library not found: {e}. "
+        "GeoTIFF/Shapefile features will be disabled."
+    )
+    print(_geo_msg)
+    if getattr(sys, "frozen", False):
+        try:
+            _log_path = os.path.join(os.path.expanduser("~"), "sat_planner_geospatial_error.log")
+            with open(_log_path, "w", encoding="utf-8") as _log:
+                _log.write(_geo_msg + "\n\n")
+                traceback.print_exc(file=_log)
+        except OSError:
+            pass

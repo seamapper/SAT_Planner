@@ -6,9 +6,13 @@ REM Build executable for SAT Planner
 REM Output: SAT_Planner_v{version}.exe (version from sat_planner.constants). Icon: media\CCOM.ico
 
 set PYTHON_PATH=C:\Users\pjohnson\AppData\Local\miniforge3\python.exe
+set CONDA_ACTIVATE=C:\Users\pjohnson\AppData\Local\miniforge3\Scripts\activate.bat
 
 echo Building SAT Planner executable (name and version from code)...
 echo.
+
+REM Activate conda so GDAL/PROJ DLLs are available during the PyInstaller analysis phase.
+call "%CONDA_ACTIVATE%"
 
 REM Check if PyInstaller is installed
 "%PYTHON_PATH%" -m pip show pyinstaller >nul 2>&1
@@ -18,7 +22,7 @@ if errorlevel 1 (
 )
 
 REM Build using SAT_Planner.spec (exe name = SAT_Planner_v + __version__, icon = media\CCOM.ico)
-"%PYTHON_PATH%" -m PyInstaller SAT_Planner.spec
+"%PYTHON_PATH%" -m PyInstaller --noconfirm SAT_Planner.spec
 
 if errorlevel 1 (
     echo.
