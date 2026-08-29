@@ -418,7 +418,7 @@ class GeoTIFFMixin:
             log_func=lambda msg, append=True: self.set_line_info_text(msg, append=append) if hasattr(self, "set_line_info_text") else None,
             default_directory=getattr(self, "last_backscatter_import_dir", None),
             split_topo_depths=split_topo_depths,
-            gmrt_button=getattr(self, "backscatter_import_btn", None),
+            gmrt_button=self._active_import_button(),
         )
 
     def _import_backscatter_line(self):

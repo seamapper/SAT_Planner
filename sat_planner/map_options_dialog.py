@@ -31,13 +31,15 @@ class MapOptionsDialog(QDialog):
         slope_overlay_band_widgets,
         slope_overlay_opacity_label,
         slope_overlay_opacity_slider,
+        elevation_slope_combo,
+        shaded_relief_cmap_btn,
         dyn_vert_exag_btn,
         dynamic_resolution_btn,
     ):
         super().__init__(parent)
         self.setWindowTitle("Map Options")
         self.setModal(False)
-        self.resize(420, 460)
+        self.resize(420, 500)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -69,8 +71,18 @@ class MapOptionsDialog(QDialog):
         geotiff_layout = QVBoxLayout(geotiff_group)
         geotiff_layout.setSpacing(6)
 
-        display_row = QHBoxLayout()
         half_width = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        map_display_row = QHBoxLayout()
+        map_display_row.addWidget(QLabel("Map Display:"))
+        elevation_slope_combo.setSizePolicy(half_width)
+        map_display_row.addWidget(elevation_slope_combo, 1)
+        geotiff_layout.addLayout(map_display_row)
+
+        shaded_relief_cmap_btn.setSizePolicy(half_width)
+        geotiff_layout.addWidget(shaded_relief_cmap_btn)
+
+        display_row = QHBoxLayout()
         dyn_vert_exag_btn.setSizePolicy(half_width)
         dynamic_resolution_btn.setSizePolicy(half_width)
         display_row.addWidget(dyn_vert_exag_btn, 1)

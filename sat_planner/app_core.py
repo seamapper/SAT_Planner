@@ -443,6 +443,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             # Restored: Enable/disable for elevation_slope_combo
             if hasattr(self, 'elevation_slope_combo'):
                 self.elevation_slope_combo.setEnabled(False)
+            if hasattr(self, 'shaded_relief_cmap_btn'):
+                self.shaded_relief_cmap_btn.setEnabled(False)
             if hasattr(self, 'pick_center_btn'):
                 self.pick_center_btn.setEnabled(False)
             if hasattr(self, 'performance_pick_center_btn'):
@@ -479,10 +481,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.backscatter_move_waypoints_btn.setEnabled(False)
             if hasattr(self, 'backscatter_show_info_btn'):
                 self.backscatter_show_info_btn.setEnabled(False)
-            if hasattr(self, 'backscatter_import_btn'):
-                self.backscatter_import_btn.setEnabled(False)
-            if hasattr(self, 'backscatter_export_btn'):
-                self.backscatter_export_btn.setEnabled(False)
+            if hasattr(self, 'shared_import_btn'):
+                self.shared_import_btn.setEnabled(False)
+            if hasattr(self, 'shared_export_btn'):
+                self.shared_export_btn.setEnabled(False)
             if hasattr(self, 'backscatter_download_gmrt_checkbox'):
                 self.backscatter_download_gmrt_checkbox.setEnabled(False)
             if hasattr(self, 'backscatter_gmrt_buffer_spin'):
@@ -836,6 +838,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 )),
                 self.slope_overlay_opacity_label,
                 self.slope_overlay_opacity_slider,
+                self.elevation_slope_combo,
+                self.shaded_relief_cmap_btn,
                 self.dyn_vert_exag_btn,
                 self.dynamic_resolution_btn,
             )
@@ -1022,6 +1026,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             # Mark as initialized and update previous tab index
             self.tab_switch_initialized = True
             self.previous_tab_index = current_tab
+            if hasattr(self, "_update_shared_survey_io_ui"):
+                self._update_shared_survey_io_ui()
         except Exception as e:
             print(f"Error in tab change handler: {e}")
 
@@ -1116,17 +1122,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         geotiff_layout.addWidget(download_data_row)
         geotiff_layout.addSpacing(3)
 
-        # Display mode dropdown - label and combo on same line
-        display_frame = QWidget()
-        display_layout = QHBoxLayout(display_frame)
-        display_layout.setContentsMargins(0, 0, 0, 0)
-        display_layout.addWidget(QLabel("Map Display:"))
+        # Map display / colormap controls (hosted in Map Options dialog)
         self.elevation_slope_combo = QComboBox()
         self.elevation_slope_combo.addItems(["Shaded Relief", "Shaded Slope", "Hillshade", "Slope"])
-        self.elevation_slope_combo.setCurrentText("Shaded Relief")  # Set default
+        self.elevation_slope_combo.setCurrentText("Shaded Relief")
         self.elevation_slope_combo.currentTextChanged.connect(self._on_geotiff_display_mode_changed)
         self.elevation_slope_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        display_layout.addWidget(self.elevation_slope_combo)
         self.dyn_vert_exag_btn = QPushButton("Vertical Exaggeration")
         self.dyn_vert_exag_btn.clicked.connect(self._open_dyn_vert_exag_dialog)
         self.dyn_vert_exag_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -1138,12 +1139,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.shaded_relief_cmap_btn.clicked.connect(self._cycle_shaded_relief_cmap)
         self.shaded_relief_cmap_btn.setMinimumWidth(0)
         self.shaded_relief_cmap_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        display_layout.addWidget(self.shaded_relief_cmap_btn)
         if hasattr(self, "_update_shaded_relief_cmap_button"):
             self._update_shaded_relief_cmap_button()
-        display_layout.addStretch()
-        geotiff_layout.addWidget(display_frame)
-        geotiff_layout.addSpacing(3)
 
         # Contours / slope overlay controls (hosted in Map Options dialog)
         self.show_contours_checkbox = QCheckBox("Contours (m)")
@@ -1193,7 +1190,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # --- Test Planning GroupBox (contains tabs) ---
         test_planning_groupbox = QGroupBox("Test Planning")
-        test_planning_layout = QVBoxLayout(test_planning_groupbox)
+        self._test_planning_layout = QVBoxLayout(test_planning_groupbox)
 
         self.param_notebook = QTabWidget()
 
@@ -1214,7 +1211,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.param_notebook.addTab(self.performance_frame, "Performance")
         self.param_notebook.addTab(self.adcp_frame, "ADCP")
 
-        test_planning_layout.addWidget(self.param_notebook)
+        self._test_planning_layout.addWidget(self.param_notebook)
         param_layout.addWidget(test_planning_groupbox)
 
         # --- Activity Log GroupBox (reparented to right-side bottom strip in _setup_layout) ---
@@ -1410,77 +1407,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_test_plan_info_layout.addWidget(self.ref_show_info_btn, ref_test_plan_row, 0, 1, 2)
 
         ref_layout.addWidget(ref_test_plan_info_groupbox, row, 0, 1, 2)
-        ref_layout.setRowStretch(row, 0)
-        row += 1
-
-        # --- Import/Export GroupBox ---
-        ref_import_export_groupbox = QGroupBox("Accuracy Import/Export")
-        ref_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        ref_import_export_layout = QVBoxLayout(ref_import_export_groupbox)
-        ref_import_export_layout.setSpacing(0)
-        ref_import_export_layout.setContentsMargins(9, 9, 9, 9)
-
-        self.import_survey_btn = QPushButton("Import Accuracy Survey")
-        self.import_survey_btn.clicked.connect(self._import_survey_files)
-        ref_import_export_layout.addWidget(self.import_survey_btn)
-        ref_import_export_layout.addSpacing(3)
-
-        # Download GMRT row (same as Calibration)
-        ref_gmrt_row = QWidget()
-        ref_gmrt_row_layout = QHBoxLayout(ref_gmrt_row)
-        ref_gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
-        ref_gmrt_row_layout.setSpacing(6)
-        self.ref_download_gmrt_checkbox = QCheckBox("Download GMRT")
-        self.ref_download_gmrt_checkbox.setChecked(False)
-        self.ref_download_gmrt_checkbox.setToolTip("When enabled, importing a reference survey will download a GMRT bathymetry GeoTIFF (buffer and 100 m resolution) and load it.")
-        ref_gmrt_row_layout.addWidget(self.ref_download_gmrt_checkbox)
-        self.ref_gmrt_buffer_spin = QDoubleSpinBox()
-        self.ref_gmrt_buffer_spin.setRange(0.01, 10.0)
-        self.ref_gmrt_buffer_spin.setSingleStep(0.1)
-        self.ref_gmrt_buffer_spin.setValue(0.5)
-        self.ref_gmrt_buffer_spin.setDecimals(2)
-        self.ref_gmrt_buffer_spin.setMinimumWidth(60)
-        self.ref_gmrt_buffer_spin.setToolTip("Buffer size in degrees around survey extent for GMRT download.")
-        ref_gmrt_row_layout.addWidget(self.ref_gmrt_buffer_spin)
-        self.ref_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
-        self.ref_split_topo_depths_checkbox.setChecked(True)
-        self.ref_split_topo_depths_checkbox.setToolTip(
-            "When on, the downloaded GMRT GeoTIFF is split into a topography file "
-            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
-            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
-        )
-        self.ref_split_topo_depths_checkbox.setEnabled(self.ref_download_gmrt_checkbox.isChecked())
-        self.ref_download_gmrt_checkbox.toggled.connect(self.ref_split_topo_depths_checkbox.setEnabled)
-        ref_gmrt_row_layout.addWidget(self.ref_split_topo_depths_checkbox)
-        ref_gmrt_row_layout.addStretch()
-        ref_import_export_layout.addWidget(ref_gmrt_row)
-        ref_import_export_layout.addSpacing(3)
-
-        self.export_survey_btn = QPushButton("Export Accuracy Survey")
-        self.export_survey_btn.clicked.connect(self._export_survey_files)
-        ref_import_export_layout.addWidget(self.export_survey_btn)
-        ref_import_export_layout.addSpacing(3)
-
-        # Export Name at the bottom
-        ref_export_name_frame = QWidget()
-        ref_export_name_layout = QGridLayout(ref_export_name_frame)
-        ref_export_name_layout.setSpacing(0)
-        ref_export_name_layout.setContentsMargins(0, 0, 0, 0)
-        ref_export_name_layout.setColumnStretch(0, 1)
-        ref_export_name_layout.setColumnStretch(1, 2)
-        ref_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
-        self.export_name_entry = QLineEdit()
-        try:
-            heading = float(self.heading_entry.text() or "0")
-            cross = int(round((heading + 90) % 360))
-            export_name = f"acc_depth0m_cross{cross}deg"
-        except Exception:
-            export_name = "acc_depth0m_cross90deg"
-        self.export_name_entry.setText(export_name)
-        ref_export_name_layout.addWidget(self.export_name_entry, 0, 1)
-        ref_import_export_layout.addWidget(ref_export_name_frame)
-
-        ref_layout.addWidget(ref_import_export_groupbox, row, 0, 1, 2)
         ref_layout.setRowStretch(row, 0)
         row += 1
 
@@ -1708,68 +1634,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_layout.setRowStretch(cal_row, 0)
         cal_row += 1
 
-        # --- Import/Export GroupBox ---
-        cal_import_export_groupbox = QGroupBox("Calibration Import/Export")
-        cal_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        cal_import_export_layout = QVBoxLayout(cal_import_export_groupbox)
-        cal_import_export_layout.setSpacing(0)
-        cal_import_export_layout.setContentsMargins(9, 9, 9, 9)
-
-        self.cal_import_survey_btn = QPushButton("Import Calibration Survey")
-        self.cal_import_survey_btn.clicked.connect(self._import_cal_survey_files)
-        cal_import_export_layout.addWidget(self.cal_import_survey_btn)
-        cal_import_export_layout.addSpacing(3)
-
-        gmrt_row = QWidget()
-        gmrt_row_layout = QHBoxLayout(gmrt_row)
-        gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
-        gmrt_row_layout.setSpacing(6)
-        self.cal_download_gmrt_checkbox = QCheckBox("Download GMRT")
-        self.cal_download_gmrt_checkbox.setChecked(False)
-        self.cal_download_gmrt_checkbox.setToolTip("When enabled, importing a calibration survey will download a GMRT bathymetry GeoTIFF (buffer and 100 m resolution) and load it.")
-        gmrt_row_layout.addWidget(self.cal_download_gmrt_checkbox)
-        self.cal_gmrt_buffer_spin = QDoubleSpinBox()
-        self.cal_gmrt_buffer_spin.setRange(0.01, 10.0)
-        self.cal_gmrt_buffer_spin.setSingleStep(0.1)
-        self.cal_gmrt_buffer_spin.setValue(0.5)
-        self.cal_gmrt_buffer_spin.setDecimals(2)
-        self.cal_gmrt_buffer_spin.setMinimumWidth(60)
-        self.cal_gmrt_buffer_spin.setToolTip("Buffer size in degrees around survey extent for GMRT download.")
-        gmrt_row_layout.addWidget(self.cal_gmrt_buffer_spin)
-        self.cal_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
-        self.cal_split_topo_depths_checkbox.setChecked(True)
-        self.cal_split_topo_depths_checkbox.setToolTip(
-            "When on, the downloaded GMRT GeoTIFF is split into a topography file "
-            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
-            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
-        )
-        self.cal_split_topo_depths_checkbox.setEnabled(self.cal_download_gmrt_checkbox.isChecked())
-        self.cal_download_gmrt_checkbox.toggled.connect(self.cal_split_topo_depths_checkbox.setEnabled)
-        gmrt_row_layout.addWidget(self.cal_split_topo_depths_checkbox)
-        gmrt_row_layout.addStretch()
-        cal_import_export_layout.addWidget(gmrt_row)
-        cal_import_export_layout.addSpacing(3)
-
-        self.cal_export_survey_btn = QPushButton("Export Calibration Survey")
-        self.cal_export_survey_btn.clicked.connect(self._export_cal_survey_files)
-        cal_import_export_layout.addWidget(self.cal_export_survey_btn)
-        cal_import_export_layout.addSpacing(3)
-        # Export Name at the bottom
-        export_name_frame = QWidget()
-        export_name_layout = QGridLayout(export_name_frame)
-        export_name_layout.setSpacing(0)
-        export_name_layout.setContentsMargins(0, 0, 0, 0)
-        export_name_layout.setColumnStretch(0, 1)
-        export_name_layout.setColumnStretch(1, 2)
-        export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
-        self.cal_export_name_entry = QLineEdit()
-        export_name_layout.addWidget(self.cal_export_name_entry, 0, 1)
-        cal_import_export_layout.addWidget(export_name_frame)
-
-        cal_layout.addWidget(cal_import_export_groupbox, cal_row, 0, 1, 2)
-        cal_layout.setRowStretch(cal_row, 0)
-        cal_row += 1
-
         # Add stretch at the bottom to push all groupboxes to the top
         cal_layout.setRowStretch(cal_row, 1)
 
@@ -1878,72 +1742,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         line_test_plan_info_layout.addWidget(self.line_show_info_btn, line_test_plan_row, 0, 1, 2)
 
         line_layout.addWidget(line_test_plan_info_groupbox, line_row, 0, 1, 2)
-        line_layout.setRowStretch(line_row, 0)
-        line_row += 1
-
-        # --- Import/Export GroupBox ---
-        line_import_export_groupbox = QGroupBox("Line Import/Export")
-        line_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        line_import_export_layout = QVBoxLayout(line_import_export_groupbox)
-        line_import_export_layout.setSpacing(0)
-        line_import_export_layout.setContentsMargins(9, 9, 9, 9)
-
-        self.line_import_btn = QPushButton("Import Line Survey")
-        self.line_import_btn.clicked.connect(self._import_drawn_line)
-        line_import_export_layout.addWidget(self.line_import_btn)
-        line_import_export_layout.addSpacing(3)
-
-        # Download GMRT row (same as Calibration / Reference)
-        line_gmrt_row = QWidget()
-        line_gmrt_row_layout = QHBoxLayout(line_gmrt_row)
-        line_gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
-        line_gmrt_row_layout.setSpacing(6)
-        self.line_plan_download_gmrt_checkbox = QCheckBox("Download GMRT")
-        self.line_plan_download_gmrt_checkbox.setChecked(False)
-        self.line_plan_download_gmrt_checkbox.setToolTip("When enabled, importing a line plan survey will download a GMRT bathymetry GeoTIFF (buffer and 100 m resolution) and load it.")
-        line_gmrt_row_layout.addWidget(self.line_plan_download_gmrt_checkbox)
-        self.line_plan_gmrt_buffer_spin = QDoubleSpinBox()
-        self.line_plan_gmrt_buffer_spin.setRange(0.01, 10.0)
-        self.line_plan_gmrt_buffer_spin.setSingleStep(0.1)
-        self.line_plan_gmrt_buffer_spin.setValue(0.5)
-        self.line_plan_gmrt_buffer_spin.setDecimals(2)
-        self.line_plan_gmrt_buffer_spin.setMinimumWidth(60)
-        self.line_plan_gmrt_buffer_spin.setToolTip("Buffer size in degrees around survey extent for GMRT download.")
-        line_gmrt_row_layout.addWidget(self.line_plan_gmrt_buffer_spin)
-        self.line_plan_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
-        self.line_plan_split_topo_depths_checkbox.setChecked(True)
-        self.line_plan_split_topo_depths_checkbox.setToolTip(
-            "When on, the downloaded GMRT GeoTIFF is split into a topography file "
-            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
-            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
-        )
-        self.line_plan_split_topo_depths_checkbox.setEnabled(self.line_plan_download_gmrt_checkbox.isChecked())
-        self.line_plan_download_gmrt_checkbox.toggled.connect(self.line_plan_split_topo_depths_checkbox.setEnabled)
-        line_gmrt_row_layout.addWidget(self.line_plan_split_topo_depths_checkbox)
-        line_gmrt_row_layout.addStretch()
-        line_import_export_layout.addWidget(line_gmrt_row)
-        line_import_export_layout.addSpacing(3)
-
-        self.line_export_btn = QPushButton("Export Line Survey")
-        self.line_export_btn.clicked.connect(self._export_drawn_line)
-        line_import_export_layout.addWidget(self.line_export_btn)
-        line_import_export_layout.addSpacing(3)
-
-        # Export Name at the bottom
-        line_export_name_frame = QWidget()
-        line_export_name_layout = QGridLayout(line_export_name_frame)
-        line_export_name_layout.setSpacing(0)
-        line_export_name_layout.setContentsMargins(0, 0, 0, 0)
-        line_export_name_layout.setColumnStretch(0, 1)
-        line_export_name_layout.setColumnStretch(1, 2)
-        line_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
-        self.line_export_name_entry = QLineEdit()
-        default_export_name = f"Line_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        self.line_export_name_entry.setText(default_export_name)
-        line_export_name_layout.addWidget(self.line_export_name_entry, 0, 1)
-        line_import_export_layout.addWidget(line_export_name_frame)
-
-        line_layout.addWidget(line_import_export_groupbox, line_row, 0, 1, 2)
         line_layout.setRowStretch(line_row, 0)
         line_row += 1
 
@@ -2279,66 +2077,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         backscatter_line_planning_layout.addWidget(backscatter_line_plot_control_group)
         backscatter_layout.addWidget(backscatter_line_planning_group)
 
-        backscatter_import_export_group = QGroupBox("Backscatter Import/Export")
-        backscatter_import_export_layout = QVBoxLayout(backscatter_import_export_group)
-        backscatter_import_export_layout.setSpacing(0)
-        backscatter_import_export_layout.setContentsMargins(9, 9, 9, 9)
-
-        self.backscatter_import_btn = QPushButton("Import Backscatter Line")
-        self.backscatter_import_btn.clicked.connect(self._import_backscatter_line)
-        backscatter_import_export_layout.addWidget(self.backscatter_import_btn)
-        backscatter_import_export_layout.addSpacing(3)
-
-        backscatter_gmrt_row = QWidget()
-        backscatter_gmrt_row_layout = QHBoxLayout(backscatter_gmrt_row)
-        backscatter_gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
-        backscatter_gmrt_row_layout.setSpacing(6)
-        self.backscatter_download_gmrt_checkbox = QCheckBox("Download GMRT")
-        self.backscatter_download_gmrt_checkbox.setChecked(False)
-        self.backscatter_download_gmrt_checkbox.setToolTip(
-            "When enabled, importing a backscatter line will download a GMRT bathymetry GeoTIFF (buffer and 100 m resolution) and load it."
-        )
-        backscatter_gmrt_row_layout.addWidget(self.backscatter_download_gmrt_checkbox)
-        self.backscatter_gmrt_buffer_spin = QDoubleSpinBox()
-        self.backscatter_gmrt_buffer_spin.setRange(0.01, 10.0)
-        self.backscatter_gmrt_buffer_spin.setSingleStep(0.1)
-        self.backscatter_gmrt_buffer_spin.setValue(0.5)
-        self.backscatter_gmrt_buffer_spin.setDecimals(2)
-        self.backscatter_gmrt_buffer_spin.setMinimumWidth(60)
-        self.backscatter_gmrt_buffer_spin.setToolTip("Buffer size in degrees around backscatter extent for GMRT download.")
-        backscatter_gmrt_row_layout.addWidget(self.backscatter_gmrt_buffer_spin)
-        self.backscatter_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
-        self.backscatter_split_topo_depths_checkbox.setChecked(True)
-        self.backscatter_split_topo_depths_checkbox.setToolTip(
-            "When on, the downloaded GMRT GeoTIFF is split into a topography file "
-            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
-            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
-        )
-        self.backscatter_split_topo_depths_checkbox.setEnabled(self.backscatter_download_gmrt_checkbox.isChecked())
-        self.backscatter_download_gmrt_checkbox.toggled.connect(self.backscatter_split_topo_depths_checkbox.setEnabled)
-        backscatter_gmrt_row_layout.addWidget(self.backscatter_split_topo_depths_checkbox)
-        backscatter_gmrt_row_layout.addStretch()
-        backscatter_import_export_layout.addWidget(backscatter_gmrt_row)
-        backscatter_import_export_layout.addSpacing(3)
-
-        self.backscatter_export_btn = QPushButton("Export Backscatter Line")
-        self.backscatter_export_btn.clicked.connect(self._export_backscatter_line)
-        backscatter_import_export_layout.addWidget(self.backscatter_export_btn)
-        backscatter_import_export_layout.addSpacing(3)
-
-        backscatter_export_name_frame = QWidget()
-        backscatter_export_name_layout = QGridLayout(backscatter_export_name_frame)
-        backscatter_export_name_layout.setSpacing(0)
-        backscatter_export_name_layout.setContentsMargins(0, 0, 0, 0)
-        backscatter_export_name_layout.setColumnStretch(0, 1)
-        backscatter_export_name_layout.setColumnStretch(1, 2)
-        backscatter_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
-        self.backscatter_export_name_entry = QLineEdit(f"BS_{datetime.datetime.now().strftime('%Y%m%d')}_0")
-        backscatter_export_name_layout.addWidget(self.backscatter_export_name_entry, 0, 1)
-        backscatter_import_export_layout.addWidget(backscatter_export_name_frame)
-
-        backscatter_layout.addWidget(backscatter_import_export_group)
-
         backscatter_layout.addStretch(1)
 
         # --- Performance Tab ---
@@ -2499,74 +2237,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         swath_perf_layout.addWidget(performance_plot_control_groupbox, swath_perf_row, 0, 1, 2)
         swath_perf_row += 1
 
-        perf_import_export_groupbox = QGroupBox("Performance Import/Export")
-        perf_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        perf_import_export_layout = QVBoxLayout(perf_import_export_groupbox)
-        perf_import_export_layout.setSpacing(0)
-        perf_import_export_layout.setContentsMargins(9, 9, 9, 9)
-
-        self.performance_import_survey_btn = QPushButton("Import Performance Survey")
-        self.performance_import_survey_btn.clicked.connect(self._import_performance_survey)
-        perf_import_export_layout.addWidget(self.performance_import_survey_btn)
-        perf_import_export_layout.addSpacing(3)
-
-        perf_gmrt_row = QWidget()
-        perf_gmrt_row_layout = QHBoxLayout(perf_gmrt_row)
-        perf_gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
-        perf_gmrt_row_layout.setSpacing(6)
-        self.performance_download_gmrt_checkbox = QCheckBox("Download GMRT")
-        self.performance_download_gmrt_checkbox.setChecked(False)
-        self.performance_download_gmrt_checkbox.setToolTip(
-            "When enabled, importing a performance survey downloads a GMRT bathymetry GeoTIFF "
-            "(buffer in degrees around the plan) and loads it."
-        )
-        perf_gmrt_row_layout.addWidget(self.performance_download_gmrt_checkbox)
-        self.performance_gmrt_buffer_spin = QDoubleSpinBox()
-        self.performance_gmrt_buffer_spin.setRange(0.01, 10.0)
-        self.performance_gmrt_buffer_spin.setSingleStep(0.1)
-        self.performance_gmrt_buffer_spin.setValue(0.5)
-        self.performance_gmrt_buffer_spin.setDecimals(2)
-        self.performance_gmrt_buffer_spin.setMinimumWidth(60)
-        self.performance_gmrt_buffer_spin.setToolTip("Buffer size in degrees around performance plan extent for GMRT download.")
-        perf_gmrt_row_layout.addWidget(self.performance_gmrt_buffer_spin)
-        self.performance_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
-        self.performance_split_topo_depths_checkbox.setChecked(True)
-        self.performance_split_topo_depths_checkbox.setToolTip(
-            "When on, the downloaded GMRT GeoTIFF is split into a topography file "
-            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
-            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
-        )
-        self.performance_split_topo_depths_checkbox.setEnabled(self.performance_download_gmrt_checkbox.isChecked())
-        self.performance_download_gmrt_checkbox.toggled.connect(self.performance_split_topo_depths_checkbox.setEnabled)
-        perf_gmrt_row_layout.addWidget(self.performance_split_topo_depths_checkbox)
-        perf_gmrt_row_layout.addStretch()
-        perf_import_export_layout.addWidget(perf_gmrt_row)
-        perf_import_export_layout.addSpacing(3)
-
-        self.performance_export_survey_btn = QPushButton("Export Performance Survey")
-        self.performance_export_survey_btn.clicked.connect(self._export_performance_survey_files)
-        perf_import_export_layout.addWidget(self.performance_export_survey_btn)
-        perf_import_export_layout.addSpacing(3)
-
-        perf_export_name_frame = QWidget()
-        perf_export_name_layout = QGridLayout(perf_export_name_frame)
-        perf_export_name_layout.setSpacing(0)
-        perf_export_name_layout.setContentsMargins(0, 0, 0, 0)
-        perf_export_name_layout.setColumnStretch(0, 1)
-        perf_export_name_layout.setColumnStretch(1, 2)
-        perf_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
-        self.performance_export_name_entry = QLineEdit()
-        self.performance_export_name_entry.setText(
-            self._build_performance_export_basename()
-            if hasattr(self, "_build_performance_export_basename")
-            else "perf_swell0_depth0m"
-        )
-        perf_export_name_layout.addWidget(self.performance_export_name_entry, 0, 1)
-        perf_import_export_layout.addWidget(perf_export_name_frame)
-
-        swath_perf_layout.addWidget(perf_import_export_groupbox, swath_perf_row, 0, 1, 2)
-        swath_perf_row += 1
-
         self._update_performance_ping_time()
 
         performance_layout.addWidget(swath_perf_groupbox, performance_row, 0, 1, 2)
@@ -2680,66 +2350,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         adcp_layout.addWidget(adcp_plot_control_groupbox, adcp_row, 0, 1, 2)
         adcp_row += 1
-
-        adcp_import_export_groupbox = QGroupBox("ADCP Import/Export")
-        adcp_import_export_groupbox.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
-        adcp_import_export_layout = QVBoxLayout(adcp_import_export_groupbox)
-        adcp_import_export_layout.setSpacing(0)
-        adcp_import_export_layout.setContentsMargins(9, 9, 9, 9)
-
-        self.adcp_import_btn = QPushButton("Import ADCP Cal")
-        self.adcp_import_btn.clicked.connect(self._import_adcp_cal)
-        adcp_import_export_layout.addWidget(self.adcp_import_btn)
-        adcp_import_export_layout.addSpacing(3)
-
-        adcp_gmrt_row = QWidget()
-        adcp_gmrt_row_layout = QHBoxLayout(adcp_gmrt_row)
-        adcp_gmrt_row_layout.setContentsMargins(0, 0, 0, 0)
-        adcp_gmrt_row_layout.setSpacing(6)
-        self.adcp_download_gmrt_checkbox = QCheckBox("Download GMRT")
-        self.adcp_download_gmrt_checkbox.setChecked(False)
-        self.adcp_download_gmrt_checkbox.setToolTip(
-            "When enabled, importing an ADCP calibration downloads a GMRT bathymetry GeoTIFF "
-            "(buffer in degrees around the plan) and loads it."
-        )
-        adcp_gmrt_row_layout.addWidget(self.adcp_download_gmrt_checkbox)
-        self.adcp_gmrt_buffer_spin = QDoubleSpinBox()
-        self.adcp_gmrt_buffer_spin.setRange(0.01, 10.0)
-        self.adcp_gmrt_buffer_spin.setSingleStep(0.1)
-        self.adcp_gmrt_buffer_spin.setValue(0.5)
-        self.adcp_gmrt_buffer_spin.setDecimals(2)
-        self.adcp_gmrt_buffer_spin.setMinimumWidth(60)
-        adcp_gmrt_row_layout.addWidget(self.adcp_gmrt_buffer_spin)
-        self.adcp_split_topo_depths_checkbox = QCheckBox("Split Topo/Depths")
-        self.adcp_split_topo_depths_checkbox.setChecked(True)
-        self.adcp_split_topo_depths_checkbox.setEnabled(self.adcp_download_gmrt_checkbox.isChecked())
-        self.adcp_download_gmrt_checkbox.toggled.connect(self.adcp_split_topo_depths_checkbox.setEnabled)
-        adcp_gmrt_row_layout.addWidget(self.adcp_split_topo_depths_checkbox)
-        adcp_gmrt_row_layout.addStretch()
-        adcp_import_export_layout.addWidget(adcp_gmrt_row)
-        adcp_import_export_layout.addSpacing(3)
-
-        self.adcp_export_btn = QPushButton("Export ADCP Cal")
-        self.adcp_export_btn.clicked.connect(self._export_adcp_cal_files)
-        self.adcp_export_btn.setEnabled(False)
-        adcp_import_export_layout.addWidget(self.adcp_export_btn)
-        adcp_import_export_layout.addSpacing(3)
-
-        adcp_export_name_frame = QWidget()
-        adcp_export_name_layout = QGridLayout(adcp_export_name_frame)
-        adcp_export_name_layout.setSpacing(0)
-        adcp_export_name_layout.setContentsMargins(0, 0, 0, 0)
-        adcp_export_name_layout.setColumnStretch(0, 1)
-        adcp_export_name_layout.setColumnStretch(1, 2)
-        adcp_export_name_layout.addWidget(QLabel("Export Name:"), 0, 0)
-        self.adcp_export_name_entry = QLineEdit(self._build_adcp_export_basename())
-        adcp_export_name_layout.addWidget(self.adcp_export_name_entry, 0, 1)
-        adcp_import_export_layout.addWidget(adcp_export_name_frame)
-
-        adcp_layout.addWidget(adcp_import_export_groupbox, adcp_row, 0, 1, 2)
-        adcp_layout.setRowStretch(adcp_row, 0)
-        adcp_row += 1
         adcp_layout.setRowStretch(adcp_row, 1)
+
+        self._install_shared_survey_io(self._test_planning_layout)
 
         # --- 2. Main Plot Area (right side) ---
         self.plot_frame = QWidget()

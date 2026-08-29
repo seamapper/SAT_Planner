@@ -7,7 +7,22 @@ import datetime
 import json
 import os
 
-from PyQt6.QtWidgets import QFileDialog, QDialogButtonBox, QPushButton
+from PyQt6.QtWidgets import (
+    QFileDialog,
+    QDialog,
+    QDialogButtonBox,
+    QPushButton,
+    QCheckBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QStackedWidget,
+    QWidget,
+)
+
+from sat_planner.import_survey_dialog import ImportSurveyDialog
 
 from sat_planner import GEOSPATIAL_LIBS_AVAILABLE, decimal_degrees_to_ddm
 from sat_planner.constants import LineString, fiona, pyproj
@@ -21,6 +36,239 @@ except ImportError:
 
 class ExportImportMixin:
     """Mixin for save/load survey parameters and export survey files."""
+
+    _SURVEY_IO_TAB_SPECS = (
+        {
+            "tab_label": "Calibration Survey",
+            "import_label": "Import Calibration Survey",
+            "export_label": "Export Calibration Survey",
+            "import_handler": "_import_cal_survey_files",
+            "export_handler": "_export_cal_survey_files",
+            "export_name_attr": "cal_export_name_entry",
+            "gmrt_prefix": "cal",
+        },
+        {
+            "tab_label": "Accuracy Survey",
+            "import_label": "Import Accuracy Survey",
+            "export_label": "Export Accuracy Survey",
+            "import_handler": "_import_survey_files",
+            "export_handler": "_export_survey_files",
+            "export_name_attr": "export_name_entry",
+            "gmrt_prefix": "ref",
+        },
+        {
+            "tab_label": "Line Plan",
+            "import_label": "Import Line Plan",
+            "export_label": "Export Line Plan",
+            "import_handler": "_import_drawn_line",
+            "export_handler": "_export_drawn_line",
+            "export_name_attr": "line_export_name_entry",
+            "gmrt_prefix": "line_plan",
+        },
+        {
+            "tab_label": "Backscatter Line",
+            "import_label": "Import Backscatter Line",
+            "export_label": "Export Backscatter Line",
+            "import_handler": "_import_backscatter_line",
+            "export_handler": "_export_backscatter_line",
+            "export_name_attr": "backscatter_export_name_entry",
+            "gmrt_prefix": "backscatter",
+            "requires_geospatial": True,
+        },
+        {
+            "tab_label": "Performance Survey",
+            "import_label": "Import Performance Survey",
+            "export_label": "Export Performance Survey",
+            "import_handler": "_import_performance_survey",
+            "export_handler": "_export_performance_survey_files",
+            "export_name_attr": "performance_export_name_entry",
+            "gmrt_prefix": "performance",
+        },
+        {
+            "tab_label": "ADCP Cal",
+            "import_label": "Import ADCP Cal",
+            "export_label": "Export ADCP Cal",
+            "import_handler": "_import_adcp_cal",
+            "export_handler": "_export_adcp_cal_files",
+            "export_name_attr": "adcp_export_name_entry",
+            "gmrt_prefix": "adcp",
+        },
+    )
+
+    def _survey_io_spec(self, tab_index=None):
+        if tab_index is None:
+            tab_index = self.param_notebook.currentIndex()
+        return self._SURVEY_IO_TAB_SPECS[tab_index]
+
+    def _active_import_button(self):
+        return getattr(self, "shared_import_btn", None)
+
+    def _gmrt_widgets_for_prefix(self, prefix):
+        return (
+            getattr(self, f"{prefix}_download_gmrt_checkbox"),
+            getattr(self, f"{prefix}_gmrt_buffer_spin"),
+            getattr(self, f"{prefix}_split_topo_depths_checkbox"),
+        )
+
+    def _create_hidden_gmrt_import_widgets(self, prefix, import_tooltip):
+        """Create per-tab GMRT widgets (not shown on tab layouts; used by Import Survey dialog)."""
+        holder = QWidget(self)
+        holder.hide()
+        download_cb = QCheckBox(holder)
+        download_cb.setChecked(False)
+        download_cb.setToolTip(import_tooltip)
+        buffer_spin = QDoubleSpinBox(holder)
+        buffer_spin.setRange(0.01, 10.0)
+        buffer_spin.setSingleStep(0.1)
+        buffer_spin.setValue(0.5)
+        buffer_spin.setDecimals(2)
+        buffer_spin.setMinimumWidth(60)
+        buffer_spin.setToolTip("Buffer size in degrees around survey extent for GMRT download.")
+        split_cb = QCheckBox(holder)
+        split_cb.setChecked(True)
+        split_cb.setToolTip(
+            "When on, the downloaded GMRT GeoTIFF is split into a topography file "
+            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
+            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
+        )
+        split_cb.setEnabled(download_cb.isChecked())
+        download_cb.toggled.connect(split_cb.setEnabled)
+        setattr(self, f"{prefix}_download_gmrt_checkbox", download_cb)
+        setattr(self, f"{prefix}_gmrt_buffer_spin", buffer_spin)
+        setattr(self, f"{prefix}_split_topo_depths_checkbox", split_cb)
+
+    def _create_export_name_page(self, stack, default_text=""):
+        page = QWidget()
+        layout = QGridLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(3)
+        layout.setColumnStretch(0, 1)
+        layout.setColumnStretch(1, 2)
+        layout.addWidget(QLabel("Export Name:"), 0, 0)
+        entry = QLineEdit()
+        if default_text:
+            entry.setText(default_text)
+        layout.addWidget(entry, 0, 1)
+        stack.addWidget(page)
+        return entry
+
+    def _create_shared_survey_io_widgets(self):
+        """Create shared Import/Export widgets (call after all tab fields exist)."""
+        gmrt_tooltip = (
+            "When enabled, importing a survey will download a GMRT bathymetry GeoTIFF "
+            "(buffer and 100 m resolution) and load it."
+        )
+        for spec in self._SURVEY_IO_TAB_SPECS:
+            self._create_hidden_gmrt_import_widgets(spec["gmrt_prefix"], gmrt_tooltip)
+
+        self._shared_io_button_row = QHBoxLayout()
+        self.shared_import_btn = QPushButton("Import Survey")
+        self.shared_import_btn.clicked.connect(self._on_shared_import_clicked)
+        self._shared_io_button_row.addWidget(self.shared_import_btn, 1)
+        self.shared_export_btn = QPushButton("Export Survey")
+        self.shared_export_btn.clicked.connect(self._on_shared_export_clicked)
+        self._shared_io_button_row.addWidget(self.shared_export_btn, 1)
+
+        self.shared_export_name_stack = QStackedWidget()
+
+        self.cal_export_name_entry = self._create_export_name_page(self.shared_export_name_stack)
+
+        acc_export_default = "acc_depth0m_cross90deg"
+        if hasattr(self, "heading_entry"):
+            try:
+                heading = float(self.heading_entry.text() or "0")
+                cross = int(round((heading + 90) % 360))
+                acc_export_default = f"acc_depth0m_cross{cross}deg"
+            except Exception:
+                pass
+        self.export_name_entry = self._create_export_name_page(
+            self.shared_export_name_stack, acc_export_default
+        )
+
+        line_default = f"Line_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.line_export_name_entry = self._create_export_name_page(
+            self.shared_export_name_stack, line_default
+        )
+
+        bs_default = f"BS_{datetime.datetime.now().strftime('%Y%m%d')}_0"
+        self.backscatter_export_name_entry = self._create_export_name_page(
+            self.shared_export_name_stack, bs_default
+        )
+
+        perf_default = (
+            self._build_performance_export_basename()
+            if hasattr(self, "_build_performance_export_basename")
+            else "perf_swell0_depth0m"
+        )
+        self.performance_export_name_entry = self._create_export_name_page(
+            self.shared_export_name_stack, perf_default
+        )
+
+        adcp_default = (
+            self._build_adcp_export_basename()
+            if hasattr(self, "_build_adcp_export_basename")
+            else "adcp_cal"
+        )
+        self.adcp_export_name_entry = self._create_export_name_page(
+            self.shared_export_name_stack, adcp_default
+        )
+
+    def _install_shared_survey_io(self, parent_layout):
+        """Insert shared Import/Export row above the tab widget."""
+        if not hasattr(self, "shared_import_btn"):
+            self._create_shared_survey_io_widgets()
+        parent_layout.insertWidget(0, self.shared_export_name_stack)
+        parent_layout.insertLayout(0, self._shared_io_button_row)
+        self._update_shared_survey_io_ui()
+
+    def _setup_shared_survey_io(self, parent_layout):
+        """Backward-compatible alias."""
+        self._install_shared_survey_io(parent_layout)
+
+    def _shared_survey_io_import_enabled(self, tab_index):
+        spec = self._survey_io_spec(tab_index)
+        if spec.get("requires_geospatial") and not GEOSPATIAL_LIBS_AVAILABLE:
+            return False
+        return True
+
+    def _shared_survey_io_export_enabled(self, tab_index):
+        if tab_index == 5 and hasattr(self, "_adcp_plan_complete"):
+            return self._adcp_plan_complete()
+        if self._survey_io_spec(tab_index).get("requires_geospatial") and not GEOSPATIAL_LIBS_AVAILABLE:
+            return False
+        return True
+
+    def _update_shared_survey_io_ui(self):
+        if not hasattr(self, "param_notebook") or not hasattr(self, "shared_import_btn"):
+            return
+        tab_index = self.param_notebook.currentIndex()
+        spec = self._survey_io_spec(tab_index)
+        self.shared_export_name_stack.setCurrentIndex(tab_index)
+        self.shared_import_btn.setText(spec["import_label"])
+        self.shared_export_btn.setText(spec["export_label"])
+        self.shared_import_btn.setEnabled(self._shared_survey_io_import_enabled(tab_index))
+        self.shared_export_btn.setEnabled(self._shared_survey_io_export_enabled(tab_index))
+
+    def _show_import_survey_dialog(self):
+        spec = self._survey_io_spec()
+        download_cb, buffer_spin, split_cb = self._gmrt_widgets_for_prefix(spec["gmrt_prefix"])
+        dialog = ImportSurveyDialog(self, spec["tab_label"], download_cb, buffer_spin, split_cb)
+        return dialog.exec() == QDialog.DialogCode.Accepted
+
+    def _on_shared_import_clicked(self):
+        if hasattr(self, "_gmrt_is_downloading") and self._gmrt_is_downloading():
+            self._gmrt_cancel_active_download()
+            return
+        if not self._show_import_survey_dialog():
+            return
+        spec = self._survey_io_spec()
+        handler = getattr(self, spec["import_handler"])
+        handler()
+
+    def _on_shared_export_clicked(self):
+        spec = self._survey_io_spec()
+        handler = getattr(self, spec["export_handler"])
+        handler()
 
     def _select_export_directory(self, start_dir=None, title="Select Export Directory"):
         """Directory picker with an Export Types button; returns path or None."""

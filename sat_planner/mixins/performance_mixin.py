@@ -1199,7 +1199,7 @@ class PerformanceMixin:
             log_func=lambda msg, append=True: self.set_performance_activity_text(msg, append=append),
             default_directory=getattr(self, "last_perf_import_dir", None),
             split_topo_depths=split_topo_depths,
-            gmrt_button=getattr(self, "performance_import_survey_btn", None),
+            gmrt_button=self._active_import_button(),
         )
 
     def _perf_import_post_import(self, file_path):

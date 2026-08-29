@@ -2123,7 +2123,7 @@ class CalibrationMixin:
             log_func=lambda msg, append=True: self.set_cal_info_text(msg, append=append),
             default_directory=getattr(self, "last_cal_import_dir", None),
             split_topo_depths=split_topo_depths,
-            gmrt_button=getattr(self, "cal_import_survey_btn", None),
+            gmrt_button=self._active_import_button(),
         )
 
     def _calculate_calibration_survey_statistics(self):

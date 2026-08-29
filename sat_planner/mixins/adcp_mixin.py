@@ -317,7 +317,6 @@ class AdcpMixin:
             "adcp_zoom_btn",
             "adcp_clear_btn",
             "adcp_show_info_btn",
-            "adcp_export_btn",
         ):
             btn = getattr(self, btn_name, None)
             if btn is not None:
@@ -335,8 +334,8 @@ class AdcpMixin:
             self.adcp_clear_btn.setEnabled(self._adcp_plan_has_any_geometry())
         if hasattr(self, "adcp_show_info_btn"):
             self.adcp_show_info_btn.setEnabled(self._adcp_plan_complete())
-        if hasattr(self, "adcp_export_btn"):
-            self.adcp_export_btn.setEnabled(self._adcp_plan_complete())
+        if hasattr(self, "_update_shared_survey_io_ui"):
+            self._update_shared_survey_io_ui()
         if hasattr(self, "adcp_show_direction_checkbox"):
             has_segments = bool(
                 getattr(self, "adcp_circle1_segments", None)
@@ -1212,7 +1211,7 @@ class AdcpMixin:
             log_func=lambda msg, append=True: self.set_adcp_activity_text(msg, append=append),
             default_directory=getattr(self, "last_adcp_import_dir", None),
             split_topo_depths=split_topo_depths,
-            gmrt_button=getattr(self, "adcp_import_btn", None),
+            gmrt_button=self._active_import_button(),
         )
 
     def _import_adcp_cal(self):

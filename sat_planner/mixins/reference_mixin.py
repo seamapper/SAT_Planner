@@ -459,7 +459,7 @@ class ReferenceMixin:
             log_func=lambda msg, append=True: self.set_ref_info_text(msg, append=append),
             default_directory=getattr(self, "last_ref_import_dir", None),
             split_topo_depths=split_topo_depths,
-            gmrt_button=getattr(self, "import_survey_btn", None),
+            gmrt_button=self._active_import_button(),
         )
 
     def _compute_crossline_lead_from_import(self):
