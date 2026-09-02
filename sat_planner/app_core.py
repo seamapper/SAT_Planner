@@ -48,7 +48,7 @@ from .mixins.map_interaction_mixin import MapInteractionMixin
 from .mixins.export_import_mixin import ExportImportMixin
 from .mixins.config_mixin import ConfigMixin
 from .mixins.deferred_params_mixin import DeferredParamsMixin
-from .gmrt_dialog import GMRTGrabber
+from .bathymetry_download import DownloadBathymetryDialog
 from .map_options_dialog import MapOptionsDialog
 
 
@@ -954,62 +954,59 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             # Destroy the main window
             self.destroy()
 
-    def _on_download_data_activated(self, index):
-        """Open the chosen download source immediately (no separate Go button)."""
-        if index == self._download_data_gmrt_index:
-            self._open_gmrt_download_dialog()
-
-    def _open_gmrt_download_dialog(self):
-        """Open the embedded GMRT Download dialog (non-modal). When a GeoTIFF is downloaded, load it and refresh profile."""
+    def _open_bathymetry_download_dialog(self, source_name=None):
+        """Open (or raise) the unified bathymetry download dialog."""
+        if source_name is True or source_name is False:
+            source_name = None
         try:
-            if not hasattr(self, '_gmrt_dialogs'):
-                self._gmrt_dialogs = []
-            # Reuse an existing visible GMRT window if one is already open.
-            alive_dialogs = []
-            for dlg in list(self._gmrt_dialogs):
-                if dlg is None:
-                    continue
+            dlg = getattr(self, "_bathymetry_download_dialog", None)
+            if dlg is not None:
                 try:
                     if dlg.isVisible():
-                        alive_dialogs.append(dlg)
+                        if source_name and hasattr(dlg, "data_source_combo"):
+                            idx = dlg.data_source_combo.findText(source_name)
+                            if idx >= 0:
+                                dlg.data_source_combo.setCurrentIndex(idx)
+                        if dlg.isMinimized():
+                            dlg.showNormal()
+                        dlg.raise_()
+                        dlg.activateWindow()
+                        return
                 except Exception:
-                    continue
-            self._gmrt_dialogs = alive_dialogs
-            if self._gmrt_dialogs:
-                dialog = self._gmrt_dialogs[-1]
-                try:
-                    if dialog.isMinimized():
-                        dialog.showNormal()
-                except Exception:
-                    pass
-                dialog.raise_()
-                dialog.activateWindow()
-                return
+                    self._bathymetry_download_dialog = None
 
-            # Create with parent=None so it opens as a separate top-level window and does not overwrite the main app
-            dialog = GMRTGrabber(None)
-            dialog.geotiff_downloaded.connect(self._on_gmrt_dialog_geotiff_downloaded)
+            dialog = DownloadBathymetryDialog(self, initial_source=source_name)
+            dialog.geotiff_downloaded.connect(self._on_bathymetry_dialog_geotiff_downloaded)
+            dialog.finished.connect(self._on_bathymetry_download_dialog_finished)
+            self._bathymetry_download_dialog = dialog
             dialog.show()
             dialog.raise_()
             dialog.activateWindow()
-            self._gmrt_dialogs.append(dialog)
         except Exception as e:
-            self._show_message("error", "GMRT Dialog", f"Could not open GMRT Download dialog: {e}")
+            self._show_message(
+                "error",
+                "Download Bathymetry",
+                f"Could not open Download Bathymetry dialog: {e}",
+            )
+
+    def _on_bathymetry_download_dialog_finished(self, _result=None):
+        self._bathymetry_download_dialog = None
+
+    def _on_bathymetry_dialog_geotiff_downloaded(self, path):
+        """Load a downloaded GeoTIFF into the map and refresh the profile."""
+        if path and hasattr(self, "_load_geotiff_from_path"):
+            self._load_geotiff_from_path(path)
+        if hasattr(self, "_draw_current_profile"):
+            self._draw_current_profile()
+        if hasattr(self, "profile_canvas"):
+            self.profile_canvas.draw()
+
+    # Backward-compatible aliases
+    def _open_gmrt_download_dialog(self):
+        self._open_bathymetry_download_dialog("GMRT Topo-Bathy")
 
     def _on_gmrt_dialog_geotiff_downloaded(self, path):
-        """Load the downloaded GeoTIFF into the map and refresh the profile."""
-        if path and hasattr(self, '_load_geotiff_from_path'):
-            self._load_geotiff_from_path(path)
-        if hasattr(self, 'download_data_combo'):
-            self.download_data_combo.blockSignals(True)
-            try:
-                self.download_data_combo.setCurrentIndex(self._download_data_gmrt_index)
-            finally:
-                self.download_data_combo.blockSignals(False)
-        if hasattr(self, '_draw_current_profile'):
-            self._draw_current_profile()
-        if hasattr(self, 'profile_canvas'):
-            self.profile_canvas.draw()
+        self._on_bathymetry_dialog_geotiff_downloaded(path)
 
     def _on_tab_changed(self, event=None):
         """Handle tab change event - update profile plot for active tab."""
@@ -1109,16 +1106,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         download_data_layout = QHBoxLayout(download_data_row)
         download_data_layout.setContentsMargins(0, 0, 0, 0)
         download_data_layout.setSpacing(6)
-        download_data_layout.addWidget(QLabel("Download Data:"))
-        self.download_data_combo = QComboBox()
-        self.download_data_combo.setToolTip("Choose a data source to download. GMRT opens the Download GMRT Grid dialog.")
-        self._download_data_select_index = 0
-        self._download_data_gmrt_index = 1
-        self.download_data_combo.addItem("Select Source")
-        self.download_data_combo.addItem("GMRT")
-        self.download_data_combo.setCurrentIndex(self._download_data_select_index)
-        self.download_data_combo.activated.connect(self._on_download_data_activated)
-        download_data_layout.addWidget(self.download_data_combo, 1)
+        self.download_bathymetry_btn = QPushButton("Download Online Bathymetry")
+        self.download_bathymetry_btn.setToolTip(
+            "Open the interactive bathymetry download dialog (GEBCO, GMRT, NCEI, WGOM-LI-SNE)."
+        )
+        self.download_bathymetry_btn.clicked.connect(lambda: self._open_bathymetry_download_dialog())
+        download_data_layout.addWidget(self.download_bathymetry_btn, 1)
         geotiff_layout.addWidget(download_data_row)
         geotiff_layout.addSpacing(3)
 

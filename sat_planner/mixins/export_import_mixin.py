@@ -15,10 +15,13 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QSizePolicy,
     QStackedWidget,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -214,11 +217,23 @@ class ExportImportMixin:
         )
 
     def _install_shared_survey_io(self, parent_layout):
-        """Insert shared Import/Export row above the tab widget."""
+        """Insert shared Import/Export controls above the tab widget."""
         if not hasattr(self, "shared_import_btn"):
             self._create_shared_survey_io_widgets()
-        parent_layout.insertWidget(0, self.shared_export_name_stack)
-        parent_layout.insertLayout(0, self._shared_io_button_row)
+        if not hasattr(self, "shared_survey_io_groupbox"):
+            self.shared_survey_io_groupbox = QGroupBox("Import/Export")
+            self.shared_survey_io_groupbox.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+            )
+            io_layout = QVBoxLayout(self.shared_survey_io_groupbox)
+            io_layout.setContentsMargins(9, 9, 9, 9)
+            io_layout.setSpacing(3)
+            io_layout.addLayout(self._shared_io_button_row)
+            io_layout.addWidget(self.shared_export_name_stack)
+        parent_layout.insertWidget(0, self.shared_survey_io_groupbox)
+        parent_layout.setStretch(0, 0)
+        if parent_layout.count() > 1:
+            parent_layout.setStretch(1, 1)
         self._update_shared_survey_io_ui()
 
     def _setup_shared_survey_io(self, parent_layout):

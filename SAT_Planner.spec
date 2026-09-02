@@ -80,7 +80,7 @@ a = Analysis(
         'sat_planner.mixins.map_interaction_mixin',
         'sat_planner.mixins.export_import_mixin',
         'sat_planner.mixins.config_mixin',
-        # GMRT Download dialog (embedded copy)
+        # GMRT Download dialog (still used by import-path tooling / legacy)
         'sat_planner.gmrt_dialog',
         'sat_planner.gmrt_dialog.main_window',
         'sat_planner.gmrt_dialog.map_widget',
@@ -89,6 +89,22 @@ a = Analysis(
         'sat_planner.gmrt_dialog.workers.download_worker',
         'sat_planner.gmrt_dialog.workers.map_worker',
         'sat_planner.gmrt_dialog.workers.mosaic_worker',
+        # Unified bathymetry download dialog (vendored from Bathymetry_Downloader)
+        'sat_planner.bathymetry_download',
+        'sat_planner.bathymetry_download.data_sources',
+        'sat_planner.bathymetry_download.main_window',
+        'sat_planner.bathymetry_download.ui_layout',
+        'sat_planner.bathymetry_download.map_widget',
+        'sat_planner.bathymetry_download.map_loaders',
+        'sat_planner.bathymetry_download.service_loader',
+        'sat_planner.bathymetry_download.ui_widgets',
+        'sat_planner.bathymetry_download.download_module',
+        'sat_planner.bathymetry_download.gmrt_module',
+        'sat_planner.bathymetry_download.geo_utils',
+        'sat_planner.gmrt_split',
+        'sat_planner.import_survey_dialog',
+        'sat_planner.map_options_dialog',
+        'sat_planner.dyn_vert_exag_dialog',
         # Geospatial: from working old.spec (do not add osgeo)
         'fiona', 'shapely', 'pyproj', 'rasterio',
         'rasterio.sample', 'rasterio.io', 'rasterio.warp', 'rasterio.transform',
