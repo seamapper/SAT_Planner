@@ -6,21 +6,24 @@ A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing
 
 ## Overview
 
-The SAT/QAT Planner is a desktop application designed for planning and visualizing multibeam testing and calibration operations. It supports five main planning modes:
+The SAT/QAT Planner is a desktop application designed for planning and visualizing multibeam testing and calibration operations. It supports six main planning modes:
 - **Calibration Survey Planning**: Plan pitch, roll, and heading calibration lines
 - **Accuracy Survey Planning**: Generate parallel survey lines with customizable parameters
-- **Performance (Swath) Survey Planning**: Plan a four-heading swath performance test with optional RX-noise BIST legs relative to swell direction
 - **Line Planning**: Interactive line drawing with real-time elevation profiles
-- **Backscatter Normalization Planning**: Interactive line and area selection for backscatter calibration.
+- **Backscatter Normalization Planning**: Interactive line and area selection for backscatter calibration
+- **Performance (Swath) Survey Planning**: Plan a four-heading swath performance test with optional RX-noise BIST legs relative to swell direction
+- **ADCP Calibration Planning**: Plan dual-circle ADCP calibration tracks with segment-based profiles and import/export
 
 ## Features
 
 ### Core Functionality
-- **Multi-tab Interface**: Separate tabs for Calibration, Accuracy, Performance, and Line planning (left panel)
+- **Multi-tab Interface**: Calibration, Accuracy, Line, Backscatter, Performance, and ADCP tabs (left panel)
+- **Shared Import/Export**: A single **Import/Export** group above the tab notebook; **Import Survey** / **Export Survey** labels and the **Export Name** field follow the active tab
 - **Dark Theme**: Qt GUI always uses a dark theme; map (matplotlib) keeps default styling
+- **Startup Guidance**: The map and profile plots show *Load a Test Plan or Bathymetry to begin planning* until bathymetry or survey geometry is loaded
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
-- **GMRT Download**: Optional download of GMRT bathymetry GeoTIFF when importing surveys (Calibration, Accuracy, Performance, Line tabs; configurable buffer). While a download is in flight, the per-tab import button turns orange and changes to **"Downloading GMRT - Click to Cancel"**; clicking it again cancels the worker, removes any partial file, and notifies the user. Failures restore the button the same way.
-- **Download Data**: Source selector in GeoTIFF Controls (default `Select Source`; current source `GMRT`) opens the "Download GMRT Grid" dialog immediately on selection and keeps the selected source after successful download
+- **Download Online Bathymetry**: **Download Online Bathymetry** in the Bathymetry GeoTIFF panel opens an interactive dialog (GEBCO 2026, GMRT Topo-Bathy / Observed Only, NCEI multibeam mosaics, WGOM-LI-SNE) with map preview, AOI selection, and GeoTIFF download into the planner
+- **GMRT on Import**: After you **select a survey file**, if the import has **no planning bathymetry** (no `geotiff_path` in metadata, or the saved file is missing), a dialog offers **GMRT download** for the survey area (buffer, optional Split Topo/Depths). If bathymetry was loaded from the survey, the dialog is skipped. While a download is in flight, **Import Survey** turns orange as **Downloading GMRT - Click to Cancel**; clicking again cancels the worker, removes any partial file, and restores the button
 - **Map Display** / **Color Map**: Display mode dropdown and colormap cycle button remain in the Bathymetry GeoTIFF panel; **Vertical Exaggeration** and **Dyn Res** live in **Map Options**
 - **Map Options** (icon, lower-left of the map): Non-modal dialog for Imagery Basemap, NOAA ENC + opacity, EEZs + opacity, Add/Remove Shapefile, Vertical Exaggeration, Dyn Res, Contours, and multi-range Slopes overlay (Qt overlay icons are not included in exported map PNGs)
 - **Measurement Tool** (icon to the right of Map Options): Toggle distance/heading measure mode; orange thick `+` cursor while active; bottom-strip prompt explains how to deactivate
@@ -31,7 +34,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **Export Capabilities**: Export survey plans in CSV, Shapefile, GeoJSON, asciiplan, LNW, PNG (high and/or low resolution), and companion text/statistics formats (varies by tab)
 - **Export Name**: Suggested basenames update automatically when blank or still matching the auto-generated pattern; **custom Export Names are preserved** and are not overwritten on Enter/blur or when plan parameters regenerate (Accuracy, Performance, Calibration, ADCP, Backscatter)
 - **Export Types**: Opened from the **Select Export Directory** dialog (Action button); toggle optional export products by format; choices are saved in `~/.cal_ref_planner_config.json` under `export_type_options`
-- **Survey Import**: Import calibration, accuracy, performance, and line plans from DDD, DMS, DMM, LNW, CSV, GeoJSON, GPX, shapefile (`.shp`), or GeoPackage (`.gpkg`) (performance, calibration, and accuracy imports use an assignment dialog when geometry is ambiguous; shapefile/GPKG geometry is reprojected from its source CRS to WGS84 automatically)
+- **Survey Import**: Use the shared **Import Survey** control (label follows the active tab). Import calibration, accuracy, performance, line, backscatter, and ADCP plans from DDD, DMS, DMM, LNW, CSV, GeoJSON, GPX, shapefile (`.shp`), or GeoPackage (`.gpkg`) (calibration, accuracy, and performance imports use an assignment dialog when geometry is ambiguous; shapefile/GPKG geometry is reprojected from its source CRS to WGS84 automatically). **GMRT bathymetry** is offered **after** file selection when no planning GeoTIFF is available
 - **EEZ Overlay**: EEZ layer with opacity control (default 80%) and hover `GEONAME` tooltip lookup (controls in Map Options)
 - **Visualization Shapefile Toggle**: `Add Shapefile` / `Remove Shapefile` in Map Options after loading, allowing quick removal of visualization overlays
 
@@ -48,7 +51,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **Line Offset (m)** (the perpendicular distance between the pitch line and each heading line): When drawing, the field is filled with the median GeoTIFF depth along the pitch line (recommendation mode). When importing a plan that already contains heading lines, the field is filled with the actual perpendicular distance from the pitch line to the imported heading lines (computed with `pyproj.Geod`) and **locked** so a subsequent GeoTIFF / GMRT load doesn't overwrite it. Sidecar `line_offset` in a `*_params.json` still wins over both. The lock releases when the user picks a new pitch line, edits the existing pitch line, or starts a fresh calibration survey, at which point depth-driven recommendation resumes.
 - Display pitch line depth statistics (shallowest, maximum, mean, median)
 - Configure turn time for accurate time estimates
-- Import calibration surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON, Shapefile `.shp`, GeoPackage `.gpkg`); **suggested line assignment** from file labels or geometry (Pitch = middle parallel line, Roll = non-parallel, Heading1/2 by file order); optional GMRT download after import (checkbox + buffer)
+- Import calibration surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON, Shapefile `.shp`, GeoPackage `.gpkg`); **suggested line assignment** from file labels or geometry (Pitch = middle parallel line, Roll = non-parallel, Heading1/2 by file order); **GMRT download offered after import** when no planning GeoTIFF is present
 - GeoJSON import loads geometry from **`{name}.geojson`**; **`{name}_params.json`** in the same folder (if present) supplies **survey speed**, **turn time (min)**, **lead-in (m)**, **heading line offset**, and **export name** so you can edit those fields without changing the geometry file
 - Import auto-zooms to the extents of all loaded calibration geometry, including lead-in/out when present
 - **Calibration Survey Info** dialog and *_info.txt with **Calibration Waypoints (DMM)** and **Calibration Waypoints (DDD)** sections (including core start/end waypoints and lead waypoints when lead-in is nonzero)
@@ -62,7 +65,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Generate parallel survey lines with customizable parameters
 - Auto-regenerate plans when parameters change (with debounce)
 - Configure line length, spacing, heading, speed, and turn time
-- Import accuracy surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON, Shapefile `.shp`, GeoPackage `.gpkg`); **suggested crossline and reference line order** (crossline by orientation, reference lines in file order); optional GMRT download after import (checkbox + buffer)
+- Import accuracy surveys (DDD/DMS/DMM/LNW, CSV, GeoJSON, Shapefile `.shp`, GeoPackage `.gpkg`); **suggested crossline and reference line order** (crossline by orientation, reference lines in file order); **GMRT download offered after import** when no planning GeoTIFF is present
 - **Accuracy Survey Info** dialog and *_info.txt with **Survey Plan** and **Export Date**, crossline depth/slope extrema (minimum/maximum depth and slope from the full crossline profile), and **Accuracy Waypoints (DMM)** / **Accuracy Waypoints (DDD)** sections (L1S/L1E, L2S/L2E, …, CLS/CLE)
 - `*_info.txt` for Accuracy now uses the same base text content as **Accuracy Survey Info** (with export-only degree-symbol normalization)
 - Calculate comprehensive survey statistics with time breakdowns
@@ -77,7 +80,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - In **Calculated Time & Distance**, total test time is shown on one line (`min` + `hr`) and line length is shown on one line (`m`, `km`, `nm`)
 - **Auto-plot** (debounced) after editing test parameters or after performance pick-center when inputs are valid.
 - **Profile** (Performance tab): line 1 swath + first BIST segment; **sienna** / **gold** to match the map.
-- **Performance Import/Export**: same product family as Accuracy exports plus `{name}_performance_params.json`; optional **Download GMRT** on import; assignment dialog when import geometry is ambiguous. Default export basename: `perf_swell<deg>_depth<m>m` (custom Export Names are preserved)
+- **Performance Import/Export**: same product family as Accuracy exports plus `{name}_performance_params.json`; **GMRT download offered after import** when no planning GeoTIFF is present; assignment dialog when import geometry is ambiguous. Default export basename: `perf_swell<deg>_depth<m>m` (custom Export Names are preserved)
 - **Map markers**: **Perf Central Pt** vs **Acc Central Pt** (green accuracy center only when an accuracy plan is loaded).
 
 ### Line Planning
@@ -86,7 +89,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Real-time elevation profiles as you draw
 - Edit existing lines by dragging waypoints
 - Import/export line plans (DDD, DMS, DMM, LNW, CSV, GeoJSON, Shapefile `.shp`, GeoPackage `.gpkg`; single polyline, no assignment dialog)
-- Optional GMRT download after import (checkbox + buffer)
+- **GMRT download offered after import** when no planning GeoTIFF is present
 - **Survey Info** dialog and *_info.txt with **Line Plan Waypoints (DMM)** and **Line Plan Waypoints (DDD)** sections (WP1, WP2, …)
 - Calculate survey statistics for drawn lines
 - Export uses shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`
@@ -102,7 +105,13 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **Show Area Stats** and **Survey Info** / `*_info.txt` include line/area metrics, **Normalization Area Width** (full width = `2 × half_width_m`), and waypoint sections in DMM/DDD
 - Import/export backscatter line products (respects **Export Types** toggles, including map/profile PNG high and low); exports include `{name}_backscatter_stats.png` (+ optional `*_low` copy) when map PNG export is enabled
 - Default **Export Name** format: `BS_YYYYMMDD_<mean depth>`; custom names are preserved when geometry regenerates the suggested name
-- Optional GMRT download after import
+- Optional GMRT download offered after import when no planning GeoTIFF is present
+
+### ADCP Calibration Planning
+- **ADCP** tab: dual-circle calibration tracks (36 segments per circle), diameter/speed/turn-time parameters, and map markers for circle centers and travel direction
+- **ADCP Plot Control**: Zoom to plan, show direction of travel, clear plan, **Show ADCP Cal Info**
+- Import/export ADCP calibration (same survey file families as other tabs where applicable); `{name}_adcp_params.json` sidecar; **GMRT download offered after import** when no planning GeoTIFF is present
+- Elevation profile follows circle segments when bathymetry is loaded
 
 ### GeoTIFF Visualization
 - **Map Display** modes (dropdown in Bathymetry GeoTIFF): **Shaded Relief** (default), **Shaded Slope**, **Hillshade**, **Slope**
@@ -148,7 +157,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 
 ### Optional
 - **Pillow (PIL)** – Imagery Basemap and NOAA ENC Charts overlays; preferred path for resizing exported `*_low.png` email copies
-- **requests** – GMRT bathymetry download (dialog and optional download on import)
+- **requests** – Online bathymetry download (Download Online Bathymetry dialog) and GMRT post-import download
 - **colormaps** – Extra Shaded Relief colormaps (ice, arctic, sapphire, torch); without it those options are omitted from the Color Map cycle
 
 ## Project structure
@@ -160,24 +169,28 @@ The application is organized as a package plus a launcher:
   - **`constants.py`** – Version, config path, geospatial library availability, Shaded Relief colormap options, default slope-overlay bands.
   - **`export_utils.py`** – Shared export writers: DDD/DMM/DMS CSV and TXT, SIS asciiplan, Hypack LNW; UTM zone from points; PNG helpers (`save_export_png`, `*_low.png` email copies).
   - **`performance_import_dialog.py`** – Assignment dialog for mapping imported segments to Performance swath lines 1–4 and optional BIST 1–4.
+  - **`import_survey_dialog.py`** – Post-import GMRT bathymetry prompt when a survey has no planning GeoTIFF.
   - **`dyn_vert_exag_dialog.py`** – Dialog for editing dynamic vertical exaggeration breakpoint tables (Map Options → Vertical Exaggeration).
   - **`map_options_dialog.py`** – Non-modal Map Options dialog (layers, V.E., Dyn Res, contours, slope ranges).
   - **`utils_geo.py`** – Coordinate helpers (e.g. decimal degrees to DDM).
   - **`utils_ui.py`** – UI helpers (message boxes, confirmations).
-  - **`gmrt_dialog/`** – Embedded GMRT Download dialog (config, workers, map_widget, main_window); GeoTIFF-only output, optional split into topo/bathy.
+  - **`bathymetry_download/`** – Interactive **Download Online Bathymetry** dialog (map preview, AOI, multi-source download workers; vendored from Bathymetry Downloader).
+  - **`gmrt_dialog/`** – Legacy embedded GMRT Grid dialog (retained for shared split logic); primary bathymetry UI is `bathymetry_download/`.
+  - **`gmrt_split.py`** – Split combined GMRT GeoTIFF into topo/bathy grids (used by import GMRT and download flows).
   - **`mixins/`** – Feature mixins used by the main window:
     - **BasemapMixin** – Imagery basemap and NOAA ENC Charts overlays.
     - **GeoTIFFMixin** – Load/remove GeoTIFF, display mode, dynamic resolution, contours, slope-overlay bands/opacity.
     - **PlottingMixin** – Survey plan plot, limits, colorbars, DDM axis labels.
     - **SurveyParsersMixin** – DDD/DMS/DMM/LNW parsers (lines and polylines), UTM zone dialog.
-    - **GMRTDownloadMixin** – GMRT GridServer download and load GeoTIFF.
-    - **ReferenceMixin** – Accuracy tab (reference/survey line planning), export/import, optional GMRT on import.
-    - **CalibrationMixin** – Calibration tab, pitch/roll/heading lines, export/import, optional GMRT on import.
-    - **LinePlanningMixin** – Line planning tab, draw/edit, profile, statistics, optional GMRT on import.
+    - **GMRTDownloadMixin** – GMRT GridServer download and load GeoTIFF (post-import prompt and download flows).
+    - **ReferenceMixin** – Accuracy tab (reference/survey line planning), export/import.
+    - **CalibrationMixin** – Calibration tab, pitch/roll/heading lines, export/import.
+    - **LinePlanningMixin** – Line planning tab, draw/edit, profile, statistics.
     - **PerformanceMixin** – Performance tab: ping/line-length math, pick center/depth, plot/info, import/export hooks, debounced auto-plot.
-    - **ProfilesMixin** – Crossline, pitch, line-planning, and performance elevation profiles (performance: line 1 + BIST colors aligned with map).
+    - **AdcpMixin** – ADCP tab: dual-circle calibration, import/export, profiles.
+    - **ProfilesMixin** – Crossline, pitch, line-planning, backscatter, performance, and ADCP elevation profiles.
     - **MapInteractionMixin** – Click, scroll, pan, zoom, pick center/pitch/roll, measurement tool.
-    - **ExportImportMixin** – Save/load parameters, export survey files, **Select Export Directory** dialog with **Export Types** button.
+    - **ExportImportMixin** – Shared Import/Export UI, save/load parameters, export survey files, **Select Export Directory** dialog with **Export Types** button, post-import GMRT prompt.
     - **ConfigMixin** – Last-used directories, config load/save, persisted **Export Types** options, **`vert_exag_table`**, **`shaded_relief_cmap`**, **`slope_overlay_bands`**, and **`slope_overlay_opacity`** (with migration from legacy `map_png` / `profiles_png` keys).
 
 ## Installation
@@ -185,7 +198,7 @@ The application is organized as a package plus a launcher:
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `SAT_Planner_v2026.37.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
+- `SAT_Planner_v2026.39.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
 - `SAT_Planner.app` (macOS) — if available
 
 No installation required - just run the executable or app bundle.
@@ -204,7 +217,7 @@ cd SAT_Planner
 ```bash
 pip install PyQt6 matplotlib numpy rasterio pyproj shapely fiona Pillow requests colormaps
 ```
-(`requests` is used for GMRT bathymetry download; `colormaps` is optional for ice/arctic/sapphire/torch.)
+(`requests` is used for online bathymetry and GMRT downloads; `colormaps` is optional for ice/arctic/sapphire/torch.)
 
 **Using conda (recommended for Windows and macOS):**
 ```bash
@@ -248,14 +261,14 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 
 ### Basic Workflow
 
-1. **Load GeoTIFF** (optional): Click "Load GeoTIFF" to load elevation data, or use **Download Data** -> **GMRT** to open the GMRT dialog and download bathymetry (GeoTIFF-only; if you use split, the app loads the bathy grid)
+1. **Load bathymetry** (optional): Click **Load GeoTIFF**, or **Download Online Bathymetry** to fetch a grid (GEBCO, GMRT, NCEI, WGOM, etc.) and load it into the planner. Until bathymetry or a survey plan is loaded, the map and profile show a short *Load a Test Plan or Bathymetry to begin planning* message.
 2. **GeoTIFF display** (optional): Use **Map Display** (Shaded Relief, Shaded Slope, Hillshade, Slope) and **Color Map** in the Bathymetry GeoTIFF panel; open **Map Options** (map icon) for Vertical Exaggeration, Dyn Res, Contours, and Slopes
 3. **Map overlays / measure** (optional): Use **Map Options** for Imagery Basemap, NOAA ENC, EEZs, and shapefiles; use the **Measurement** icon for distance/heading
-4. **Select Planning Mode**: Choose Calibration, Accuracy, Performance, or Line tabs
+4. **Select Planning Mode**: Choose Calibration, Accuracy, Line, Backscatter, Performance, or ADCP
 5. **Configure Parameters**: Set survey parameters in the appropriate tab
-6. **Generate/Plan**: Create survey lines based on parameters or draw interactively
-7. **View Statistics / test info**: Open **Calibration Survey Info**, **Accuracy Survey Info**, **Show Performance Test Info** (Performance tab), or **Survey Info** (Line tab)
-8. **Export**: Save survey plans using the Export buttons; in **Select Export Directory**, use **Export Types** if you want to limit optional formats (shapefile, text, Hypack, GPX, PNG resolutions, etc.)
+6. **Generate/Plan** or **Import Survey**: Create survey lines from parameters, draw interactively, or use the shared **Import Survey** button (label follows the active tab). If the imported survey has no planning GeoTIFF, you will be prompted to download GMRT for the survey area.
+7. **View Statistics / test info**: Open the tab’s survey-info dialog (Calibration, Accuracy, Performance, Line, Backscatter, or ADCP)
+8. **Export**: Use **Export Survey**; in **Select Export Directory**, use **Export Types** if you want to limit optional formats (shapefile, text, Hypack, GPX, PNG resolutions, etc.)
 
 ### Calibration Survey Planning
 
@@ -287,7 +300,7 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 1. Load a GeoTIFF (needed for plotting and for depth at pick).
 2. Open the **Performance** tab; set **Swell Direction** (default 0°) and other test parameters (speed, pings, BIST time, etc.).
 3. Use **Pick Center from GeoTIFF** and click the map, or enter central latitude/longitude manually. With valid depth/speed/pings, the plan may **auto-plot**; otherwise click **Plot Performance Lines**.
-4. Use **Show Performance Test Info** for a written pattern, distances, and times; use **Performance Import/Export** to share plans in the same family of formats as Accuracy.
+4. Use **Show Performance Test Info** for a written pattern, distances, and times; use the shared **Import Survey** / **Export Survey** controls to share plans in the same family of formats as Accuracy.
 
 ### Line Planning
 
@@ -306,20 +319,44 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 3. In **Backscatter Line Planning**, define the normalization centerline/area and line settings (lead-in, speed, swath angle, sound velocity).
 4. Use **Show Area Stats** and **Survey Info** to review calculated metrics and waypoints (`BS1LI`, `BS1S`, `BS1E`, `BS1LO`).
 5. Adjust **Box Width (m)** or use **Edit Area Width** / **Move Waypoints** as needed.
-6. Use **Import Backscatter Line** / **Export Backscatter Line** to share geometry, settings, and reports (optional products follow **Export Types**).
+6. Use **Import Survey** / **Export Survey** (Backscatter labels when that tab is active) to share geometry, settings, and reports (optional products follow **Export Types**).
 
-### Download GMRT Grid Dialog
+### ADCP Calibration Planning
 
-Use **Download Data** -> **GMRT** in the GeoTIFF Control section to open the **Download GMRT Grid** window (separate from the main app). In the dialog you can:
+1. Load bathymetry (recommended).
+2. Open the **ADCP** tab; set circle diameter, survey speed, turn time, and related parameters.
+3. Place or import the dual-circle calibration plan; use **Zoom to ADCP Cal** and **Show ADCP Cal Info** as needed.
+4. Use **Import Survey** / **Export Survey** to share geometry and `{name}_adcp_params.json` metadata.
+
+### Download Online Bathymetry
+
+Click **Download Online Bathymetry** in the **Bathymetry GeoTIFF** panel to open the interactive download dialog. Sources include:
+
+- **GMRT Topo-Bathy** (default) and **GMRT Topo-Bathy (Observed Only)**
+- **GEBCO 2026**
+- **NCEI Multibeam Mosaic** (Raw and Proc)
+- **WGOM-LI-SNE** (Hi Resolution and Regional)
+
+In the dialog you can:
+
+- Preview the selected source on the map (including optional GMRT hi-res mask)
+- Set the area of interest (coordinates or map draw)
+- Choose cell size / resolution where the source supports it (meter presets for GMRT and WGOM)
+- Download a GeoTIFF; on success the grid is loaded into SAT Planner
+
+GMRT sources support optional **Split Topo/Depths** (load bathymetry only). Large GMRT requests may warn when estimated pixels exceed limits.
+
+### Legacy Download GMRT Grid Dialog
+
+The older standalone **Download GMRT Grid** window (`sat_planner/gmrt_dialog/`) remains in the codebase for shared GMRT split logic. The main application UI uses **Download Online Bathymetry** instead. If you open the legacy dialog directly, you can:
 
 - Set the area of interest (North/South/East/West or draw on the map)
 - Choose **Cell Resolution**: 100 m, 200 m, 400 m, or **Custom** (e.g. 50 m); default is 100 m
 - **Split Grid Into Bathymetry and Topography** is enabled by default; SAT Planner loads the bathymetry grid after download
 - A warning (orange text) appears when estimated pixels exceed 16,000,000
 - Download progress displays in-dialog (tile mode: `x of y`; single-grid mode: indeterminate "Downloading...")
-- Use **"Close GMRT Downloader"** at the bottom to close the dialog
 
-Downloads are always GeoTIFF. The dialog uses its own config: `~/.gmrtgrab_sat_planner_config.json`.
+Downloads are always GeoTIFF. The legacy dialog uses its own config: `~/.gmrtgrab_sat_planner_config.json`.
 
 ### Map Options and Measurement
 
@@ -352,7 +389,7 @@ Survey **`{name}_params.json`** sidecars (and tab-specific variants such as `{na
 ## Export Formats
 
 ### Always exported
-Regardless of **Export Types** settings (Accuracy, Calibration, Performance, Line, and Backscatter):
+Regardless of **Export Types** settings (Accuracy, Calibration, Performance, Line, Backscatter, and ADCP):
 - **GeoJSON** (and backscatter `{name}_area.geojson` when a normalization polygon exists)
 - **`{name}_params.json`** sidecars (tab-specific fields; Performance uses `{name}_performance_params.json`)
 - **`*_info.txt`** statistics / survey-info reports
@@ -424,6 +461,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.39**: **Shared Import/Export** group above the tab notebook (import/export labels and Export Name follow the active tab). **Download Online Bathymetry** replaces the GeoTIFF **Download Data** source dropdown (GEBCO, GMRT, NCEI, WGOM interactive dialog with map preview). **GMRT on import** runs **after** survey file selection and prompts only when no planning GeoTIFF is available (missing path or absent metadata). Map and profile **startup placeholders** (*Load a Test Plan or Bathymetry to begin planning*). Added `import_survey_dialog.py`, `bathymetry_download/` package, and ADCP tab documentation in README.
 - **v2026.37**: Map chrome declutter. **Map Options** icon (lower-left of map) opens a non-modal dialog for basemap/ENC/EEZ/shapefile, **Vertical Exaggeration**, **Dyn Res**, Contours, and **Slopes** (three ranges with colors, shared opacity, `-` = undefined/off). **Measurement Tool** is a map icon with orange thick `+` cursor and bottom-strip deactivate prompt. Bathymetry panel keeps **Map Display** and **Color Map** (extra ice/arctic/sapphire/torch when `colormaps` is installed; RdYlBu inverted). **Export Types** moved into the **Select Export Directory** dialog. Slope overlay bands/opacity and colormap persist in config and `*_params.json`.
 - **v2026.36**: Export Name fields no longer snap back to the default suggested basename after editing. **Accuracy** and **Performance** no longer regenerate the name on Enter/blur; **Calibration**, **ADCP**, and **Backscatter** keep custom names when pitch/offset, diameter, or geometry updates would previously overwrite them. Blank names and names that still match the auto-generated pattern continue to refresh as parameters change.
 - **v2026.35**: GeoTIFF display and visualization controls. **Shaded Relief** is now the single elevation-overlay mode (former **Shaded Relief Dyn** behavior): dynamic V.E. curve with multidirectional hillshade and semi-transparent elevation colors. Display dropdown: Shaded Relief, Shaded Slope, Hillshade, Slope. New **V.E.** button opens an editable breakpoint table (elevation range minima and Shaded Relief values; Shaded Relief Dyn auto-derived); defaults and user edits persist in `~/.cal_ref_planner_config.json` and survey `*_params.json`. New **CMap** button cycles Shaded Relief elevation colormaps (rainbow default; viridis, cividis, turbo, inverted CnBu/Greys/Spectral/hsv, RdYlBu, jet, winter); colormap persists between sessions and in params sidecars. **Hillshade** and **Shaded Slope** hillshade layers use the same dynamic V.E. curve as Shaded Relief. **Dynamic Resolution** button label shortened to **Dyn Res:** ON/OFF; **V.E.** button uses compact fixed width.
@@ -474,7 +512,7 @@ For questions or issues, please contact:
 
 ## GMRT
 
-Bathymetry/topography data available through the Download GMRT Grid dialog and the GMRT download-on-import options are from the Global Multi-Resolution Topography (GMRT) synthesis:
+Bathymetry/topography data available through **Download Online Bathymetry**, post-import GMRT prompts, and related download flows includes GMRT and other sources as documented in the dialog. GMRT synthesis citation:
 
 Ryan, W. B. F., S.M. Carbotte, J. Coplan, S. O'Hara, A. Melkonian, R. Arko, R.A. Weissel, V. Ferrini, A. Goodwillie, F. Nitsche, J. Bonczkowski, and R. Zemsky (2009), Global Multi-Resolution Topography (GMRT) synthesis data set, *Geochem. Geophys. Geosyst.*, 10, Q03014, doi:[10.1029/2008GC002332](https://doi.org/10.1029/2008GC002332).
 
