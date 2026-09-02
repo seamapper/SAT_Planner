@@ -723,8 +723,11 @@ class GeoTIFFMixin:
             if hasattr(self, "_deferred_sync_all_bound_params"):
                 self._deferred_sync_all_bound_params()
             self._update_backscatter_area_button_states()
-            if getattr(self, "backscatter_download_gmrt_checkbox", None) and self.backscatter_download_gmrt_checkbox.isChecked():
-                self._download_and_load_gmrt_after_backscatter_import()
+            imported_geotiff_path = params.get("geotiff_path") if isinstance(params, dict) else None
+            self._maybe_prompt_gmrt_download_after_import(
+                geotiff_path=imported_geotiff_path,
+                download_callback=self._download_and_load_gmrt_after_backscatter_import,
+            )
         except Exception as e:
             self._show_message("error", "Import Error", f"Failed to import backscatter line: {e}")
 

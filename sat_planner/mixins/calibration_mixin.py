@@ -2039,8 +2039,17 @@ class CalibrationMixin:
                                 append=True,
                             )
             # Suggested export name: from params, else from loaded GeoTIFF, else defer if GMRT download, else pitch-line or generic
-            if not params or not isinstance(params, dict) or not params.get('export_name'):
-                self._set_cal_export_name_after_import()
+            imported_geotiff_path = imported_geojson_geotiff_path
+            if params and isinstance(params, dict):
+                if params.get("geotiff_path"):
+                    imported_geotiff_path = params.get("geotiff_path")
+                if (
+                    imported_geotiff_path
+                    and os.path.exists(imported_geotiff_path)
+                    and hasattr(self, "_load_geotiff_from_path")
+                    and self.geotiff_data_array is None
+                ):
+                    self._load_geotiff_from_path(imported_geotiff_path)
             if hasattr(self, '_deferred_sync_all_bound_params'):
                 self._deferred_sync_all_bound_params()
             self._update_pitch_line_button_states()
@@ -2074,8 +2083,13 @@ class CalibrationMixin:
                     imported_lines.append(f"Heading line {i+1}")
             if imported_lines:
                 self.set_cal_info_text(f"Successfully imported: {', '.join(imported_lines)}")
-                if getattr(self, 'cal_download_gmrt_checkbox', None) and self.cal_download_gmrt_checkbox.isChecked():
-                    self._download_and_load_gmrt_after_import()
+                gmrt_started = self._maybe_prompt_gmrt_download_after_import(
+                    geotiff_path=imported_geotiff_path,
+                    download_callback=self._download_and_load_gmrt_after_import,
+                )
+                if not params or not isinstance(params, dict) or not params.get('export_name'):
+                    if not gmrt_started:
+                        self._set_cal_export_name_after_import()
             else:
                 self._show_message("warning","Import Warning", "No valid calibration lines found in the selected file.")
         except Exception as e:

@@ -1179,8 +1179,13 @@ class AdcpMixin:
             self._zoom_to_adcp_cal()
         msg = f"Imported ADCP calibration from {os.path.basename(file_path)}."
         self.set_adcp_activity_text(msg, append=False)
-        if getattr(self, "adcp_download_gmrt_checkbox", None) and self.adcp_download_gmrt_checkbox.isChecked():
-            self._download_and_load_gmrt_after_adcp_import()
+        imported_geotiff_path = None
+        if params and isinstance(params, dict):
+            imported_geotiff_path = params.get("geotiff_path")
+        self._maybe_prompt_gmrt_download_after_import(
+            geotiff_path=imported_geotiff_path,
+            download_callback=self._download_and_load_gmrt_after_adcp_import,
+        )
 
     def _download_and_load_gmrt_after_adcp_import(self):
         points = self._adcp_all_segment_points()
@@ -1383,9 +1388,7 @@ class AdcpMixin:
         self.profile_ax.tick_params(axis="both", which="major", labelsize=7)
 
         if not self._adcp_plan_complete():
-            self.profile_ax.set_title("ADCP — Elevation Profile", fontsize=8)
-            self.profile_fig.tight_layout(pad=1.0)
-            self.profile_canvas.draw_idle()
+            self._show_profile_planning_placeholder()
             return
 
         geod = self._adcp_geod()

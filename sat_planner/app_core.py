@@ -352,7 +352,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.profile_ax = self.profile_fig.add_subplot(111)
         self.profile_canvas = FigureCanvas(self.profile_fig)
         self.profile_widget = self.profile_canvas
-        self._draw_crossline_profile()
+        self._show_profile_planning_placeholder()
 
         # Slope profile checkbox for profile plot
         self.show_slope_profile_var = True
@@ -2355,6 +2355,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.canvas = FigureCanvas(self.figure)
         plot_layout.addWidget(self.canvas)
         self.canvas_widget = self.canvas  # For compatibility
+        self._show_map_planning_placeholder()
 
         print(f"Widgets created - param_scroll: {self.param_scroll is not None}, plot_frame: {self.plot_frame is not None}, canvas: {self.canvas is not None}")
 

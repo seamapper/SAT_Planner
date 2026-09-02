@@ -5,12 +5,35 @@ _draw_roll_line_profile, _draw_current_profile.
 """
 import numpy as np
 
-from sat_planner.constants import pyproj
+from sat_planner.constants import pyproj, PLANNING_PLACEHOLDER_TEXT
 
 
 class ProfilesMixin:
     """Mixin for profile plots: _get_profile_data_from_geotiff, _draw_crossline_profile,
     _draw_pitch_line_profile, _draw_roll_line_profile, _draw_current_profile."""
+
+    def _show_profile_planning_placeholder(self):
+        """Show startup guidance on the profile plot when nothing is available yet."""
+        if not hasattr(self, "profile_ax") or not hasattr(self, "profile_fig"):
+            return
+        self.profile_ax.clear()
+        for ax in self.profile_fig.get_axes():
+            if ax != self.profile_ax:
+                ax.remove()
+        self.profile_ax.set_axis_off()
+        self.profile_ax.text(
+            0.5,
+            0.5,
+            PLANNING_PLACEHOLDER_TEXT,
+            ha="center",
+            va="center",
+            transform=self.profile_ax.transAxes,
+            fontsize=10,
+            color="#666666",
+        )
+        self.profile_fig.subplots_adjust(left=0.12, right=0.98, top=0.92, bottom=0.12)
+        if hasattr(self, "profile_canvas"):
+            self.profile_canvas.draw_idle()
 
     def _show_slope_on_profile(self):
         """Whether elevation profile plots should include the slope (twin axis) curve."""
@@ -110,13 +133,13 @@ class ProfilesMixin:
             segment and
             len(segment) == 2
         ):
-            self.profile_canvas.draw_idle()
+            self._show_profile_planning_placeholder()
             return
 
         (lat1, lon1), (lat2, lon2) = segment
         dists, elevations, slopes = self._profile_arrays_along_segment_endpoints(lat1, lon1, lat2, lon2, n=100)
         if dists is None or elevations is None:
-            self.profile_canvas.draw_idle()
+            self._show_profile_planning_placeholder()
             return
 
         self._profile_dists = dists
@@ -171,8 +194,7 @@ class ProfilesMixin:
             or not ext
             or len(ext) != 2
         ):
-            self.profile_fig.tight_layout(pad=1.0)
-            self.profile_canvas.draw_idle()
+            self._show_profile_planning_placeholder()
             return
 
         (a_lat, a_lon), (b_lat, b_lon) = centerline
@@ -213,8 +235,7 @@ class ProfilesMixin:
             all_s.append(slopes)
 
         if not all_d:
-            self.profile_fig.tight_layout(pad=1.0)
-            self.profile_canvas.draw_idle()
+            self._show_profile_planning_placeholder()
             return
 
         dcat = np.concatenate(all_d)
@@ -347,6 +368,7 @@ class ProfilesMixin:
         elevations, slopes, _ = self._get_profile_data_from_geotiff(lats, lons)
         if elevations is None:
             if self.geotiff_data_array is None or self.geotiff_extent is None:
+                self._show_profile_planning_placeholder()
                 return None, None, None
             left, right, bottom, top = tuple(self.geotiff_extent)
             nrows, ncols = self.geotiff_data_array.shape
@@ -394,8 +416,6 @@ class ProfilesMixin:
             self.cross_line_data and
             len(self.cross_line_data) == 2
         ):
-            self.profile_ax.clear()
-            self.profile_canvas.draw_idle()
             self._profile_dists = None
             self._profile_elevations = None
             self._profile_slopes = None
@@ -405,6 +425,7 @@ class ProfilesMixin:
                 except Exception:
                     pass
                 self.profile_info_text = None
+            self._show_profile_planning_placeholder()
             return
         self.profile_ax.clear()
         for ax in self.profile_fig.get_axes():
@@ -425,6 +446,7 @@ class ProfilesMixin:
         elevations, slopes, profile_extent = self._get_profile_data_from_geotiff(lats, lons)
         if elevations is None:
             if self.geotiff_data_array is None or self.geotiff_extent is None:
+                self._show_profile_planning_placeholder()
                 return
             left, right, bottom, top = tuple(self.geotiff_extent)
             nrows, ncols = self.geotiff_data_array.shape
@@ -520,9 +542,7 @@ class ProfilesMixin:
         slope_ax = None
 
         if not (hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2):
-            self.profile_fig.tight_layout(pad=1.0)
-            if hasattr(self, 'profile_canvas'):
-                self.profile_canvas.draw_idle()
+            self._show_profile_planning_placeholder()
             return
 
         (lat1, lon1), (lat2, lon2) = self.pitch_line_points
@@ -532,6 +552,7 @@ class ProfilesMixin:
         elevations, slopes, profile_extent = self._get_profile_data_from_geotiff(lats, lons)
         if elevations is None:
             if self.geotiff_data_array is None or self.geotiff_extent is None:
+                self._show_profile_planning_placeholder()
                 return
             left, right, bottom, top = tuple(self.geotiff_extent)
             nrows, ncols = self.geotiff_data_array.shape
@@ -629,9 +650,7 @@ class ProfilesMixin:
         slope_ax = None
 
         if not (hasattr(self, "roll_line_points") and len(self.roll_line_points) == 2):
-            self.profile_fig.tight_layout(pad=1.0)
-            if hasattr(self, "profile_canvas"):
-                self.profile_canvas.draw_idle()
+            self._show_profile_planning_placeholder()
             return
 
         (lat1, lon1), (lat2, lon2) = self.roll_line_points
@@ -641,6 +660,7 @@ class ProfilesMixin:
         elevations, slopes, profile_extent = self._get_profile_data_from_geotiff(lats, lons)
         if elevations is None:
             if self.geotiff_data_array is None or self.geotiff_extent is None:
+                self._show_profile_planning_placeholder()
                 return
             left, right, bottom, top = tuple(self.geotiff_extent)
             nrows, ncols = self.geotiff_data_array.shape
@@ -755,10 +775,7 @@ class ProfilesMixin:
             segments.append((bist_data[0][0], bist_data[0][1], perf_bist_color, "BIST"))
 
         if not segments:
-            self.profile_ax.set_title("Performance — Elevation Profile", fontsize=8)
-            self.profile_fig.tight_layout(pad=1.0)
-            if hasattr(self, "profile_canvas"):
-                self.profile_canvas.draw_idle()
+            self._show_profile_planning_placeholder()
             return
 
         title = "Performance Line 1 + BIST — Elevation Profile" if len(segments) > 1 else "Performance Line 1 — Elevation Profile"
@@ -797,9 +814,7 @@ class ProfilesMixin:
             cumulative = float(dists_plot[-1])
 
         if not elev_arrays:
-            self.profile_fig.tight_layout(pad=1.0)
-            if hasattr(self, "profile_canvas"):
-                self.profile_canvas.draw_idle()
+            self._show_profile_planning_placeholder()
             return
 
         if self._show_slope_on_profile() and slope_dists_concat:
@@ -856,14 +871,6 @@ class ProfilesMixin:
             if hasattr(self, "_draw_adcp_profile"):
                 self._draw_adcp_profile()
             else:
-                self.profile_ax.clear()
-                self.profile_ax.set_title("Elevation Profile", fontsize=8)
-                self.profile_fig.tight_layout(pad=1.0)
-                self.profile_canvas.draw()
+                self._show_profile_planning_placeholder()
         else:
-            self.profile_ax.clear()
-            self.profile_ax.set_title("Elevation Profile", fontsize=8)
-            self.profile_ax.set_xlabel("Distance (m)", fontsize=8)
-            self.profile_ax.set_ylabel("Elevation (m)", fontsize=8)
-            self.profile_fig.tight_layout(pad=1.0)
-            self.profile_canvas.draw()
+            self._show_profile_planning_placeholder()

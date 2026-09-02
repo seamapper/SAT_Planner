@@ -868,8 +868,10 @@ class ReferenceMixin:
             else:
                 msg += " (parameters calculated from lines)"
             self.set_ref_info_text(msg)
-            if getattr(self, "ref_download_gmrt_checkbox", None) and self.ref_download_gmrt_checkbox.isChecked():
-                self._download_and_load_gmrt_after_ref_import()
+            self._maybe_prompt_gmrt_download_after_import(
+                geotiff_path=imported_params_geotiff_path,
+                download_callback=self._download_and_load_gmrt_after_ref_import,
+            )
         else:
             self._show_message("warning", "Import Warning", "No valid survey lines found in the selected file.")
 
@@ -1362,8 +1364,11 @@ class ReferenceMixin:
                 else:
                     msg += " (parameters calculated from lines)"
                 self.set_ref_info_text(msg)
-                if getattr(self, "ref_download_gmrt_checkbox", None) and self.ref_download_gmrt_checkbox.isChecked():
-                    self._download_and_load_gmrt_after_ref_import()
+                geotiff_path_to_load = imported_params_geotiff_path or imported_geojson_geotiff_path
+                self._maybe_prompt_gmrt_download_after_import(
+                    geotiff_path=geotiff_path_to_load,
+                    download_callback=self._download_and_load_gmrt_after_ref_import,
+                )
             else:
                 self._show_message("warning","Import Warning", "No valid survey lines found in the selected file.")
 

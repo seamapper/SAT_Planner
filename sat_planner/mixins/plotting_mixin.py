@@ -7,12 +7,68 @@ from matplotlib.colors import LightSource
 from matplotlib.patches import FancyArrowPatch, Polygon
 from matplotlib.ticker import FuncFormatter
 
-from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, CRSError
+from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, CRSError, PLANNING_PLACEHOLDER_TEXT
 from sat_planner.utils_geo import decimal_degrees_to_ddm
 
 
 class PlottingMixin:
     """Mixin providing _generate_and_plot, _plot_survey_plan, _clear_plot, _remove_colorbar."""
+
+    def _has_map_planning_content(self):
+        """True when the map has bathymetry or any survey/plan geometry to display."""
+        if self.geotiff_data_array is not None and self.geotiff_extent is not None:
+            return True
+        if getattr(self, "survey_lines_data", None):
+            return True
+        if getattr(self, "cross_line_data", None):
+            return True
+        if getattr(self, "pitch_line_points", None) and len(self.pitch_line_points) == 2:
+            return True
+        if getattr(self, "roll_line_points", None) and len(self.roll_line_points) == 2:
+            return True
+        if getattr(self, "line_planning_points", None) and len(self.line_planning_points) >= 2:
+            return True
+        if getattr(self, "backscatter_box_vertices", None) is not None:
+            return True
+        if getattr(self, "performance_test_lines_data", None) and len(self.performance_test_lines_data) == 4:
+            return True
+        if getattr(self, "adcp_circle1_center", None) is not None:
+            return True
+        if getattr(self, "adcp_circle2_center", None) is not None:
+            return True
+        return False
+
+    def _show_map_planning_placeholder(self):
+        """Show startup guidance on the main map when nothing is loaded yet."""
+        if not hasattr(self, "figure"):
+            return
+        for ax in self.figure.axes[:]:
+            self.figure.delaxes(ax)
+        self.figure.clear()
+        self.ax = self.figure.add_subplot(111)
+        self.figure.subplots_adjust(left=0.085, right=0.99, top=0.95, bottom=0.08)
+        self.ax.set_axis_off()
+        self.ax.text(
+            0.5,
+            0.5,
+            PLANNING_PLACEHOLDER_TEXT,
+            ha="center",
+            va="center",
+            transform=self.ax.transAxes,
+            fontsize=12,
+            color="#666666",
+        )
+        self.slope_colorbar = None
+        self.elevation_colorbar = None
+        self.geotiff_image_plot = None
+        self.geotiff_hillshade_plot = None
+        self.contour_plot = None
+        self.basemap_image_plot = None
+        self.slope_overlay_image_plot = None
+        self.backscatter_slope_areas_overlay_plot = None
+        self.backscatter_raster_plot = None
+        if hasattr(self, "canvas"):
+            self.canvas.draw_idle()
 
     def _should_show_travel_direction_arrows(self):
         """ADCP circle direction arrows when the ADCP tab checkbox is checked."""
@@ -594,6 +650,10 @@ class PlottingMixin:
 
     def _plot_survey_plan(self, preserve_view_limits=True):
         try:
+            if not self._has_map_planning_content():
+                self._show_map_planning_placeholder()
+                return
+
             # Remove all axes except the main one to prevent accumulation of colorbar axes
             for ax in self.figure.axes[:]:
                 if ax is not self.ax:
@@ -1894,6 +1954,12 @@ class PlottingMixin:
             # Reset Load GeoTIFF button to orange and bold when GeoTIFF is removed
             if hasattr(self, 'load_geotiff_btn'):
                 self.load_geotiff_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
+
+        if full_clear:
+            self._show_map_planning_placeholder()
+            if hasattr(self, "_show_profile_planning_placeholder"):
+                self._show_profile_planning_placeholder()
+            return
 
         # Reset plot elements
         if self.ax:

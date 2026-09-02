@@ -264,17 +264,46 @@ class ExportImportMixin:
         self.shared_import_btn.setEnabled(self._shared_survey_io_import_enabled(tab_index))
         self.shared_export_btn.setEnabled(self._shared_survey_io_export_enabled(tab_index))
 
-    def _show_import_survey_dialog(self):
+    def _import_has_planning_geotiff(self, geotiff_path=None):
+        """True when bathymetry is already available from the imported survey."""
+        if geotiff_path and os.path.isfile(geotiff_path):
+            return True
+        return (
+            getattr(self, "geotiff_data_array", None) is not None
+            and getattr(self, "geotiff_extent", None) is not None
+        )
+
+    def _maybe_prompt_gmrt_download_after_import(self, geotiff_path=None, download_callback=None):
+        """After import, offer GMRT download when the survey has no planning bathymetry.
+
+        Returns True when a GMRT download was started.
+        """
+        if not callable(download_callback):
+            return False
+        if self._import_has_planning_geotiff(geotiff_path):
+            return False
+
         spec = self._survey_io_spec()
         download_cb, buffer_spin, split_cb = self._gmrt_widgets_for_prefix(spec["gmrt_prefix"])
-        dialog = ImportSurveyDialog(self, spec["tab_label"], download_cb, buffer_spin, split_cb)
-        return dialog.exec() == QDialog.DialogCode.Accepted
+        dialog = ImportSurveyDialog(
+            self,
+            spec["tab_label"],
+            download_cb,
+            buffer_spin,
+            split_cb,
+            prompt_missing_geotiff=True,
+            geotiff_path=geotiff_path,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+        if download_cb.isChecked():
+            download_callback()
+            return True
+        return False
 
     def _on_shared_import_clicked(self):
         if hasattr(self, "_gmrt_is_downloading") and self._gmrt_is_downloading():
             self._gmrt_cancel_active_download()
-            return
-        if not self._show_import_survey_dialog():
             return
         spec = self._survey_io_spec()
         handler = getattr(self, spec["import_handler"])

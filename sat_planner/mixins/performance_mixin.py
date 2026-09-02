@@ -1202,7 +1202,7 @@ class PerformanceMixin:
             gmrt_button=self._active_import_button(),
         )
 
-    def _perf_import_post_import(self, file_path):
+    def _perf_import_post_import(self, file_path, geotiff_path_hint=None):
         """Populate performance fields from optional metadata; refresh map and profile."""
         lines = getattr(self, "performance_test_lines_data", []) or []
         if len(lines) != 4:
@@ -1353,8 +1353,13 @@ class PerformanceMixin:
         else:
             msg += " (geometry only; fill swell direction if needed)"
         self.set_performance_activity_text(msg, append=False)
-        if getattr(self, "performance_download_gmrt_checkbox", None) and self.performance_download_gmrt_checkbox.isChecked():
-            self._download_and_load_gmrt_after_perf_import()
+        imported_geotiff_path = geotiff_path_hint
+        if params and isinstance(params, dict) and params.get("geotiff_path"):
+            imported_geotiff_path = params.get("geotiff_path")
+        self._maybe_prompt_gmrt_download_after_import(
+            geotiff_path=imported_geotiff_path,
+            download_callback=self._download_and_load_gmrt_after_perf_import,
+        )
 
     def _import_performance_survey(self):
         """Import performance plan from the same file types as Accuracy; assign lines when needed."""
@@ -1498,7 +1503,7 @@ class PerformanceMixin:
                             break
                     if spd is not None:
                         self._perf_set_deferred_field("performance_test_speed_entry", spd)
-                    self._perf_import_post_import(file_path)
+                    self._perf_import_post_import(file_path, geotiff_path_hint=gtp)
                     return
                 imported_lines = self._geojson_to_unassigned_segments(geojson_data)
                 if not imported_lines:

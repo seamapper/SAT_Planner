@@ -13,13 +13,23 @@ from PyQt6.QtWidgets import (
 
 
 class ImportSurveyDialog(QDialog):
-    """Configure GMRT import options, then continue to the file picker."""
+    """Offer GMRT bathymetry download options after a survey import."""
 
-    def __init__(self, parent, tab_label, download_checkbox, buffer_spin, split_checkbox):
+    def __init__(
+        self,
+        parent,
+        tab_label,
+        download_checkbox,
+        buffer_spin,
+        split_checkbox,
+        *,
+        prompt_missing_geotiff=False,
+        geotiff_path=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle(f"Import {tab_label}")
         self.setModal(True)
-        self.resize(420, 180)
+        self.resize(460, 200)
 
         self._download_checkbox = download_checkbox
         self._buffer_spin = buffer_spin
@@ -27,17 +37,36 @@ class ImportSurveyDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        intro = QLabel(
-            "Choose GMRT options for this import, then click Continue to select a survey file."
-        )
+        if prompt_missing_geotiff:
+            if geotiff_path:
+                intro_text = (
+                    "The planning GeoTIFF referenced by this survey was not found:\n"
+                    f"{geotiff_path}\n\n"
+                    "Download GMRT bathymetry for the survey area, or skip to continue "
+                    "without bathymetry."
+                )
+            else:
+                intro_text = (
+                    "This survey does not include planning bathymetry (GeoTIFF).\n\n"
+                    "Download GMRT bathymetry for the survey area, or skip to continue "
+                    "without bathymetry."
+                )
+            default_download = True
+        else:
+            intro_text = (
+                "Choose GMRT options for this import, then click Continue to select a survey file."
+            )
+            default_download = download_checkbox.isChecked()
+
+        intro = QLabel(intro_text)
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
         gmrt_group = QGroupBox("GMRT Bathymetry Download")
         gmrt_layout = QVBoxLayout(gmrt_group)
 
-        self.download_gmrt_checkbox = QCheckBox("Download GMRT after import")
-        self.download_gmrt_checkbox.setChecked(download_checkbox.isChecked())
+        self.download_gmrt_checkbox = QCheckBox("Download GMRT bathymetry for survey area")
+        self.download_gmrt_checkbox.setChecked(default_download)
         self.download_gmrt_checkbox.setToolTip(download_checkbox.toolTip())
         gmrt_layout.addWidget(self.download_gmrt_checkbox)
 
@@ -59,6 +88,8 @@ class ImportSurveyDialog(QDialog):
         self.split_topo_depths_checkbox.setToolTip(split_checkbox.toolTip())
         self.split_topo_depths_checkbox.setEnabled(self.download_gmrt_checkbox.isChecked())
         self.download_gmrt_checkbox.toggled.connect(self.split_topo_depths_checkbox.setEnabled)
+        self.download_gmrt_checkbox.toggled.connect(self.gmrt_buffer_spin.setEnabled)
+        self.gmrt_buffer_spin.setEnabled(self.download_gmrt_checkbox.isChecked())
         gmrt_layout.addWidget(self.split_topo_depths_checkbox)
 
         layout.addWidget(gmrt_group)
@@ -66,7 +97,9 @@ class ImportSurveyDialog(QDialog):
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        button_box.button(QDialogButtonBox.StandardButton.Ok).setText("Continue")
+        button_box.button(QDialogButtonBox.StandardButton.Ok).setText(
+            "Continue" if not prompt_missing_geotiff else "OK"
+        )
         button_box.accepted.connect(self._on_accept)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)

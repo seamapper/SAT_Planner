@@ -914,8 +914,13 @@ class LinePlanningMixin:
             self.set_line_info_text(f"Successfully imported line plan with {len(self.line_planning_points)} points.")
             if hasattr(self, 'line_start_draw_btn') and len(self.line_planning_points) >= 2:
                 self.line_start_draw_btn.setStyleSheet("")
-            if getattr(self, "line_plan_download_gmrt_checkbox", None) and self.line_plan_download_gmrt_checkbox.isChecked():
-                self._download_and_load_gmrt_after_line_import()
+            imported_geotiff_path = None
+            if sidecar_params and isinstance(sidecar_params, dict):
+                imported_geotiff_path = sidecar_params.get("geotiff_path")
+            self._maybe_prompt_gmrt_download_after_import(
+                geotiff_path=imported_geotiff_path,
+                download_callback=self._download_and_load_gmrt_after_line_import,
+            )
         except Exception as e:
             self._show_message("error", "Import Error", f"Failed to import line plan: {e}")
 

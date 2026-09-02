@@ -6,9 +6,11 @@ import os
 import sys
 import traceback
 
-__version__ = "2026.38"
+__version__ = "2026.39"
 
 CONFIG_FILENAME = os.path.join(os.path.expanduser("~"), ".cal_ref_planner_config.json")
+
+PLANNING_PLACEHOLDER_TEXT = "Load a Test Plan or Bathymetry\nto begin planning"
 
 # Register third-party colormaps with matplotlib (via colormaps package).
 _OPTIONAL_COLORMAP_NAMES = ("ice", "arctic", "sapphire", "torch")
