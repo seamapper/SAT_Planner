@@ -6,7 +6,6 @@ import csv
 import json
 import os
 import re
-import time
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -68,23 +67,6 @@ class PerformanceMixin:
         elif hasattr(widget, "setText"):
             widget.setText("-")
 
-    def _debug_performance_log(self, hypothesis_id, location, message, data):
-        """Append an NDJSON debug event for this debug session."""
-        payload = {
-            "sessionId": "f0b845",
-            "runId": "pre-fix",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        try:
-            with open("debug-f0b845.log", "a", encoding="utf-8") as f:
-                f.write(json.dumps(payload) + "\n")
-        except Exception:
-            pass
-
     def _performance_ping_time_sec(self):
         """Return two-way ping time in seconds, or None if inputs are invalid."""
         if not hasattr(self, "performance_test_depth_entry"):
@@ -127,14 +109,6 @@ class PerformanceMixin:
             return
         ping_time_sec = self._performance_ping_time_sec()
         if ping_time_sec is None:
-            # region agent log
-            self._debug_performance_log(
-                "H1",
-                "performance_mixin.py:_update_performance_total_test_time",
-                "Ping time unavailable, clearing total test time",
-                {"ping_time_sec": None},
-            )
-            # endregion
             self._performance_clear_value("performance_total_test_time_entry")
             if hasattr(self, "performance_line_length_m_entry"):
                 self._performance_clear_value("performance_line_length_m_entry")
@@ -142,27 +116,11 @@ class PerformanceMixin:
         try:
             num_pings = float(self.performance_num_pings_entry.text().strip())
         except Exception:
-            # region agent log
-            self._debug_performance_log(
-                "H2",
-                "performance_mixin.py:_update_performance_total_test_time",
-                "Invalid number of pings",
-                {"raw_num_pings": self.performance_num_pings_entry.text().strip()},
-            )
-            # endregion
             self._performance_clear_value("performance_total_test_time_entry")
             if hasattr(self, "performance_line_length_m_entry"):
                 self._performance_clear_value("performance_line_length_m_entry")
             return
         if num_pings < 0 or not np.isfinite(num_pings):
-            # region agent log
-            self._debug_performance_log(
-                "H2",
-                "performance_mixin.py:_update_performance_total_test_time",
-                "Out-of-range number of pings",
-                {"num_pings": num_pings},
-            )
-            # endregion
             self._performance_clear_value("performance_total_test_time_entry")
             if hasattr(self, "performance_line_length_m_entry"):
                 self._performance_clear_value("performance_line_length_m_entry")
@@ -175,27 +133,11 @@ class PerformanceMixin:
             try:
                 bist_min = float(bist_raw)
             except Exception:
-                # region agent log
-                self._debug_performance_log(
-                    "H2",
-                    "performance_mixin.py:_update_performance_total_test_time",
-                    "Invalid BIST time",
-                    {"raw_bist_min": bist_raw},
-                )
-                # endregion
                 self._performance_clear_value("performance_total_test_time_entry")
                 if hasattr(self, "performance_line_length_m_entry"):
                     self._performance_clear_value("performance_line_length_m_entry")
                 return
         if bist_min < 0 or not np.isfinite(bist_min):
-            # region agent log
-            self._debug_performance_log(
-                "H2",
-                "performance_mixin.py:_update_performance_total_test_time",
-                "Out-of-range BIST time",
-                {"bist_min": bist_min},
-            )
-            # endregion
             self._performance_clear_value("performance_total_test_time_entry")
             if hasattr(self, "performance_line_length_m_entry"):
                 self._performance_clear_value("performance_line_length_m_entry")
@@ -204,14 +146,6 @@ class PerformanceMixin:
         collect_sec = num_pings * ping_time_sec
         total_sec = collect_sec + bist_min * 60.0
         if not np.isfinite(total_sec):
-            # region agent log
-            self._debug_performance_log(
-                "H2",
-                "performance_mixin.py:_update_performance_total_test_time",
-                "Computed non-finite total seconds",
-                {"collect_sec": collect_sec, "bist_min": bist_min, "total_sec": total_sec},
-            )
-            # endregion
             self._performance_clear_value("performance_total_test_time_entry")
             if hasattr(self, "performance_line_length_m_entry"):
                 self._performance_clear_value("performance_line_length_m_entry")
@@ -220,14 +154,6 @@ class PerformanceMixin:
         total_min = total_sec / 60.0
         total_hr = total_min / 60.0
         self._performance_set_value("performance_total_test_time_entry", f"{total_min:.2f} min ({total_hr:.2f} hr)")
-        # region agent log
-        self._debug_performance_log(
-            "H3",
-            "performance_mixin.py:_update_performance_total_test_time",
-            "Computed total test time",
-            {"ping_time_sec": ping_time_sec, "num_pings": num_pings, "bist_min": bist_min, "total_sec": total_sec},
-        )
-        # endregion
         self._update_performance_line_length()
 
     def _update_performance_line_length(self):
@@ -251,38 +177,14 @@ class PerformanceMixin:
         try:
             total_sec = float(total_sec_raw)
         except Exception:
-            # region agent log
-            self._debug_performance_log(
-                "H4",
-                "performance_mixin.py:_update_performance_line_length",
-                "Total seconds unavailable for line length",
-                {"raw_total_sec": total_sec_raw},
-            )
-            # endregion
             self._performance_clear_value("performance_line_length_m_entry")
             return
         try:
             speed_kts = float(self.performance_test_speed_entry.text().strip())
         except Exception:
-            # region agent log
-            self._debug_performance_log(
-                "H4",
-                "performance_mixin.py:_update_performance_line_length",
-                "Invalid test speed",
-                {"raw_speed_kts": self.performance_test_speed_entry.text().strip()},
-            )
-            # endregion
             self._performance_clear_value("performance_line_length_m_entry")
             return
         if total_sec < 0 or speed_kts < 0 or not np.isfinite(total_sec) or not np.isfinite(speed_kts):
-            # region agent log
-            self._debug_performance_log(
-                "H4",
-                "performance_mixin.py:_update_performance_line_length",
-                "Out-of-range values for line length",
-                {"total_sec": total_sec, "speed_kts": speed_kts},
-            )
-            # endregion
             self._performance_clear_value("performance_line_length_m_entry")
             return
 
@@ -294,20 +196,6 @@ class PerformanceMixin:
             "performance_line_length_m_entry",
             f"{line_length_m:.1f} m ({line_length_km:.3f} km, {line_length_nm:.3f} nm)",
         )
-        # region agent log
-        self._debug_performance_log(
-            "H5",
-            "performance_mixin.py:_update_performance_line_length",
-            "Computed line length from speed and ping collection time",
-            {
-                "speed_kts": speed_kts,
-                "speed_mps": speed_mps,
-                "total_sec": total_sec,
-                "line_length_m": line_length_m,
-                "line_length_km": line_length_km,
-            },
-        )
-        # endregion
         if not getattr(self, "_performance_suppress_scheduled_autoplot", False):
             self._schedule_autoplot_performance_test_lines(400)
 
