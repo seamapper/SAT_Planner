@@ -31,7 +31,7 @@ import time
 
 from .constants import DEFAULT_SHADED_RELIEF_CMAP, DEFAULT_SLOPE_OVERLAY_BANDS
 from . import __version__, CONFIG_FILENAME, GEOSPATIAL_LIBS_AVAILABLE
-from .utils_ui import show_message as _show_message_fn, ask_yes_no as _ask_yes_no_fn, ask_ok_cancel as _ask_ok_cancel_fn
+from .utils_ui import show_message as _show_message_fn, ask_yes_no as _ask_yes_no_fn, ask_ok_cancel as _ask_ok_cancel_fn, media_path
 from .utils_geo import decimal_degrees_to_ddm
 from .mixins.basemap_mixin import BasemapMixin
 from .mixins.geotiff_mixin import GeoTIFFMixin
@@ -58,6 +58,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"UNH/CCOM-JHC - SAT Planner - v{__version__} - pjohnson@ccom.unh.edu")
+        icon_path = media_path("CCOM.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         # Set minimum window size
         self.setMinimumSize(1600, 1110)
@@ -739,8 +742,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
     def _media_path(self, filename):
         """Return absolute path to a file in the project media directory."""
-        pkg_dir = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(os.path.dirname(pkg_dir), "media", filename)
+        return media_path(filename)
 
     def _setup_map_options_overlay(self):
         """Map overlay icons (options, measurement) and non-modal options dialog."""

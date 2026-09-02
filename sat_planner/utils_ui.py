@@ -2,6 +2,9 @@
 Qt UI helpers for SAT Planner: message boxes and simple dialogs.
 Take parent (QWidget) as first argument; safe to call from app or any widget.
 """
+import os
+import sys
+
 from PyQt6.QtWidgets import (
     QApplication,
     QMessageBox,
@@ -14,6 +17,15 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPalette, QColor
+
+
+def media_path(filename):
+    """Return absolute path to a file in the project media directory (source or frozen exe)."""
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        return os.path.join(base, "media", filename)
+    pkg_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(os.path.dirname(pkg_dir), "media", filename)
 
 
 def apply_dark_theme(app):

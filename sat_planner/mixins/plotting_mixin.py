@@ -1,14 +1,18 @@
 """
 Survey plan plotting: generate plan, plot survey lines/GeoTIFF/contours, clear plot, colorbars.
 """
+import os
 import traceback
 import numpy as np
+import matplotlib.image as mpimg
 from matplotlib.colors import LightSource
+from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from matplotlib.patches import FancyArrowPatch, Polygon
 from matplotlib.ticker import FuncFormatter
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, CRSError, PLANNING_PLACEHOLDER_TEXT
 from sat_planner.utils_geo import decimal_degrees_to_ddm
+from sat_planner.utils_ui import media_path
 
 
 class PlottingMixin:
@@ -48,9 +52,29 @@ class PlottingMixin:
         self.ax = self.figure.add_subplot(111)
         self.figure.subplots_adjust(left=0.085, right=0.99, top=0.95, bottom=0.08)
         self.ax.set_axis_off()
+        text_y = 0.5
+        logo_path = media_path("CCOM.png")
+        if os.path.exists(logo_path):
+            try:
+                img = mpimg.imread(logo_path)
+                if img.ndim >= 2 and img.shape[1] > 0:
+                    fig_w_px = self.figure.get_figwidth() * self.figure.dpi
+                    zoom = (fig_w_px * 0.32) / img.shape[1]
+                    imagebox = OffsetImage(img, zoom=zoom)
+                    ab = AnnotationBbox(
+                        imagebox,
+                        (0.5, 0.58),
+                        frameon=False,
+                        xycoords="axes fraction",
+                        box_alignment=(0.5, 0.5),
+                    )
+                    self.ax.add_artist(ab)
+                    text_y = 0.24
+            except Exception:
+                pass
         self.ax.text(
             0.5,
-            0.5,
+            text_y,
             PLANNING_PLACEHOLDER_TEXT,
             ha="center",
             va="center",
