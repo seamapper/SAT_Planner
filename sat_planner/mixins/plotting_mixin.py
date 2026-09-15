@@ -2,6 +2,7 @@
 Survey plan plotting: generate plan, plot survey lines/GeoTIFF/contours, clear plot, colorbars.
 """
 import os
+import textwrap
 import traceback
 import numpy as np
 import matplotlib.image as mpimg
@@ -12,7 +13,7 @@ from matplotlib.ticker import FuncFormatter
 
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, CRSError, PLANNING_PLACEHOLDER_TEXT
 from sat_planner.utils_geo import decimal_degrees_to_ddm
-from sat_planner.utils_ui import media_path
+from sat_planner.utils_ui import get_about_program_info
 
 
 class PlottingMixin:
@@ -43,7 +44,7 @@ class PlottingMixin:
         return False
 
     def _show_map_planning_placeholder(self):
-        """Show startup guidance on the main map when nothing is loaded yet."""
+        """Show About info + startup guidance on the main map when nothing is loaded yet."""
         if not hasattr(self, "figure"):
             return
         for ax in self.figure.axes[:]:
@@ -52,36 +53,79 @@ class PlottingMixin:
         self.ax = self.figure.add_subplot(111)
         self.figure.subplots_adjust(left=0.085, right=0.99, top=0.95, bottom=0.08)
         self.ax.set_axis_off()
-        text_y = 0.5
-        logo_path = media_path("CCOM.png")
+
+        try:
+            import sat_planner.app_core as _app_core
+
+            about = get_about_program_info(source_path=_app_core.__file__)
+        except Exception:
+            about = get_about_program_info()
+
+        from matplotlib.offsetbox import TextArea, VPacker
+
+        def _text_area(text, *, fontsize=9, fontweight="normal", color="#555555"):
+            return TextArea(
+                text,
+                textprops={
+                    "ha": "center",
+                    "va": "center",
+                    "fontsize": fontsize,
+                    "fontweight": fontweight,
+                    "color": color,
+                    "multialignment": "center",
+                },
+            )
+
+        children = [
+            _text_area(about["title"], fontsize=14, fontweight="bold", color="#333333"),
+            _text_area(f"Frozen On: {about['compile_date']}", fontsize=9, color="#888888"),
+        ]
+
+        logo_path = about["logo_path"]
         if os.path.exists(logo_path):
             try:
                 img = mpimg.imread(logo_path)
                 if img.ndim >= 2 and img.shape[1] > 0:
+                    # Keep logo modest so surrounding About text never overlaps it.
                     fig_w_px = self.figure.get_figwidth() * self.figure.dpi
-                    zoom = (fig_w_px * 0.32) / img.shape[1]
-                    imagebox = OffsetImage(img, zoom=zoom)
-                    ab = AnnotationBbox(
-                        imagebox,
-                        (0.5, 0.58),
-                        frameon=False,
-                        xycoords="axes fraction",
-                        box_alignment=(0.5, 0.5),
-                    )
-                    self.ax.add_artist(ab)
-                    text_y = 0.24
+                    zoom = min(0.55, (fig_w_px * 0.20) / img.shape[1])
+                    children.append(OffsetImage(img, zoom=zoom))
             except Exception:
                 pass
-        self.ax.text(
-            0.5,
-            text_y,
-            PLANNING_PLACEHOLDER_TEXT,
-            ha="center",
-            va="center",
-            transform=self.ax.transAxes,
-            fontsize=12,
-            color="#666666",
+
+        children.extend(
+            [
+                _text_area(about["author"], fontsize=11, fontweight="bold", color="#333333"),
+                _text_area(about["email"], fontsize=9, color="#555555"),
+                _text_area(
+                    "\n".join(textwrap.wrap(about["institution"], width=62)),
+                    fontsize=9,
+                    color="#555555",
+                ),
+                _text_area(
+                    "\n".join(textwrap.wrap(about["grant"], width=72)),
+                    fontsize=8,
+                    color="#666666",
+                ),
+                _text_area(
+                    "\n".join(textwrap.wrap(about["license"], width=62)),
+                    fontsize=8,
+                    color="#666666",
+                ),
+                _text_area(PLANNING_PLACEHOLDER_TEXT, fontsize=12, fontweight="bold", color="#666666"),
+            ]
         )
+
+        packer = VPacker(children=children, align="center", pad=0, sep=10)
+        ab = AnnotationBbox(
+            packer,
+            (0.5, 0.5),
+            frameon=False,
+            xycoords="axes fraction",
+            box_alignment=(0.5, 0.5),
+        )
+        self.ax.add_artist(ab)
+
         self.slope_colorbar = None
         self.elevation_colorbar = None
         self.geotiff_image_plot = None

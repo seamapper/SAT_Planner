@@ -2,6 +2,7 @@
 Qt UI helpers for SAT Planner: message boxes and simple dialogs.
 Take parent (QWidget) as first argument; safe to call from app or any widget.
 """
+import datetime
 import os
 import sys
 
@@ -18,6 +19,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QPalette, QColor
 
+from sat_planner.constants import __version__
+
 
 def media_path(filename):
     """Return absolute path to a file in the project media directory (source or frozen exe)."""
@@ -26,6 +29,41 @@ def media_path(filename):
         return os.path.join(base, "media", filename)
     pkg_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(os.path.dirname(pkg_dir), "media", filename)
+
+
+def get_about_program_info(source_path=None):
+    """Return About-dialog fields shared by the dialog and map startup placeholder."""
+    compile_date = "Unknown"
+    try:
+        if getattr(sys, "frozen", False):
+            path = sys.executable
+        else:
+            path = source_path or __file__
+        if path and os.path.exists(path):
+            compile_date = datetime.datetime.fromtimestamp(os.path.getmtime(path)).strftime(
+                "%B %d, %Y"
+            )
+    except Exception:
+        compile_date = "Unknown"
+
+    return {
+        "title": f"UNH/CCOM-JHC SAT Planner v{__version__}",
+        "compile_date": compile_date,
+        "author": "Paul Johnson",
+        "email": "pjohnson@ccom.unh.edu",
+        "institution": (
+            "Center for Coastal and Ocean Mapping/Joint Hydrographic Center, "
+            "University of New Hampshire"
+        ),
+        "grant": (
+            "This program was developed at the University of New Hampshire, "
+            "Center for Coastal and Ocean Mapping - Joint Hydrographic Center "
+            "(UNH/CCOM-JHC) under the grant NA25NOSX400C0001-T1-01 from the National "
+            "Oceanic and Atmospheric Administration (NOAA)."
+        ),
+        "license": "This software is released for general use under the BSD 3-Clause License.",
+        "logo_path": media_path("CCOM.png"),
+    }
 
 
 def apply_dark_theme(app):

@@ -31,7 +31,13 @@ import time
 
 from .constants import DEFAULT_SHADED_RELIEF_CMAP, DEFAULT_SLOPE_OVERLAY_BANDS
 from . import __version__, CONFIG_FILENAME, GEOSPATIAL_LIBS_AVAILABLE
-from .utils_ui import show_message as _show_message_fn, ask_yes_no as _ask_yes_no_fn, ask_ok_cancel as _ask_ok_cancel_fn, media_path
+from .utils_ui import (
+    show_message as _show_message_fn,
+    ask_yes_no as _ask_yes_no_fn,
+    ask_ok_cancel as _ask_ok_cancel_fn,
+    media_path,
+    get_about_program_info,
+)
 from .utils_geo import decimal_degrees_to_ddm
 from .mixins.basemap_mixin import BasemapMixin
 from .mixins.geotiff_mixin import GeoTIFFMixin
@@ -597,35 +603,19 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
 
-        program_name = QLabel(f"UNH/CCOM-JHC SAT PLanner v{__version__}")
+        about = get_about_program_info(source_path=__file__)
+
+        program_name = QLabel(about["title"])
         program_name.setStyleSheet("font-size: 16pt; font-weight: bold;")
         program_name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(program_name)
 
-        compile_date = "Unknown"
-        try:
-            if getattr(sys, 'frozen', False):
-                exe_path = sys.executable
-                if os.path.exists(exe_path):
-                    mod_time = os.path.getmtime(exe_path)
-                    compile_date = datetime.datetime.fromtimestamp(mod_time).strftime("%B %d, %Y")
-            else:
-                script_path = __file__
-                if os.path.exists(script_path):
-                    mod_time = os.path.getmtime(script_path)
-                    compile_date = datetime.datetime.fromtimestamp(mod_time).strftime("%B %d, %Y")
-        except Exception:
-            compile_date = "Unknown"
-
-        date_label = QLabel(f"Compiled: {compile_date}")
+        date_label = QLabel(f"Frozen On: {about['compile_date']}")
         date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         date_label.setStyleSheet("font-size: 10pt; color: #a0a0a0;")
         layout.addWidget(date_label)
 
-        # Media folder is at project root (parent of sat_planner package)
-        _pkg_dir = os.path.dirname(os.path.abspath(__file__))
-        _project_root = os.path.dirname(_pkg_dir)
-        logo_path = os.path.join(_project_root, "media", "CCOM.png")
+        logo_path = about["logo_path"]
         if os.path.exists(logo_path):
             logo_label = QLabel()
             pixmap = QPixmap(logo_path)
@@ -635,33 +625,29 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(logo_label)
 
-        author_label = QLabel("Paul Johnson")
+        author_label = QLabel(about["author"])
         author_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         author_label.setStyleSheet("font-size: 12pt; font-weight: bold; margin-top: 10px;")
         layout.addWidget(author_label)
 
-        email_label = QLabel("pjohnson@ccom.unh.edu")
+        email_label = QLabel(about["email"])
         email_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         email_label.setStyleSheet("font-size: 10pt; margin-top: 3px;")
         layout.addWidget(email_label)
 
-        institution_label = QLabel("Center for Coastal and Ocean Mapping/Joint Hydrographic Center, University of New Hampshire")
+        institution_label = QLabel(about["institution"])
         institution_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         institution_label.setWordWrap(True)
         institution_label.setStyleSheet("font-size: 10pt; margin-top: 5px;")
         layout.addWidget(institution_label)
 
-        grant_text = ("This program was developed at the University of New Hampshire, "
-                      "Center for Coastal and Ocean Mapping - Joint Hydrographic Center "
-                      "(UNH/CCOM-JHC) under the grant NA25NOSX400C0001-T1-01 from the National "
-                      "Oceanic and Atmospheric Administration (NOAA).")
-        grant_label = QLabel(grant_text)
+        grant_label = QLabel(about["grant"])
         grant_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         grant_label.setWordWrap(True)
         grant_label.setStyleSheet("font-size: 9pt; margin-top: 15px;")
         layout.addWidget(grant_label)
 
-        license_label = QLabel("This software is released for general use under the BSD 3-Clause License.")
+        license_label = QLabel(about["license"])
         license_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         license_label.setWordWrap(True)
         license_label.setStyleSheet("font-size: 9pt; margin-top: 10px;")
