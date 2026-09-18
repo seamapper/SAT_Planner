@@ -209,6 +209,25 @@ UI_DATA_SOURCE_ORDER = (
     "WGOM-LI-SNE Regional",
 )
 
+# Short tags appended to exported Full/View GeoTIFF filenames.
+EXPORT_SOURCE_TAGS = {
+    "GMRT Topo-Bathy": "GMRT",
+    "GMRT Topo-Bathy (Observed Only)": "GMRT",
+    "GEBCO 2026": "GEBCO",
+    "NCEI Multibeam Mosaic Raw": "NCEI",
+    "NCEI Multibeam Mosaic Proc": "NCEI",
+    "WGOM-LI-SNE Hi Resolution": "CCOM",
+    "WGOM-LI-SNE Regional": "CCOM",
+}
+
+
+def export_source_tag_for_data_source(name):
+    """Return filename source tag (e.g. GMRT) for a Download Data source, or None."""
+    if not name:
+        return None
+    return EXPORT_SOURCE_TAGS.get(name)
+
+
 def get_source(data_sources, name):
     """Return config dict for a named data source."""
     return data_sources.get(name, {})

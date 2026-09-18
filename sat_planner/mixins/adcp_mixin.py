@@ -731,7 +731,20 @@ class AdcpMixin:
         speed_kts = self._adcp_get_survey_speed_kts()
         turn_min = self._adcp_get_turn_time_min()
         diameter_m = self._adcp_get_diameter_m()
-        geotiff_path = self.current_geotiff_path if hasattr(self, "current_geotiff_path") and self.current_geotiff_path else None
+        exported_geotiff_path = (
+            self._maybe_export_survey_geotiff(export_dir, export_name)
+            if hasattr(self, "_maybe_export_survey_geotiff")
+            else None
+        )
+        geotiff_path = (
+            self._resolve_export_params_geotiff_path(exported_geotiff_path)
+            if hasattr(self, "_resolve_export_params_geotiff_path")
+            else (
+                self.current_geotiff_path
+                if hasattr(self, "current_geotiff_path") and self.current_geotiff_path
+                else None
+            )
+        )
 
         try:
             rows = self._adcp_export_rows()
@@ -968,6 +981,8 @@ class AdcpMixin:
             _add_status(json_metadata_path)
             if export_profiles_png and hasattr(self, "profile_fig") and self.profile_fig is not None:
                 _add_status(profile_png_path)
+            if exported_geotiff_path:
+                _add_status(exported_geotiff_path)
 
             if status_lines:
                 self.set_adcp_activity_text("ADCP export results:\n" + "\n".join(status_lines), append=True)
@@ -1192,24 +1207,13 @@ class AdcpMixin:
         if not points:
             self._show_message("warning", "GMRT Download", "No ADCP plan points to compute extent.")
             return
-        lats = [p[0] for p in points]
-        lons = [p[1] for p in points]
-        mid_lat = (min(lats) + max(lats)) / 2.0
-        mid_lon = (min(lons) + max(lons)) / 2.0
-        buffer_deg = 0.5
-        if hasattr(self, "adcp_gmrt_buffer_spin"):
-            try:
-                buffer_deg = float(self.adcp_gmrt_buffer_spin.value())
-            except (ValueError, TypeError):
-                pass
-        split_topo_depths = True
-        if hasattr(self, "adcp_split_topo_depths_checkbox"):
-            split_topo_depths = bool(self.adcp_split_topo_depths_checkbox.isChecked())
+        west, east, south, north = self._gmrt_download_extent_from_points(points, prefix="adcp")
+        split_topo_depths = self._gmrt_split_topo_depths_for_prefix("adcp")
         self._download_gmrt_and_load(
-            mid_lon - buffer_deg,
-            mid_lon + buffer_deg,
-            mid_lat - buffer_deg,
-            mid_lat + buffer_deg,
+            west,
+            east,
+            south,
+            north,
             resolution=100,
             layer="topo",
             default_filename_prefix="GMRT_Bathy",

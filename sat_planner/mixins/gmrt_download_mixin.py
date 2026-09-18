@@ -309,7 +309,11 @@ class GMRTDownloadMixin:
                     # Suppress the load-time auto-zoom so the existing plan-
                     # bounds view (set by the import handler) survives until
                     # we explicitly re-zoom to the plan below.
-                    self._load_geotiff_from_path(path_to_load, auto_zoom_to_geotiff=False)
+                    self._load_geotiff_from_path(
+                        path_to_load,
+                        auto_zoom_to_geotiff=False,
+                        bathy_source_tag="GMRT",
+                    )
                 log_func("GMRT grid loaded.", append=True)
                 # Restore the plan-bounds view: the GeoTIFF load reset the
                 # axes to whatever the import handler had set them to (the

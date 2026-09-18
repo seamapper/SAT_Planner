@@ -395,21 +395,10 @@ class GeoTIFFMixin:
             self._show_message("warning", "GMRT Download", "No backscatter line to compute extent.")
             return
         (lat1, lon1), (lat2, lon2) = segment
-        mid_lat = (lat1 + lat2) / 2.0
-        mid_lon = (lon1 + lon2) / 2.0
-        buffer_deg = 0.5
-        if hasattr(self, "backscatter_gmrt_buffer_spin"):
-            try:
-                buffer_deg = float(self.backscatter_gmrt_buffer_spin.value())
-            except (ValueError, TypeError):
-                pass
-        west = mid_lon - buffer_deg
-        east = mid_lon + buffer_deg
-        south = mid_lat - buffer_deg
-        north = mid_lat + buffer_deg
-        split_topo_depths = True
-        if hasattr(self, "backscatter_split_topo_depths_checkbox"):
-            split_topo_depths = bool(self.backscatter_split_topo_depths_checkbox.isChecked())
+        west, east, south, north = self._gmrt_download_extent_from_points(
+            [(lat1, lon1), (lat2, lon2)], prefix="backscatter"
+        )
+        split_topo_depths = self._gmrt_split_topo_depths_for_prefix("backscatter")
         self._download_gmrt_and_load(
             west, east, south, north,
             resolution=100,
@@ -769,8 +758,19 @@ class GeoTIFFMixin:
         params_json_path = None
         info_txt_path = None
         export_errors = {}
+        exported_geotiff_path = None
 
         try:
+            exported_geotiff_path = (
+                self._maybe_export_survey_geotiff(export_dir, export_name)
+                if hasattr(self, "_maybe_export_survey_geotiff")
+                else None
+            )
+            params_geotiff_path = (
+                self._resolve_export_params_geotiff_path(exported_geotiff_path)
+                if hasattr(self, "_resolve_export_params_geotiff_path")
+                else (self.current_geotiff_path if hasattr(self, "current_geotiff_path") else None)
+            )
             line_points = list(getattr(self, "_calculate_backscatter_line_statistics", lambda: {})().get("line_waypoints", []))
             if len(line_points) < 2:
                 line_points = [centerline[0], centerline[1]]
@@ -801,7 +801,10 @@ class GeoTIFFMixin:
             }]
             geojson_collection = {
                 "type": "FeatureCollection",
-                "properties": {"geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0))},
+                "properties": {
+                    "geotiff_path": params_geotiff_path,
+                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                },
                 "features": gj_features,
             }
             try:
@@ -987,7 +990,7 @@ class GeoTIFFMixin:
                 "backscatter_percent_clip_min": float(getattr(self, "backscatter_percent_clip_min", 0.5) or 0.5),
                 "backscatter_percent_clip_max": float(getattr(self, "backscatter_percent_clip_max", 0.5) or 0.5),
                 "backscatter_nan_value": float(getattr(self, "backscatter_nan_value", -9999.0)),
-                "geotiff_path": self.current_geotiff_path if hasattr(self, "current_geotiff_path") else None,
+                "geotiff_path": params_geotiff_path,
                 "backscatter_geotiff_path": self.backscatter_geotiff_path if hasattr(self, "backscatter_geotiff_path") else None,
                 "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
                 "show_contours_var": bool(getattr(self, "show_contours_var", False)),
@@ -1055,6 +1058,7 @@ class GeoTIFFMixin:
                     _add_result(profile_png_path)
                 _add_result(params_json_path)
                 _add_result(info_txt_path)
+                _add_result(exported_geotiff_path)
                 if results:
                     self.set_line_info_text("Backscatter export results:\n" + "\n".join(results), append=True)
         except Exception as e:
@@ -1616,12 +1620,20 @@ class GeoTIFFMixin:
             if not response:
                 return
 
-        self._load_geotiff_from_path(file_path, use_background_loading=use_background_loading)
+        self._load_geotiff_from_path(
+            file_path,
+            use_background_loading=use_background_loading,
+            bathy_source_tag=None,
+        )
 
     def _load_geotiff_from_path(self, file_path, use_background_loading=False,
-                                auto_zoom_to_geotiff=True):
+                                auto_zoom_to_geotiff=True, bathy_source_tag=None):
         """Load and display a GeoTIFF from the given path. Used by Load
         GeoTIFF and by GMRT download.
+
+        ``bathy_source_tag`` is the short Download Data origin tag for export
+        filenames (``GMRT``, ``GEBCO``, ``NCEI``, ``CCOM``), or ``None`` when
+        the grid came from Load GeoTIFF / import / unknown.
 
         ``auto_zoom_to_geotiff`` (default ``True``) controls whether the map
         view snaps to the GeoTIFF's bounds after loading. Direct "Load
@@ -1634,6 +1646,7 @@ class GeoTIFFMixin:
             return
         if not file_path or not os.path.isfile(file_path):
             return
+        self.current_geotiff_bathy_source_tag = bathy_source_tag
         self.last_geotiff_dir = os.path.dirname(file_path)
         if hasattr(self, '_save_last_geotiff_dir'):
             self._save_last_geotiff_dir()

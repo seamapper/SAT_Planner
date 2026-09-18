@@ -34,7 +34,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **Export Capabilities**: Export survey plans in CSV, Shapefile, GeoJSON, asciiplan, LNW, PNG (high and/or low resolution), and companion text/statistics formats (varies by tab)
 - **Export Name**: Suggested basenames update automatically when blank or still matching the auto-generated pattern; **custom Export Names are preserved** and are not overwritten on Enter/blur or when plan parameters regenerate (Accuracy, Performance, Calibration, ADCP, Backscatter)
 - **Export Types**: Opened from the **Select Export Directory** dialog (Action button); toggle optional export products by format; choices are saved in `~/.cal_ref_planner_config.json` under `export_type_options`
-- **Survey Import**: Use the shared **Import Survey** control (label follows the active tab). Import calibration, accuracy, performance, line, backscatter, and ADCP plans from DDD, DMS, DMM, LNW, CSV, GeoJSON, GPX, shapefile (`.shp`), or GeoPackage (`.gpkg`) (calibration, accuracy, and performance imports use an assignment dialog when geometry is ambiguous; shapefile/GPKG geometry is reprojected from its source CRS to WGS84 automatically). **GMRT bathymetry** is offered **after** file selection when no planning GeoTIFF is available
+- **Survey Import**: Use the shared **Import Survey** control (label follows the active tab). Import calibration, accuracy, performance, line, backscatter, and ADCP plans from DDD, DMS, DMM, LNW, CSV, GeoJSON, GPX, shapefile (`.shp`), or GeoPackage (`.gpkg`) (calibration, accuracy, and performance imports use an assignment dialog when geometry is ambiguous; shapefile/GPKG geometry is reprojected from its source CRS to WGS84 automatically). **GMRT bathymetry** is offered **after** file selection when no planning GeoTIFF is available (if a grid is already loaded, choose **Keep existing grid** or **Download new GMRT grid**). The prompt lets you choose a **Degrees** buffer (fixed box around survey center) or **Percent of survey** buffer (expand the visible map-frame bounds; default **20%**); buffer mode and amounts are remembered in `gmrt_import_options`
 - **EEZ Overlay**: EEZ layer with opacity control (default 80%) and hover `GEONAME` tooltip lookup (controls in Map Options)
 - **Visualization Shapefile Toggle**: `Add Shapefile` / `Remove Shapefile` in Map Options after loading, allowing quick removal of visualization overlays
 
@@ -377,7 +377,8 @@ Bottom strip (under the profile): left-side prompts (e.g. measurement active), *
 The application saves configuration in:
 - `~/.cal_ref_planner_config.json` (user preferences), including:
   - Last used directories
-  - **`export_type_options`**: per-format export toggles (`esri_shapefile`, `gpkg`, `sis_asciiplan`, `gpx`, `text_csv`, `text_txt`, `hypack_lnw`, `map_png_high`, `map_png_low`, `profiles_png_high`, `profiles_png_low`; most default **on**, `gpkg` default **off**)
+  - **`export_type_options`**: per-format export toggles (`esri_shapefile`, `gpkg`, `sis_asciiplan`, `gpx`, `text_csv`, `text_txt`, `hypack_lnw`, `map_png_high`, `map_png_low`, `profiles_png_high`, `profiles_png_low`, `geotiff_full`, `geotiff_view`; most default **on**, `gpkg` / `geotiff_full` / `geotiff_view` default **off**; Full and View are mutually exclusive)
+  - **`gmrt_import_options`**: post-import GMRT prompt settings (`download`, `buffer_mode` = `degrees`|`percent` default **percent**, `buffer_deg` default **0.5**, `buffer_percent` default **20** applied to the visible map-frame extent, `split_topo_depths`)
   - **`vert_exag_table`**: Shaded Relief dynamic vertical exaggeration breakpoints (elevation range minima and **Shaded Relief** / **Shaded Relief Dyn** values); default breakpoints 0, 20, 50, 200, 1000 m
   - **`shaded_relief_cmap`**: Last selected Shaded Relief elevation overlay colormap (default **rainbow**)
   - **`slope_overlay_bands`**: Three slope-overlay ranges (min/max degrees or null, color hex)
@@ -410,8 +411,12 @@ In the **Select Export Directory** dialog, click **Export Types** to enable or d
 | Map PNG — low resolution (email) | `{name}_map_low.png` (longest side ≤ 1280 px; uses Pillow when available) |
 | Profiles PNG — high resolution | Profile PNG(s) at 300 dpi (naming varies by tab, e.g. `{name}_profile.png`, `{name}_profiles.png`, `{name}_pitch_profile.png`, crossline/main-line profiles on Accuracy) |
 | Profiles PNG — low resolution (email) | Matching `*_low.png` copies |
+| GeoTIFF (Full) | Copy of the loaded planning GeoTIFF (`{name}_{cell}m_Full[_SOURCE].tif`); either/or with View; default off |
+| GeoTIFF (View) | Crop of the loaded GeoTIFF to the current map view plus a 10% wider/taller buffer, clipped to the source grid (`{name}_{cell}m_View[_SOURCE].tif`); either/or with Full; default off |
 
 Backscatter **map** PNG toggles also control `{name}_backscatter_stats.png` (+ optional `*_backscatter_stats_low.png`). Legacy configs that only stored `map_png` / `profiles_png` are migrated to set both high and low to the former value.
+
+When **GeoTIFF (Full)** or **GeoTIFF (View)** writes a file, `geotiff_path` in `*_params.json` (and GeoJSON collection properties where present) points at that exported file; otherwise it points at the loaded planning GeoTIFF, or `null` if none is in use. `cell` is the larger of X/Y pixel size as integer meters. Optional `_SOURCE` is `_GMRT`, `_GEBCO`, `_NCEI`, or `_CCOM` when the grid came from **Download Data** / post-import GMRT; omitted for **Load GeoTIFF** and other unknown origins.
 
 ### Other export notes
 - **Export Name preservation**: Auto-suggested names update only when the field is blank or still matches a known auto pattern (e.g. `acc_depth…`, `perf_swell…`, `cal_depth…`, `ADCP_Cal_Circle…`, `BS_YYYYMMDD_…`). User-edited custom names are not reset on Enter/blur or when related plan parameters regenerate.

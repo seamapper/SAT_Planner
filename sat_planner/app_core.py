@@ -103,6 +103,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         self.geotiff_dataset_original = None  # Original rasterio dataset (keeps its CRS)
         self.current_geotiff_path = None  # Path of the currently loaded GeoTIFF (for suggested export names)
+        # Short tag for Download Data origin (GMRT/GEBCO/NCEI/CCOM); None for Load GeoTIFF / unknown
+        self.current_geotiff_bathy_source_tag = None
         self.geotiff_data_array = None  # NumPy array of *reprojected* GeoTIFF elevation data (WGS84)
         self.geotiff_extent = None  # [left, right, bottom, top] of *reprojected* data
         self.geotiff_image_plot = None  # Matplotlib imshow object for GeoTIFF
@@ -536,6 +538,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.last_adcp_import_dir = os.path.expanduser("~")
         self.last_shapefile_dir = os.path.expanduser("~")
         self.export_type_options = self._default_export_type_options()
+        self.gmrt_import_options = self._default_gmrt_import_options()
         self.vert_exag_table = self._default_vert_exag_table()
         self.shaded_relief_cmap = DEFAULT_SHADED_RELIEF_CMAP
         self._load_last_used_dir()
@@ -552,6 +555,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_last_adcp_import_dir()
         self._load_last_shapefile_dir()
         self._load_export_type_options()
+        self._load_gmrt_import_options()
         self._load_vert_exag_table()
         self._load_shaded_relief_cmap()
         if hasattr(self, "_update_shaded_relief_cmap_button"):
@@ -686,15 +690,40 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             ("map_png_low", "Map PNG — low resolution (email)"),
             ("profiles_png_high", "Profiles PNG — high resolution"),
             ("profiles_png_low", "Profiles PNG — low resolution (email)"),
+            ("geotiff_full", "GeoTIFF (Full)"),
+            ("geotiff_view", "GeoTIFF (View)"),
         ]
         checkboxes = {}
+        defaults = (
+            self._default_export_type_options()
+            if hasattr(self, "_default_export_type_options")
+            else {}
+        )
         for key, label in checkbox_specs:
             cb = QCheckBox(label)
-            cb.setChecked(bool(options.get(key, True)))
+            cb.setChecked(bool(options.get(key, defaults.get(key, False))))
             layout.addWidget(cb)
             checkboxes[key] = cb
 
-        note_label = QLabel("Always exported: .geojson, *_params.json, and *_info.txt")
+        def _on_geotiff_full_toggled(checked):
+            if checked:
+                checkboxes["geotiff_view"].blockSignals(True)
+                checkboxes["geotiff_view"].setChecked(False)
+                checkboxes["geotiff_view"].blockSignals(False)
+
+        def _on_geotiff_view_toggled(checked):
+            if checked:
+                checkboxes["geotiff_full"].blockSignals(True)
+                checkboxes["geotiff_full"].setChecked(False)
+                checkboxes["geotiff_full"].blockSignals(False)
+
+        checkboxes["geotiff_full"].toggled.connect(_on_geotiff_full_toggled)
+        checkboxes["geotiff_view"].toggled.connect(_on_geotiff_view_toggled)
+
+        note_label = QLabel(
+            "Always exported: .geojson, *_params.json, and *_info.txt. "
+            "GeoTIFF (Full) and GeoTIFF (View) are either/or; both require a loaded GeoTIFF."
+        )
         note_label.setWordWrap(True)
         layout.addWidget(note_label)
 
@@ -706,9 +735,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         layout.addWidget(button_box)
 
         if dialog.exec():
-            self.export_type_options = {
-                key: checkboxes[key].isChecked() for key, _ in checkbox_specs
-            }
+            self.export_type_options = self._normalize_geotiff_export_type_options(
+                {key: checkboxes[key].isChecked() for key, _ in checkbox_specs}
+            )
             self._save_export_type_options()
 
     def _set_activity_log_collapsed(self, collapsed):
@@ -982,8 +1011,17 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
     def _on_bathymetry_dialog_geotiff_downloaded(self, path):
         """Load a downloaded GeoTIFF into the map and refresh the profile."""
+        tag = None
+        dlg = getattr(self, "_bathymetry_download_dialog", None)
+        if dlg is not None:
+            source_name = getattr(dlg, "current_data_source", None)
+            try:
+                from sat_planner.bathymetry_download.data_sources import export_source_tag_for_data_source
+                tag = export_source_tag_for_data_source(source_name)
+            except Exception:
+                tag = None
         if path and hasattr(self, "_load_geotiff_from_path"):
-            self._load_geotiff_from_path(path)
+            self._load_geotiff_from_path(path, bathy_source_tag=tag)
         if hasattr(self, "_draw_current_profile"):
             self._draw_current_profile()
         if hasattr(self, "profile_canvas"):

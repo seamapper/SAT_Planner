@@ -409,6 +409,20 @@ class LinePlanningMixin:
         else:
             export_name = f"LinePlanning_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
         try:
+            exported_geotiff_path = (
+                self._maybe_export_survey_geotiff(export_dir, export_name)
+                if hasattr(self, "_maybe_export_survey_geotiff")
+                else None
+            )
+            params_geotiff_path = (
+                self._resolve_export_params_geotiff_path(exported_geotiff_path)
+                if hasattr(self, "_resolve_export_params_geotiff_path")
+                else (
+                    self.current_geotiff_path
+                    if hasattr(self, "current_geotiff_path") and self.current_geotiff_path
+                    else None
+                )
+            )
             export_shapefile = self._export_type_enabled("esri_shapefile") if hasattr(self, "_export_type_enabled") else True
             export_gpkg = self._export_type_enabled("gpkg") if hasattr(self, "_export_type_enabled") else False
             export_sis = self._export_type_enabled("sis_asciiplan") if hasattr(self, "_export_type_enabled") else True
@@ -456,10 +470,10 @@ class LinePlanningMixin:
                     export_speed = float(self.line_survey_speed_entry.text()) if hasattr(self, 'line_survey_speed_entry') and self.line_survey_speed_entry.text() else 8.0
                 except (ValueError, TypeError):
                     export_speed = 8.0
-                geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "survey_speed": export_speed, "geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0), "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
+                geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "survey_speed": export_speed, "geotiff_path": params_geotiff_path, "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0), "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
                 export_utils.remove_export_file(geojson_file_path)
                 with open(geojson_file_path, 'w') as f:
-                    json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": (self.current_geotiff_path if hasattr(self, 'current_geotiff_path') and self.current_geotiff_path else None), "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0)}, "features": [geojson_feature]}, f, indent=2)
+                    json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": params_geotiff_path, "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0)}, "features": [geojson_feature]}, f, indent=2)
             lnw_file_path = None
             lnw_lines = [(export_name, list(self.line_planning_points))]
             if export_hypack and len(self.line_planning_points) >= 2:
@@ -558,11 +572,7 @@ class LinePlanningMixin:
                     line_speed = 8.0
                 params_payload = {
                     "survey_speed": line_speed,
-                    "geotiff_path": (
-                        self.current_geotiff_path
-                        if hasattr(self, "current_geotiff_path") and self.current_geotiff_path
-                        else None
-                    ),
+                    "geotiff_path": params_geotiff_path,
                     "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
                     "show_contours_var": bool(getattr(self, "show_contours_var", False)),
                     "contour_interval_m": (
@@ -609,6 +619,8 @@ class LinePlanningMixin:
             success_msg += f"- {os.path.basename(stats_file_path)}\n"
             if params_json_path:
                 success_msg += f"- {os.path.basename(params_json_path)}\n"
+            if exported_geotiff_path and os.path.isfile(exported_geotiff_path):
+                success_msg += f"- {os.path.basename(exported_geotiff_path)}\n"
             success_msg += f"in directory: {export_dir}"
 
             status_lines = []
@@ -641,6 +653,8 @@ class LinePlanningMixin:
             _add_status(profile_csv_path)
             _add_status(stats_file_path)
             _add_status(params_json_path)
+            if exported_geotiff_path:
+                _add_status(exported_geotiff_path)
             if status_lines:
                 self.set_line_info_text(
                     "Line export results:\n" + "\n".join(status_lines),
@@ -656,25 +670,10 @@ class LinePlanningMixin:
         if not getattr(self, "line_planning_points", None) or len(self.line_planning_points) < 2:
             self._show_message("warning", "GMRT Download", "No line plan points to compute extent.")
             return
-        lats = [p[0] for p in self.line_planning_points]
-        lons = [p[1] for p in self.line_planning_points]
-        min_lat, max_lat = min(lats), max(lats)
-        min_lon, max_lon = min(lons), max(lons)
-        mid_lat = (min_lat + max_lat) / 2.0
-        mid_lon = (min_lon + max_lon) / 2.0
-        buffer_deg = 0.5
-        if hasattr(self, "line_plan_gmrt_buffer_spin"):
-            try:
-                buffer_deg = float(self.line_plan_gmrt_buffer_spin.value())
-            except (ValueError, TypeError):
-                pass
-        west = mid_lon - buffer_deg
-        east = mid_lon + buffer_deg
-        south = mid_lat - buffer_deg
-        north = mid_lat + buffer_deg
-        split_topo_depths = True
-        if hasattr(self, "line_plan_split_topo_depths_checkbox"):
-            split_topo_depths = bool(self.line_plan_split_topo_depths_checkbox.isChecked())
+        west, east, south, north = self._gmrt_download_extent_from_points(
+            self.line_planning_points, prefix="line_plan"
+        )
+        split_topo_depths = self._gmrt_split_topo_depths_for_prefix("line_plan")
         self._download_gmrt_and_load(
             west, east, south, north,
             resolution=100,

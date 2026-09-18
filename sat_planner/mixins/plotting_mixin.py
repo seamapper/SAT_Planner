@@ -1928,6 +1928,7 @@ class PlottingMixin:
                 self.geotiff_dataset_original = None
             if hasattr(self, 'current_geotiff_path'):
                 self.current_geotiff_path = None
+            self.current_geotiff_bathy_source_tag = None
             self.geotiff_data_array = None
             self.geotiff_extent = None
             self.geotiff_original_extent = None

@@ -432,25 +432,8 @@ class ReferenceMixin:
         if not all_points:
             self._show_message("warning", "GMRT Download", "No reference line points to compute extent.")
             return
-        lats = [p[0] for p in all_points]
-        lons = [p[1] for p in all_points]
-        min_lat, max_lat = min(lats), max(lats)
-        min_lon, max_lon = min(lons), max(lons)
-        mid_lat = (min_lat + max_lat) / 2.0
-        mid_lon = (min_lon + max_lon) / 2.0
-        buffer_deg = 0.5
-        if hasattr(self, "ref_gmrt_buffer_spin"):
-            try:
-                buffer_deg = float(self.ref_gmrt_buffer_spin.value())
-            except (ValueError, TypeError):
-                pass
-        west = mid_lon - buffer_deg
-        east = mid_lon + buffer_deg
-        south = mid_lat - buffer_deg
-        north = mid_lat + buffer_deg
-        split_topo_depths = True
-        if hasattr(self, "ref_split_topo_depths_checkbox"):
-            split_topo_depths = bool(self.ref_split_topo_depths_checkbox.isChecked())
+        west, east, south, north = self._gmrt_download_extent_from_points(all_points, prefix="ref")
+        split_topo_depths = self._gmrt_split_topo_depths_for_prefix("ref")
         self._download_gmrt_and_load(
             west, east, south, north,
             resolution=100,

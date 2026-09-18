@@ -9,6 +9,7 @@ _load_last_ref_import_dir, _save_last_ref_import_dir, _load_last_line_import_dir
 _load_last_perf_import_dir, _save_last_perf_import_dir, _load_last_adcp_import_dir, _save_last_adcp_import_dir,
 _load_last_shapefile_dir, _save_last_shapefile_dir,
 _load_export_type_options, _save_export_type_options,
+_load_gmrt_import_options, _save_gmrt_import_options,
 _load_vert_exag_table, _save_vert_exag_table, _default_vert_exag_table,
 _vert_exag_table_for_params, _add_vert_exag_table_to_params, _apply_vert_exag_table_from_params,
 _load_shaded_relief_cmap, _save_shaded_relief_cmap, _normalize_shaded_relief_cmap,
@@ -41,7 +42,16 @@ class ConfigMixin:
             "map_png_low": True,
             "profiles_png_high": True,
             "profiles_png_low": True,
+            "geotiff_full": False,
+            "geotiff_view": False,
         }
+
+    def _normalize_geotiff_export_type_options(self, options):
+        """Ensure GeoTIFF Full/View are mutually exclusive (prefer Full if both on)."""
+        opts = dict(options or {})
+        if opts.get("geotiff_full") and opts.get("geotiff_view"):
+            opts["geotiff_view"] = False
+        return opts
 
     def _load_last_used_dir(self):
         try:
@@ -330,6 +340,9 @@ class ConfigMixin:
                     for key in defaults:
                         if key in migrated:
                             self.export_type_options[key] = bool(migrated[key])
+            self.export_type_options = self._normalize_geotiff_export_type_options(
+                self.export_type_options
+            )
         except Exception:
             self.export_type_options = dict(self._default_export_type_options())
 
@@ -341,9 +354,73 @@ class ConfigMixin:
                     config = json.load(f)
             defaults = self._default_export_type_options()
             current = getattr(self, "export_type_options", defaults) or defaults
+            current = self._normalize_geotiff_export_type_options(current)
+            self.export_type_options = current
             config["export_type_options"] = {
                 key: bool(current.get(key, defaults[key])) for key in defaults
             }
+            with open(self.CONFIG_FILENAME, "w") as f:
+                json.dump(config, f)
+        except Exception:
+            pass
+
+    def _default_gmrt_import_options(self):
+        return {
+            "download": True,
+            "buffer_mode": "percent",  # "degrees" or "percent"
+            "buffer_deg": 0.5,
+            "buffer_percent": 20.0,
+            "split_topo_depths": True,
+        }
+
+    def _normalize_gmrt_import_options(self, options):
+        defaults = self._default_gmrt_import_options()
+        opts = dict(defaults)
+        if not isinstance(options, dict):
+            return opts
+        opts["download"] = bool(options.get("download", defaults["download"]))
+        mode = str(options.get("buffer_mode", defaults["buffer_mode"]) or defaults["buffer_mode"]).lower()
+        opts["buffer_mode"] = "percent" if mode == "percent" else "degrees"
+        try:
+            opts["buffer_deg"] = float(options.get("buffer_deg", defaults["buffer_deg"]))
+        except (TypeError, ValueError):
+            opts["buffer_deg"] = defaults["buffer_deg"]
+        opts["buffer_deg"] = max(0.01, min(10.0, opts["buffer_deg"]))
+        try:
+            opts["buffer_percent"] = float(options.get("buffer_percent", defaults["buffer_percent"]))
+        except (TypeError, ValueError):
+            opts["buffer_percent"] = defaults["buffer_percent"]
+        opts["buffer_percent"] = max(0.1, min(200.0, opts["buffer_percent"]))
+        opts["split_topo_depths"] = bool(
+            options.get("split_topo_depths", defaults["split_topo_depths"])
+        )
+        return opts
+
+    def _load_gmrt_import_options(self):
+        defaults = self._default_gmrt_import_options()
+        options = dict(defaults)
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+                saved = config.get("gmrt_import_options", {})
+                if isinstance(saved, dict):
+                    options = self._normalize_gmrt_import_options(saved)
+        except Exception:
+            options = dict(defaults)
+        self.gmrt_import_options = options
+
+    def _save_gmrt_import_options(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            defaults = self._default_gmrt_import_options()
+            current = getattr(self, "gmrt_import_options", defaults) or defaults
+            normalized = self._normalize_gmrt_import_options(current)
+            self.gmrt_import_options = normalized
+            config["gmrt_import_options"] = normalized
             with open(self.CONFIG_FILENAME, "w") as f:
                 json.dump(config, f)
         except Exception:

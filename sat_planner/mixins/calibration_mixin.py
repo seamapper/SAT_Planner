@@ -33,8 +33,8 @@ _CAL_ASSIGNMENT_TO_COMBO = {'pitch': 1, 'roll': 2, 'heading1': 3, 'heading2': 4}
 
 def _suggest_calibration_assignments_from_metadata(file_path, file_basename, num_lines):
     """If the file has point labels (PLS/PLE, RLS/RLE, H1S/H1E, H2S/H2E), return suggested {line_idx: role} or None.
-    Only for *_DDD.txt, *_DMM.txt, *_DMS.txt. Requires exactly 4 lines."""
-    if num_lines != 4:
+    Only for *_DDD.txt, *_DMM.txt, *_DMS.txt. Supports 3 lines (pitch+headings; no roll) or 4 lines."""
+    if num_lines not in (3, 4):
         return None
     file_basename_lower = file_basename.lower()
     if not (file_basename_lower.endswith('_ddd.txt') or file_basename_lower.endswith('_dmm.txt') or file_basename_lower.endswith('_dms.txt')):
@@ -46,7 +46,7 @@ def _suggest_calibration_assignments_from_metadata(file_path, file_basename, num
         return None
     lines = [line.strip() for line in content.replace('\r\n', '\n').replace('\r', '\n').split('\n') if line.strip()]
     # Each calibration line = 2 rows. First row's first token is start label (PLS, RLS, H1S, H2S).
-    if len(lines) < 8:
+    if len(lines) < num_lines * 2:
         return None
     def label_to_role(first_token):
         t = (first_token or '').upper()
@@ -60,7 +60,7 @@ def _suggest_calibration_assignments_from_metadata(file_path, file_basename, num
             return 'heading2'
         return None
     suggestion = {}
-    for line_idx in range(4):
+    for line_idx in range(num_lines):
         row_idx = line_idx * 2
         if row_idx >= len(lines):
             return None
@@ -71,16 +71,25 @@ def _suggest_calibration_assignments_from_metadata(file_path, file_basename, num
         if role is None:
             return None
         suggestion[line_idx] = role
-    if len(suggestion) != 4 or len(set(suggestion.values())) != 4:
+    roles = set(suggestion.values())
+    if len(suggestion) != num_lines or len(roles) != num_lines:
+        return None
+    if num_lines == 4 and roles != {'pitch', 'roll', 'heading1', 'heading2'}:
+        return None
+    if num_lines == 3 and roles != {'pitch', 'heading1', 'heading2'}:
         return None
     return suggestion
 
 
 def _suggest_calibration_assignments_from_geometry(imported_lines):
-    """Suggest calibration line roles from geometry: 3 parallel lines (Pitch + Heading1 + Heading2), 1 Roll.
+    """Suggest calibration line roles from geometry.
+
+    4 lines: 3 parallel (Pitch + Heading1 + Heading2) and 1 Roll.
+    3 lines: Pitch + Heading1 + Heading2 (pitch and roll runs share the same line).
     Pitch = spatially in the middle between the two heading lines. Heading1 vs Heading2 = file order.
-    Returns {line_idx: 'pitch'|'roll'|'heading1'|'heading2'} or None."""
-    if not imported_lines or len(imported_lines) != 4 or not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
+    Returns {line_idx: 'pitch'|'roll'|'heading1'|'heading2'} or None.
+    """
+    if not imported_lines or len(imported_lines) not in (3, 4) or not GEOSPATIAL_LIBS_AVAILABLE or pyproj is None:
         return None
     try:
         geod = pyproj.Geod(ellps="WGS84")
@@ -88,29 +97,34 @@ def _suggest_calibration_assignments_from_geometry(imported_lines):
         return None
     # Compute for each line: length (m), orientation (0-180), midpoint (lat, lon)
     orientations = []
-    lengths = []
     midpoints = []
     for line in imported_lines:
         if len(line) != 2:
             return None
         (lat1, lon1), (lat2, lon2) = line[0], line[1]
-        _, _, dist = geod.inv(lon1, lat1, lon2, lat2)
         fwd_az, _, _ = geod.inv(lon1, lat1, lon2, lat2)
         orient = fwd_az % 180.0
         mid = ((lat1 + lat2) / 2.0, (lon1 + lon2) / 2.0)
         orientations.append(orient)
-        lengths.append(dist)
         midpoints.append(mid)
     orientations = np.array(orientations)
-    # Roll = the line whose orientation differs most from the median (the one not parallel to the other 3)
-    median_orient = np.median(orientations)
-    diffs = np.abs(orientations - median_orient)
-    diffs = np.minimum(diffs, 180.0 - diffs)
-    roll_idx = int(np.argmax(diffs))
-    parallel_indices = [i for i in range(4) if i != roll_idx]
-    if len(parallel_indices) != 3:
-        return None
-    # Common orientation of the 3 parallel lines (average)
+    n = len(imported_lines)
+
+    if n == 4:
+        # Roll = the line whose orientation differs most from the median (the one not parallel to the other 3)
+        median_orient = np.median(orientations)
+        diffs = np.abs(orientations - median_orient)
+        diffs = np.minimum(diffs, 180.0 - diffs)
+        roll_idx = int(np.argmax(diffs))
+        parallel_indices = [i for i in range(4) if i != roll_idx]
+        if len(parallel_indices) != 3:
+            return None
+    else:
+        # 3-line survey: treat all three as the parallel pitch/heading set (no separate roll).
+        parallel_indices = list(range(3))
+        roll_idx = None
+
+    # Common orientation of the parallel lines (average)
     theta = float(np.mean(orientations[parallel_indices]))
     theta_rad = np.deg2rad(theta)
     # Across direction = perpendicular to line direction (theta + 90)
@@ -131,12 +145,14 @@ def _suggest_calibration_assignments_from_geometry(imported_lines):
     heading_indices = [across_positions[0][0], across_positions[2][0]]
     heading_indices.sort()
     heading1_idx, heading2_idx = heading_indices[0], heading_indices[1]
-    return {
+    suggestion = {
         pitch_idx: 'pitch',
-        roll_idx: 'roll',
         heading1_idx: 'heading1',
         heading2_idx: 'heading2',
     }
+    if roll_idx is not None:
+        suggestion[roll_idx] = 'roll'
+    return suggestion
 
 
 class ReverseLineDirectionDialog(QDialog):
@@ -188,7 +204,7 @@ class LineAssignmentDialog(QDialog):
         """
         Args:
             parent: Parent widget
-            imported_lines: List of 4 lines, each as [(lat1, lon1), (lat2, lon2)]
+            imported_lines: List of 3 or 4 lines, each as [(lat1, lon1), (lat2, lon2)]
             suggested_assignments: Optional dict {line_idx: 'pitch'|'roll'|'heading1'|'heading2'} to pre-fill combos
         """
         super().__init__(parent)
@@ -206,7 +222,13 @@ class LineAssignmentDialog(QDialog):
         main_layout.setSpacing(10)
         
         # Instructions label
-        instructions = QLabel("Assign each imported line to a calibration line type:")
+        if len(imported_lines) == 3:
+            instructions = QLabel(
+                "Assign Pitch, Heading 1, and Heading 2 "
+                "(3-line survey: pitch and roll runs share the same line):"
+            )
+        else:
+            instructions = QLabel("Assign each imported line to a calibration line type:")
         instructions.setStyleSheet("font-weight: bold;")
         main_layout.addWidget(instructions)
         
@@ -337,27 +359,35 @@ class LineAssignmentDialog(QDialog):
     
     def _on_ok_clicked(self):
         """Validate assignments and accept dialog if valid."""
-        # Check that exactly 4 lines are assigned (pitch, roll, heading1, heading2)
         assigned_types = []
         for i, combo in enumerate(self.comboboxes):
             if combo.currentIndex() == 0:  # Empty selection
-                continue  # Allow unassigned lines, but we need exactly 4 assigned
+                continue
             assignment_type = ['', 'pitch', 'roll', 'heading1', 'heading2'][combo.currentIndex()]
             if assignment_type in assigned_types:
                 self._show_error(f"Each line type can only be assigned once. '{assignment_type}' is assigned multiple times.")
                 return
             assigned_types.append(assignment_type)
             self.assignments[i] = assignment_type
-        
-        # Validate that we have exactly 4 assignments (pitch, roll, heading1, heading2)
-        if len(assigned_types) != 4:
-            self._show_error("Please assign exactly 4 lines: Pitch Line, Roll Line, Heading Line 1, and Heading Line 2.")
+
+        required = {'pitch', 'heading1', 'heading2'}
+        if len(self.imported_lines) >= 4:
+            required.add('roll')
+
+        missing = required - set(assigned_types)
+        if missing:
+            if len(self.imported_lines) == 3:
+                self._show_error(
+                    "For a 3-line survey, assign Pitch Line, Heading Line 1, and Heading Line 2. "
+                    "Pitch and roll runs are done on the same line, so Roll will use Pitch."
+                )
+            else:
+                self._show_error(
+                    "Please assign all required line types: Pitch Line, Roll Line, "
+                    "Heading Line 1, and Heading Line 2."
+                )
             return
-        
-        if 'pitch' not in assigned_types or 'roll' not in assigned_types or 'heading1' not in assigned_types or 'heading2' not in assigned_types:
-            self._show_error("Please assign all required line types: Pitch Line, Roll Line, Heading Line 1, and Heading Line 2.")
-            return
-        
+
         self.accept()
     
     def _show_error(self, message):
@@ -412,6 +442,46 @@ class CalibrationMixin:
             self.activity_log_text.setTextCursor(cursor)
         self.activity_log_text.ensureCursorVisible()
         self.activity_log_text.setReadOnly(True)
+
+    def _cal_import_line_count_ok(self, imported_lines):
+        """True when import has 3 (shared pitch/roll) or 4 calibration lines."""
+        return len(imported_lines) in (3, 4)
+
+    def _ensure_cal_roll_from_pitch_if_missing(self):
+        """When roll is absent, reuse pitch (3-line surveys run pitch and roll together)."""
+        if len(getattr(self, "pitch_line_points", []) or []) != 2:
+            return False
+        if len(getattr(self, "roll_line_points", []) or []) == 2:
+            return False
+        self.roll_line_points = [
+            (float(self.pitch_line_points[0][0]), float(self.pitch_line_points[0][1])),
+            (float(self.pitch_line_points[1][0]), float(self.pitch_line_points[1][1])),
+        ]
+        return True
+
+    def _apply_cal_line_assignments(self, assignments, imported_lines):
+        """Map assignment dialog results onto pitch/roll/heading structures."""
+        self.pitch_line_points = []
+        self.roll_line_points = []
+        self.heading_lines = []
+        for line_idx, assignment_type in (assignments or {}).items():
+            if assignment_type == "pitch":
+                self.pitch_line_points = imported_lines[line_idx]
+            elif assignment_type == "roll":
+                self.roll_line_points = imported_lines[line_idx]
+            elif assignment_type == "heading1":
+                if len(self.heading_lines) < 1:
+                    self.heading_lines.append([])
+                self.heading_lines[0] = imported_lines[line_idx]
+            elif assignment_type == "heading2":
+                while len(self.heading_lines) < 2:
+                    self.heading_lines.append([])
+                self.heading_lines[1] = imported_lines[line_idx]
+        if self._ensure_cal_roll_from_pitch_if_missing():
+            self.set_cal_info_text(
+                "3-line calibration: pitch and roll share the same line.",
+                append=True,
+            )
 
     def _toggle_pick_pitch_line_mode(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -1217,6 +1287,20 @@ class CalibrationMixin:
         self.last_export_dir = export_dir
         self._save_last_export_dir()
         try:
+            exported_geotiff_path = (
+                self._maybe_export_survey_geotiff(export_dir, export_name)
+                if hasattr(self, "_maybe_export_survey_geotiff")
+                else None
+            )
+            _cal_geotiff = (
+                self._resolve_export_params_geotiff_path(exported_geotiff_path)
+                if hasattr(self, "_resolve_export_params_geotiff_path")
+                else (
+                    self.current_geotiff_path
+                    if hasattr(self, "current_geotiff_path") and self.current_geotiff_path
+                    else None
+                )
+            )
             geod = pyproj.Geod(ellps="WGS84") if pyproj is not None else None
             lead_in_m = self._get_cal_lead_in_m()
             # --- Build common rows and write DDD/DMM/DMS CSV and TXT via export_utils ---
@@ -1272,11 +1356,6 @@ class CalibrationMixin:
                         collection.writerecords(features)
                 self._write_gpkg_if_enabled(shapefile_path, schema, features, crs=crs_epsg)
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
-            _cal_geotiff = (
-                self.current_geotiff_path
-                if hasattr(self, "current_geotiff_path") and self.current_geotiff_path
-                else None
-            )
             geojson_features = []
             for num, name, pts in export_lines:
                 geojson_features.append({
@@ -1369,11 +1448,7 @@ class CalibrationMixin:
                     )
                 except Exception:
                     params['turn_time'] = 5.0
-                params['geotiff_path'] = (
-                    self.current_geotiff_path
-                    if hasattr(self, "current_geotiff_path") and self.current_geotiff_path
-                    else None
-                )
+                params['geotiff_path'] = _cal_geotiff
                 params['geotiff_nan_value'] = float(getattr(self, "geotiff_nan_value", -11000.0))
                 params['show_contours_var'] = bool(getattr(self, "show_contours_var", False))
                 params['contour_interval_m'] = (
@@ -1469,6 +1544,8 @@ class CalibrationMixin:
                     success_msg += f"- {bn}\n"
             if roll_profile_csv_path and os.path.isfile(roll_profile_csv_path):
                 success_msg += f"- {os.path.basename(roll_profile_csv_path)}\n"
+            if exported_geotiff_path and os.path.isfile(exported_geotiff_path):
+                success_msg += f"- {os.path.basename(exported_geotiff_path)}\n"
             success_msg += f"in directory: {export_dir}"
 
             status_lines = []
@@ -1502,6 +1579,8 @@ class CalibrationMixin:
             _add_status(pitch_profile_csv_path)
             _add_status(roll_profile_png_path)
             _add_status(roll_profile_csv_path)
+            if exported_geotiff_path:
+                _add_status(exported_geotiff_path)
             if status_lines:
                 self.set_cal_info_text(
                     "Calibration export results:\n" + "\n".join(status_lines),
@@ -1631,9 +1710,14 @@ class CalibrationMixin:
                 imported_lines = self._parse_lnw_file(file_path, utm_zone, hemisphere)
                 if imported_lines is None:
                     return  # Error already shown
-                if len(imported_lines) != 4:
-                    self._show_message("error", "Calibration Import",
-                                     f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
+                if not self._cal_import_line_count_ok(imported_lines):
+                    self._show_message(
+                        "error",
+                        "Calibration Import",
+                        f"Calibration survey requires 3 or 4 lines "
+                        f"(pitch+headings with shared pitch/roll, or pitch+roll+headings). "
+                        f"This file has {len(imported_lines)} lines.",
+                    )
                     return
                 suggested = _suggest_calibration_assignments_from_geometry(imported_lines)
                 dialog = LineAssignmentDialog(self, imported_lines, suggested)
@@ -1641,26 +1725,7 @@ class CalibrationMixin:
                     return  # User cancelled
                 
                 assignments = dialog.get_assignments()
-                
-                # Map assignments to calibration data structures
-                self.pitch_line_points = []
-                self.roll_line_points = []
-                self.heading_lines = []
-                
-                for line_idx, assignment_type in assignments.items():
-                    if assignment_type == 'pitch':
-                        self.pitch_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'roll':
-                        self.roll_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'heading1':
-                        if len(self.heading_lines) < 1:
-                            self.heading_lines.append([])
-                        self.heading_lines[0] = imported_lines[line_idx]
-                    elif assignment_type == 'heading2':
-                        if len(self.heading_lines) < 2:
-                            while len(self.heading_lines) < 2:
-                                self.heading_lines.append([])
-                        self.heading_lines[1] = imported_lines[line_idx]
+                self._apply_cal_line_assignments(assignments, imported_lines)
                 file_processed = True
 
             # Handle *.shp / *.gpkg (Shapefile or GeoPackage)
@@ -1668,32 +1733,21 @@ class CalibrationMixin:
                 imported_lines = self._parse_vector_file_as_line_list(file_path)
                 if imported_lines is None:
                     return
-                if len(imported_lines) != 4:
-                    self._show_message("error", "Calibration Import",
-                                     f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
+                if not self._cal_import_line_count_ok(imported_lines):
+                    self._show_message(
+                        "error",
+                        "Calibration Import",
+                        f"Calibration survey requires 3 or 4 lines "
+                        f"(pitch+headings with shared pitch/roll, or pitch+roll+headings). "
+                        f"This file has {len(imported_lines)} lines.",
+                    )
                     return
                 suggested = _suggest_calibration_assignments_from_geometry(imported_lines)
                 dialog = LineAssignmentDialog(self, imported_lines, suggested)
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return
                 assignments = dialog.get_assignments()
-                self.pitch_line_points = []
-                self.roll_line_points = []
-                self.heading_lines = []
-                for line_idx, assignment_type in assignments.items():
-                    if assignment_type == 'pitch':
-                        self.pitch_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'roll':
-                        self.roll_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'heading1':
-                        if len(self.heading_lines) < 1:
-                            self.heading_lines.append([])
-                        self.heading_lines[0] = imported_lines[line_idx]
-                    elif assignment_type == 'heading2':
-                        if len(self.heading_lines) < 2:
-                            while len(self.heading_lines) < 2:
-                                self.heading_lines.append([])
-                        self.heading_lines[1] = imported_lines[line_idx]
+                self._apply_cal_line_assignments(assignments, imported_lines)
                 file_processed = True
 
             # Handle *_DMS.txt format (Degrees Minutes Seconds)
@@ -1701,9 +1755,14 @@ class CalibrationMixin:
                 imported_lines = self._parse_dms_txt_file(file_path)
                 if imported_lines is None:
                     return  # Error already shown
-                if len(imported_lines) != 4:
-                    self._show_message("error", "Calibration Import",
-                                     f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
+                if not self._cal_import_line_count_ok(imported_lines):
+                    self._show_message(
+                        "error",
+                        "Calibration Import",
+                        f"Calibration survey requires 3 or 4 lines "
+                        f"(pitch+headings with shared pitch/roll, or pitch+roll+headings). "
+                        f"This file has {len(imported_lines)} lines.",
+                    )
                     return
                 file_basename = os.path.basename(file_path)
                 suggested = _suggest_calibration_assignments_from_metadata(file_path, file_basename, len(imported_lines))
@@ -1714,26 +1773,7 @@ class CalibrationMixin:
                     return  # User cancelled
                 
                 assignments = dialog.get_assignments()
-                
-                # Map assignments to calibration data structures
-                self.pitch_line_points = []
-                self.roll_line_points = []
-                self.heading_lines = []
-                
-                for line_idx, assignment_type in assignments.items():
-                    if assignment_type == 'pitch':
-                        self.pitch_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'roll':
-                        self.roll_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'heading1':
-                        if len(self.heading_lines) < 1:
-                            self.heading_lines.append([])
-                        self.heading_lines[0] = imported_lines[line_idx]
-                    elif assignment_type == 'heading2':
-                        if len(self.heading_lines) < 2:
-                            while len(self.heading_lines) < 2:
-                                self.heading_lines.append([])
-                        self.heading_lines[1] = imported_lines[line_idx]
+                self._apply_cal_line_assignments(assignments, imported_lines)
                 file_processed = True
             
             # Handle *_DMM.txt format (Degrees and decimal minutes)
@@ -1741,9 +1781,14 @@ class CalibrationMixin:
                 imported_lines = self._parse_dmm_txt_file(file_path)
                 if imported_lines is None:
                     return  # Error already shown
-                if len(imported_lines) != 4:
-                    self._show_message("error", "Calibration Import",
-                                     f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
+                if not self._cal_import_line_count_ok(imported_lines):
+                    self._show_message(
+                        "error",
+                        "Calibration Import",
+                        f"Calibration survey requires 3 or 4 lines "
+                        f"(pitch+headings with shared pitch/roll, or pitch+roll+headings). "
+                        f"This file has {len(imported_lines)} lines.",
+                    )
                     return
                 file_basename = os.path.basename(file_path)
                 suggested = _suggest_calibration_assignments_from_metadata(file_path, file_basename, len(imported_lines))
@@ -1754,24 +1799,7 @@ class CalibrationMixin:
                     return  # User cancelled
                 
                 assignments = dialog.get_assignments()
-                self.pitch_line_points = []
-                self.roll_line_points = []
-                self.heading_lines = []
-                
-                for line_idx, assignment_type in assignments.items():
-                    if assignment_type == 'pitch':
-                        self.pitch_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'roll':
-                        self.roll_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'heading1':
-                        if len(self.heading_lines) < 1:
-                            self.heading_lines.append([])
-                        self.heading_lines[0] = imported_lines[line_idx]
-                    elif assignment_type == 'heading2':
-                        if len(self.heading_lines) < 2:
-                            while len(self.heading_lines) < 2:
-                                self.heading_lines.append([])
-                        self.heading_lines[1] = imported_lines[line_idx]
+                self._apply_cal_line_assignments(assignments, imported_lines)
                 file_processed = True
             
             # Handle *_DDD.txt format (Decimal Degrees)
@@ -1779,9 +1807,14 @@ class CalibrationMixin:
                 imported_lines = self._parse_ddd_txt_file(file_path)
                 if imported_lines is None:
                     return  # Error already shown
-                if len(imported_lines) != 4:
-                    self._show_message("error", "Calibration Import",
-                                     f"Calibration survey requires exactly 4 lines (8 points). This file has {len(imported_lines)} lines.")
+                if not self._cal_import_line_count_ok(imported_lines):
+                    self._show_message(
+                        "error",
+                        "Calibration Import",
+                        f"Calibration survey requires 3 or 4 lines "
+                        f"(pitch+headings with shared pitch/roll, or pitch+roll+headings). "
+                        f"This file has {len(imported_lines)} lines.",
+                    )
                     return
                 file_basename = os.path.basename(file_path)
                 suggested = _suggest_calibration_assignments_from_metadata(file_path, file_basename, len(imported_lines))
@@ -1792,26 +1825,7 @@ class CalibrationMixin:
                     return  # User cancelled
                 
                 assignments = dialog.get_assignments()
-                
-                # Map assignments to calibration data structures
-                self.pitch_line_points = []
-                self.roll_line_points = []
-                self.heading_lines = []
-                
-                for line_idx, assignment_type in assignments.items():
-                    if assignment_type == 'pitch':
-                        self.pitch_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'roll':
-                        self.roll_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'heading1':
-                        if len(self.heading_lines) < 1:
-                            self.heading_lines.append([])
-                        self.heading_lines[0] = imported_lines[line_idx]
-                    elif assignment_type == 'heading2':
-                        if len(self.heading_lines) < 2:
-                            while len(self.heading_lines) < 2:
-                                self.heading_lines.append([])
-                        self.heading_lines[1] = imported_lines[line_idx]
+                self._apply_cal_line_assignments(assignments, imported_lines)
                 file_processed = True
             elif not file_processed and file_ext == '.csv':
                 with open(file_path, 'r', encoding='utf-8') as csvfile:
@@ -1908,7 +1922,7 @@ class CalibrationMixin:
                 if not imported_lines:
                     self._show_message("warning", "Import Warning", "No valid GPX track/route segments found.")
                     return
-                if len(imported_lines) == 4 and (not suggested or len(suggested) < 4):
+                if len(imported_lines) in (3, 4) and (not suggested or len(suggested) < len(imported_lines)):
                     geom_suggest = _suggest_calibration_assignments_from_geometry(imported_lines)
                     if geom_suggest:
                         for idx, role in geom_suggest.items():
@@ -1918,27 +1932,16 @@ class CalibrationMixin:
                 if dialog.exec() != QDialog.DialogCode.Accepted:
                     return
                 assignments = dialog.get_assignments()
-                self.pitch_line_points = []
-                self.roll_line_points = []
-                self.heading_lines = []
-                for line_idx, assignment_type in assignments.items():
-                    if assignment_type == 'pitch':
-                        self.pitch_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'roll':
-                        self.roll_line_points = imported_lines[line_idx]
-                    elif assignment_type == 'heading1':
-                        if len(self.heading_lines) < 1:
-                            self.heading_lines.append([])
-                        self.heading_lines[0] = imported_lines[line_idx]
-                    elif assignment_type == 'heading2':
-                        if len(self.heading_lines) < 2:
-                            while len(self.heading_lines) < 2:
-                                self.heading_lines.append([])
-                        self.heading_lines[1] = imported_lines[line_idx]
+                self._apply_cal_line_assignments(assignments, imported_lines)
                 file_processed = True
             elif not file_processed:
                 self._show_message("error","Import Error", f"Unsupported file format: {file_ext}")
                 return
+            if self._ensure_cal_roll_from_pitch_if_missing():
+                self.set_cal_info_text(
+                    "3-line calibration: pitch and roll share the same line.",
+                    append=True,
+                )
             params = None
             imported_line_offset = None
             base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -2110,25 +2113,8 @@ class CalibrationMixin:
         if not all_points:
             self._show_message("warning", "GMRT Download", "No calibration line points to compute extent.")
             return
-        lats = [p[0] for p in all_points]
-        lons = [p[1] for p in all_points]
-        min_lat, max_lat = min(lats), max(lats)
-        min_lon, max_lon = min(lons), max(lons)
-        mid_lat = (min_lat + max_lat) / 2.0
-        mid_lon = (min_lon + max_lon) / 2.0
-        buffer_deg = 0.5
-        if hasattr(self, 'cal_gmrt_buffer_spin'):
-            try:
-                buffer_deg = float(self.cal_gmrt_buffer_spin.value())
-            except (ValueError, TypeError):
-                pass
-        west = mid_lon - buffer_deg
-        east = mid_lon + buffer_deg
-        south = mid_lat - buffer_deg
-        north = mid_lat + buffer_deg
-        split_topo_depths = True
-        if hasattr(self, 'cal_split_topo_depths_checkbox'):
-            split_topo_depths = bool(self.cal_split_topo_depths_checkbox.isChecked())
+        west, east, south, north = self._gmrt_download_extent_from_points(all_points, prefix="cal")
+        split_topo_depths = self._gmrt_split_topo_depths_for_prefix("cal")
         self._download_gmrt_and_load(
             west, east, south, north,
             resolution=100,
