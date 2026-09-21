@@ -401,7 +401,7 @@ class GeoTIFFMixin:
         split_topo_depths = self._gmrt_split_topo_depths_for_prefix("backscatter")
         self._download_gmrt_and_load(
             west, east, south, north,
-            resolution=100,
+            resolution=self._gmrt_import_resolution_meters("backscatter"),
             layer="topo",
             default_filename_prefix="GMRT_Bathy",
             log_func=lambda msg, append=True: self.set_line_info_text(msg, append=append) if hasattr(self, "set_line_info_text") else None,
@@ -690,12 +690,16 @@ class GeoTIFFMixin:
 
             # Restore bathymetry/backscatter rasters when paths were saved.
             geotiff_path = params.get("geotiff_path")
+            if geotiff_path and hasattr(self, "_resolve_import_sidecar_path"):
+                geotiff_path = self._resolve_import_sidecar_path(geotiff_path, import_dir)
             if geotiff_path and os.path.isfile(geotiff_path):
                 try:
                     self._load_geotiff_from_path(geotiff_path, use_background_loading=False)
                 except Exception:
                     pass
             bs_geotiff_path = params.get("backscatter_geotiff_path")
+            if bs_geotiff_path and hasattr(self, "_resolve_import_sidecar_path"):
+                bs_geotiff_path = self._resolve_import_sidecar_path(bs_geotiff_path, import_dir)
             if bs_geotiff_path and os.path.isfile(bs_geotiff_path):
                 try:
                     self._load_backscatter_geotiff_from_path(bs_geotiff_path)
@@ -712,7 +716,7 @@ class GeoTIFFMixin:
             if hasattr(self, "_deferred_sync_all_bound_params"):
                 self._deferred_sync_all_bound_params()
             self._update_backscatter_area_button_states()
-            imported_geotiff_path = params.get("geotiff_path") if isinstance(params, dict) else None
+            imported_geotiff_path = geotiff_path
             self._maybe_prompt_gmrt_download_after_import(
                 geotiff_path=imported_geotiff_path,
                 download_callback=self._download_and_load_gmrt_after_backscatter_import,
@@ -767,7 +771,9 @@ class GeoTIFFMixin:
                 else None
             )
             params_geotiff_path = (
-                self._resolve_export_params_geotiff_path(exported_geotiff_path)
+                self._resolve_export_params_geotiff_path(
+                    exported_geotiff_path, export_dir=export_dir
+                )
                 if hasattr(self, "_resolve_export_params_geotiff_path")
                 else (self.current_geotiff_path if hasattr(self, "current_geotiff_path") else None)
             )
@@ -991,7 +997,14 @@ class GeoTIFFMixin:
                 "backscatter_percent_clip_max": float(getattr(self, "backscatter_percent_clip_max", 0.5) or 0.5),
                 "backscatter_nan_value": float(getattr(self, "backscatter_nan_value", -9999.0)),
                 "geotiff_path": params_geotiff_path,
-                "backscatter_geotiff_path": self.backscatter_geotiff_path if hasattr(self, "backscatter_geotiff_path") else None,
+                "backscatter_geotiff_path": (
+                    self._path_for_params_sidecar(
+                        self.backscatter_geotiff_path if hasattr(self, "backscatter_geotiff_path") else None,
+                        export_dir,
+                    )
+                    if hasattr(self, "_path_for_params_sidecar")
+                    else (self.backscatter_geotiff_path if hasattr(self, "backscatter_geotiff_path") else None)
+                ),
                 "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
                 "show_contours_var": bool(getattr(self, "show_contours_var", False)),
                 "contour_interval_m": (

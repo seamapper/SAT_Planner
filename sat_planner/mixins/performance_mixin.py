@@ -1068,7 +1068,7 @@ class PerformanceMixin:
             east,
             south,
             north,
-            resolution=100,
+            resolution=self._gmrt_import_resolution_meters("performance"),
             layer="topo",
             default_filename_prefix="GMRT_Bathy",
             log_func=lambda msg, append=True: self.set_performance_activity_text(msg, append=append),
@@ -1146,6 +1146,8 @@ class PerformanceMixin:
                         pass
                 self._apply_geotiff_viz_params_from_params(params)
                 gtp = params.get("geotiff_path")
+                if gtp and hasattr(self, "_resolve_import_sidecar_path"):
+                    gtp = self._resolve_import_sidecar_path(gtp, dir_name)
                 if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                     self._load_geotiff_from_path(gtp)
             elif all_pts and pyproj is not None:
@@ -1231,6 +1233,10 @@ class PerformanceMixin:
         imported_geotiff_path = geotiff_path_hint
         if params and isinstance(params, dict) and params.get("geotiff_path"):
             imported_geotiff_path = params.get("geotiff_path")
+        if imported_geotiff_path and hasattr(self, "_resolve_import_sidecar_path"):
+            imported_geotiff_path = self._resolve_import_sidecar_path(
+                imported_geotiff_path, dir_name
+            )
         self._maybe_prompt_gmrt_download_after_import(
             geotiff_path=imported_geotiff_path,
             download_callback=self._download_and_load_gmrt_after_perf_import,

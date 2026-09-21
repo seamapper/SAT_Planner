@@ -415,7 +415,9 @@ class LinePlanningMixin:
                 else None
             )
             params_geotiff_path = (
-                self._resolve_export_params_geotiff_path(exported_geotiff_path)
+                self._resolve_export_params_geotiff_path(
+                    exported_geotiff_path, export_dir=export_dir
+                )
                 if hasattr(self, "_resolve_export_params_geotiff_path")
                 else (
                     self.current_geotiff_path
@@ -676,7 +678,7 @@ class LinePlanningMixin:
         split_topo_depths = self._gmrt_split_topo_depths_for_prefix("line_plan")
         self._download_gmrt_and_load(
             west, east, south, north,
-            resolution=100,
+            resolution=self._gmrt_import_resolution_meters("line_plan"),
             layer="topo",
             default_filename_prefix="GMRT_Bathy",
             log_func=lambda msg, append=True: self.set_line_info_text(msg, append=append),
@@ -845,6 +847,10 @@ class LinePlanningMixin:
                     for coord in geometry.get('coordinates', []):
                         if len(coord) >= 2:
                             self.line_planning_points.append((coord[1], coord[0]))
+                if imported_geotiff_path and hasattr(self, "_resolve_import_sidecar_path"):
+                    imported_geotiff_path = self._resolve_import_sidecar_path(
+                        imported_geotiff_path, dir_name
+                    )
                 if imported_survey_speed is not None and hasattr(self, 'line_survey_speed_entry'):
                     self.line_survey_speed_entry.setText(str(imported_survey_speed))
                 if imported_nan_cutoff is not None and hasattr(self, '_set_geotiff_nan_cutoff'):
@@ -886,6 +892,8 @@ class LinePlanningMixin:
                 self._apply_geotiff_viz_params_from_params(sidecar_params)
                 try:
                     gtp = sidecar_params.get("geotiff_path")
+                    if gtp and hasattr(self, "_resolve_import_sidecar_path"):
+                        gtp = self._resolve_import_sidecar_path(gtp, dir_name)
                     if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                         self._load_geotiff_from_path(gtp)
                 except Exception:
@@ -916,6 +924,10 @@ class LinePlanningMixin:
             imported_geotiff_path = None
             if sidecar_params and isinstance(sidecar_params, dict):
                 imported_geotiff_path = sidecar_params.get("geotiff_path")
+                if imported_geotiff_path and hasattr(self, "_resolve_import_sidecar_path"):
+                    imported_geotiff_path = self._resolve_import_sidecar_path(
+                        imported_geotiff_path, dir_name
+                    )
             self._maybe_prompt_gmrt_download_after_import(
                 geotiff_path=imported_geotiff_path,
                 download_callback=self._download_and_load_gmrt_after_line_import,

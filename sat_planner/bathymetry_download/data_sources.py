@@ -249,6 +249,23 @@ def uses_meter_cell_size(data_sources, name):
     return ds.get("service_crs") == "EPSG:3857" or ds.get("api") == "gmrt"
 
 
+def gmrt_cell_size_meters_options(data_sources=None):
+    """Meter cell-size presets for GMRT (Download Bathymetry + import prompt)."""
+    sources = data_sources if data_sources is not None else DATA_SOURCES
+    ds = get_source(sources, "GMRT Topo-Bathy")
+    return list(ds.get("cell_size_meters_options", [60, 120, 240, 480, 960]))
+
+
+def gmrt_default_cell_size_meters(data_sources=None):
+    """Default GMRT cell size in meters (matches Download Bathymetry)."""
+    sources = data_sources if data_sources is not None else DATA_SOURCES
+    ds = get_source(sources, "GMRT Topo-Bathy")
+    try:
+        return float(ds.get("default_cell_size_meters", 120))
+    except (TypeError, ValueError):
+        return 120.0
+
+
 def download_filename_prefix(data_sources, name):
     """Return the filename prefix for downloaded GeoTIFFs."""
     ds = get_source(data_sources, name)

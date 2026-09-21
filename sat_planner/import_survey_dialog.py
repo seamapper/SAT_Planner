@@ -3,6 +3,7 @@
 from PyQt6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -26,6 +27,7 @@ class ImportSurveyDialog(QDialog):
         buffer_percent_spin,
         buffer_mode_widget,
         split_checkbox,
+        cell_size_combo=None,
         *,
         prompt_missing_geotiff=False,
         geotiff_path=None,
@@ -34,13 +36,14 @@ class ImportSurveyDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"Import {tab_label}")
         self.setModal(True)
-        self.resize(480, 280)
+        self.resize(480, 300)
 
         self._download_checkbox = download_checkbox
         self._buffer_spin = buffer_spin
         self._buffer_percent_spin = buffer_percent_spin
         self._buffer_mode_widget = buffer_mode_widget
         self._split_checkbox = split_checkbox
+        self._cell_size_combo = cell_size_combo
         self._existing_grid_loaded = bool(existing_grid_loaded and prompt_missing_geotiff)
 
         layout = QVBoxLayout(self)
@@ -108,6 +111,29 @@ class ImportSurveyDialog(QDialog):
             self.download_gmrt_checkbox.setChecked(default_download)
             self.download_gmrt_checkbox.setToolTip(download_checkbox.toolTip())
             gmrt_layout.addWidget(self.download_gmrt_checkbox)
+
+        cell_row = QHBoxLayout()
+        self.cell_size_label = QLabel("Cell Size (m):")
+        cell_row.addWidget(self.cell_size_label)
+        self.gmrt_cell_size_combo = QComboBox()
+        if cell_size_combo is not None:
+            for i in range(cell_size_combo.count()):
+                self.gmrt_cell_size_combo.addItem(
+                    cell_size_combo.itemText(i), cell_size_combo.itemData(i)
+                )
+            self.gmrt_cell_size_combo.setCurrentIndex(cell_size_combo.currentIndex())
+            self.gmrt_cell_size_combo.setToolTip(cell_size_combo.toolTip())
+        else:
+            for meters in (60, 120, 240, 480, 960):
+                self.gmrt_cell_size_combo.addItem(f"{meters} m", meters)
+            self.gmrt_cell_size_combo.setCurrentIndex(0)  # 60 m
+            self.gmrt_cell_size_combo.setToolTip(
+                "GMRT GridServer cell size (meters/pixel). Same presets as Download Bathymetry."
+            )
+        self.gmrt_cell_size_combo.setMinimumWidth(100)
+        cell_row.addWidget(self.gmrt_cell_size_combo)
+        cell_row.addStretch()
+        gmrt_layout.addLayout(cell_row)
 
         mode_row = QHBoxLayout()
         mode_row.addWidget(QLabel("Buffer:"))
@@ -205,6 +231,8 @@ class ImportSurveyDialog(QDialog):
     def _update_enabled_state(self):
         download_on = self._download_selected()
         mode = self._buffer_mode()
+        self.gmrt_cell_size_combo.setEnabled(download_on)
+        self.cell_size_label.setEnabled(download_on)
         self.buffer_mode_degrees.setEnabled(download_on)
         self.buffer_mode_percent.setEnabled(download_on)
         self.gmrt_buffer_spin.setEnabled(download_on and mode == "degrees")
@@ -222,5 +250,11 @@ class ImportSurveyDialog(QDialog):
             idx = self._buffer_mode_widget.findData(mode)
             if idx >= 0:
                 self._buffer_mode_widget.setCurrentIndex(idx)
+        if self._cell_size_combo is not None:
+            idx = self._cell_size_combo.findData(self.gmrt_cell_size_combo.currentData())
+            if idx >= 0:
+                self._cell_size_combo.setCurrentIndex(idx)
+            else:
+                self._cell_size_combo.setCurrentIndex(self.gmrt_cell_size_combo.currentIndex())
         self._split_checkbox.setChecked(self.split_topo_depths_checkbox.isChecked())
         self.accept()

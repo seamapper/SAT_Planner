@@ -121,10 +121,15 @@ class ExportImportMixin:
             getattr(self, f"{prefix}_gmrt_buffer_percent_spin"),
             getattr(self, f"{prefix}_gmrt_buffer_mode"),
             getattr(self, f"{prefix}_split_topo_depths_checkbox"),
+            getattr(self, f"{prefix}_gmrt_cell_size_combo"),
         )
 
     def _create_hidden_gmrt_import_widgets(self, prefix, import_tooltip):
         """Create per-tab GMRT widgets (not shown on tab layouts; used by Import Survey dialog)."""
+        from sat_planner.bathymetry_download.data_sources import (
+            gmrt_cell_size_meters_options,
+        )
+
         holder = QWidget(self)
         holder.hide()
         download_cb = QCheckBox(holder)
@@ -155,6 +160,17 @@ class ExportImportMixin:
         buffer_mode.addItem("Percent of survey", "percent")
         buffer_mode.setCurrentIndex(1)  # default: percent
         buffer_mode.setToolTip("Choose fixed degrees buffer or percent of map-frame extent.")
+        cell_size_combo = QComboBox(holder)
+        default_cell = 60
+        for meters in gmrt_cell_size_meters_options():
+            meters_i = int(meters)
+            cell_size_combo.addItem(f"{meters_i} m", meters_i)
+        idx = cell_size_combo.findData(default_cell)
+        cell_size_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        cell_size_combo.setToolTip(
+            "GMRT GridServer cell size (meters/pixel). Same presets as Download Bathymetry."
+        )
+        cell_size_combo.setMinimumWidth(80)
         split_cb = QCheckBox(holder)
         split_cb.setChecked(True)
         split_cb.setToolTip(
@@ -168,7 +184,32 @@ class ExportImportMixin:
         setattr(self, f"{prefix}_gmrt_buffer_spin", buffer_spin)
         setattr(self, f"{prefix}_gmrt_buffer_percent_spin", buffer_percent_spin)
         setattr(self, f"{prefix}_gmrt_buffer_mode", buffer_mode)
+        setattr(self, f"{prefix}_gmrt_cell_size_combo", cell_size_combo)
         setattr(self, f"{prefix}_split_topo_depths_checkbox", split_cb)
+
+    def _gmrt_import_resolution_meters(self, prefix=None):
+        """Return selected post-import GMRT cell size in meters."""
+        defaults = (
+            self._default_gmrt_import_options()
+            if hasattr(self, "_default_gmrt_import_options")
+            else {"cell_size_m": 60}
+        )
+        try:
+            if prefix is None:
+                prefix = self._survey_io_spec()["gmrt_prefix"]
+            combo = getattr(self, f"{prefix}_gmrt_cell_size_combo", None)
+            if combo is not None:
+                data = combo.currentData()
+                if data is not None:
+                    return int(data)
+                return int(float(combo.currentText().replace("m", "").strip()))
+        except Exception:
+            pass
+        opts = getattr(self, "gmrt_import_options", None) or {}
+        try:
+            return int(float(opts.get("cell_size_m", defaults.get("cell_size_m", 60))))
+        except (TypeError, ValueError):
+            return int(defaults.get("cell_size_m", 60))
 
     def _apply_gmrt_import_options_to_widgets(self):
         """Push remembered GMRT import options onto all per-tab hidden widgets."""
@@ -180,6 +221,7 @@ class ExportImportMixin:
                 "buffer_mode": "percent",
                 "buffer_deg": 0.5,
                 "buffer_percent": 20.0,
+                "cell_size_m": 60,
                 "split_topo_depths": True,
             }
         )
@@ -190,9 +232,10 @@ class ExportImportMixin:
         buffer_deg = float(options.get("buffer_deg", defaults["buffer_deg"]))
         buffer_percent = float(options.get("buffer_percent", defaults.get("buffer_percent", 20.0)))
         buffer_mode = options.get("buffer_mode", defaults.get("buffer_mode", "percent"))
+        cell_size_m = int(options.get("cell_size_m", defaults.get("cell_size_m", 60)))
         split_topo = bool(options.get("split_topo_depths", defaults["split_topo_depths"]))
         for spec in self._SURVEY_IO_TAB_SPECS:
-            download_cb, buffer_spin, buffer_percent_spin, mode_combo, split_cb = (
+            download_cb, buffer_spin, buffer_percent_spin, mode_combo, split_cb, cell_combo = (
                 self._gmrt_widgets_for_prefix(spec["gmrt_prefix"])
             )
             download_cb.blockSignals(True)
@@ -204,6 +247,12 @@ class ExportImportMixin:
             if idx < 0:
                 idx = 0
             mode_combo.setCurrentIndex(idx)
+            cell_idx = cell_combo.findData(cell_size_m)
+            if cell_idx < 0:
+                cell_idx = cell_combo.findData(int(defaults.get("cell_size_m", 60)))
+            if cell_idx < 0:
+                cell_idx = 0
+            cell_combo.setCurrentIndex(cell_idx)
             split_cb.setChecked(split_topo)
             split_cb.setEnabled(download)
 
@@ -211,7 +260,7 @@ class ExportImportMixin:
         """Update gmrt_import_options from the given (or current-tab) widgets."""
         if prefix is None:
             prefix = self._survey_io_spec()["gmrt_prefix"]
-        download_cb, buffer_spin, buffer_percent_spin, mode_combo, split_cb = (
+        download_cb, buffer_spin, buffer_percent_spin, mode_combo, split_cb, cell_combo = (
             self._gmrt_widgets_for_prefix(prefix)
         )
         defaults = (
@@ -222,6 +271,7 @@ class ExportImportMixin:
                 "buffer_mode": "percent",
                 "buffer_deg": 0.5,
                 "buffer_percent": 20.0,
+                "cell_size_m": 60,
                 "split_topo_depths": True,
             }
         )
@@ -236,11 +286,16 @@ class ExportImportMixin:
         mode = mode_combo.currentData() if mode_combo is not None else "percent"
         if not mode:
             mode = "percent"
+        try:
+            cell_size_m = int(cell_combo.currentData())
+        except (TypeError, ValueError):
+            cell_size_m = int(defaults.get("cell_size_m", 60))
         options = {
             "download": bool(download_cb.isChecked()),
             "buffer_mode": "percent" if mode == "percent" else "degrees",
             "buffer_deg": max(0.01, min(10.0, buffer_deg)),
             "buffer_percent": max(0.1, min(200.0, buffer_percent)),
+            "cell_size_m": cell_size_m,
             "split_topo_depths": bool(split_cb.isChecked()),
         }
         if hasattr(self, "_normalize_gmrt_import_options"):
@@ -316,7 +371,7 @@ class ExportImportMixin:
         mid_lat = (min_lat + max_lat) / 2.0
         mid_lon = (min_lon + max_lon) / 2.0
 
-        _, buffer_spin, buffer_percent_spin, mode_combo, _ = self._gmrt_widgets_for_prefix(prefix)
+        _, buffer_spin, buffer_percent_spin, mode_combo, _, _ = self._gmrt_widgets_for_prefix(prefix)
         mode = mode_combo.currentData() if mode_combo is not None else "percent"
         if not mode:
             mode = "percent"
@@ -530,7 +585,7 @@ class ExportImportMixin:
 
         existing_grid = self._session_has_loaded_geotiff()
         spec = self._survey_io_spec()
-        download_cb, buffer_spin, buffer_percent_spin, mode_combo, split_cb = (
+        download_cb, buffer_spin, buffer_percent_spin, mode_combo, split_cb, cell_combo = (
             self._gmrt_widgets_for_prefix(spec["gmrt_prefix"])
         )
         dialog = ImportSurveyDialog(
@@ -541,6 +596,7 @@ class ExportImportMixin:
             buffer_percent_spin,
             mode_combo,
             split_cb,
+            cell_combo,
             prompt_missing_geotiff=True,
             geotiff_path=geotiff_path,
             existing_grid_loaded=existing_grid,
@@ -755,14 +811,89 @@ class ExportImportMixin:
         except Exception:
             return None
 
-    def _resolve_export_params_geotiff_path(self, exported_geotiff_path=None):
-        """geotiff_path for params: exported file, else loaded path, else None."""
-        if exported_geotiff_path and os.path.isfile(exported_geotiff_path):
-            return exported_geotiff_path
-        path = getattr(self, "current_geotiff_path", None)
-        if path and os.path.isfile(path):
+    def _path_for_params_sidecar(self, path, base_dir=None):
+        """Return a portable path for ``*_params.json`` / GeoJSON sidecars.
+
+        When ``path`` is in ``base_dir`` (same folder as the export package),
+        store only the basename so the package can be moved. Otherwise store
+        an absolute path. Returns ``None`` if ``path`` is empty.
+        """
+        if not path:
+            return None
+        try:
+            abs_path = os.path.abspath(path)
+        except Exception:
             return path
-        return None
+        if base_dir:
+            try:
+                abs_base = os.path.abspath(base_dir)
+                if os.path.normcase(os.path.dirname(abs_path)) == os.path.normcase(abs_base):
+                    return os.path.basename(abs_path)
+            except Exception:
+                pass
+        return abs_path
+
+    def _resolve_export_params_geotiff_path(self, exported_geotiff_path=None, export_dir=None):
+        """geotiff_path for params: exported file, else loaded path, else None.
+
+        When ``export_dir`` is set and the chosen file lives in that directory,
+        the returned value is a relative basename for portability.
+        """
+        chosen = None
+        if exported_geotiff_path and os.path.isfile(exported_geotiff_path):
+            chosen = exported_geotiff_path
+        else:
+            path = getattr(self, "current_geotiff_path", None)
+            if path and os.path.isfile(path):
+                chosen = path
+        if chosen is None:
+            return None
+        return self._path_for_params_sidecar(chosen, export_dir)
+
+    def _resolve_import_sidecar_path(self, stored_path, base_dir=None):
+        """Resolve a path stored in ``*_params.json`` / GeoJSON for loading.
+
+        Relative paths (and bare filenames) resolve against ``base_dir`` (the
+        directory of the imported survey or params file). Absolute paths that
+        no longer exist also fall back to ``base_dir`` / basename so packages
+        moved after an older absolute-path export still open.
+        """
+        if not stored_path or not isinstance(stored_path, str):
+            return None
+        stored_path = stored_path.strip()
+        if not stored_path:
+            return None
+
+        candidates = []
+        if os.path.isabs(stored_path):
+            candidates.append(stored_path)
+        if base_dir:
+            candidates.append(os.path.normpath(os.path.join(base_dir, stored_path)))
+            candidates.append(os.path.join(base_dir, os.path.basename(stored_path)))
+        elif not os.path.isabs(stored_path):
+            candidates.append(os.path.abspath(stored_path))
+
+        seen = set()
+        for candidate in candidates:
+            if not candidate:
+                continue
+            try:
+                key = os.path.normcase(os.path.abspath(candidate))
+            except Exception:
+                key = candidate
+            if key in seen:
+                continue
+            seen.add(key)
+            if os.path.isfile(candidate):
+                try:
+                    return os.path.abspath(candidate)
+                except Exception:
+                    return candidate
+        if os.path.isabs(stored_path):
+            return stored_path
+        if base_dir:
+            return os.path.normpath(os.path.join(base_dir, stored_path))
+        return stored_path
 
     def _maybe_export_survey_geotiff(self, export_dir, export_name):
         """Export Full or View GeoTIFF when enabled. Returns output path or None."""
@@ -933,14 +1064,17 @@ class ExportImportMixin:
                 'bisect_lead': float(self.bisect_lead_entry.text()),
                 'survey_speed': float(self.survey_speed_entry.text()),
                 'export_name': self.export_name_entry.text().strip(),
-                'geotiff_path': self._resolve_export_params_geotiff_path(),
+                'geotiff_path': self._resolve_export_params_geotiff_path(export_dir=save_dir),
                 # Backscatter survey uses BOTH:
                 # - bathymetry grid (geotiff_path)
                 # - optional separate backscatter raster (backscatter_geotiff_path)
-                'backscatter_geotiff_path': (
-                    self.backscatter_geotiff_path
-                    if hasattr(self, 'backscatter_geotiff_path') and self.backscatter_geotiff_path
-                    else None
+                'backscatter_geotiff_path': self._path_for_params_sidecar(
+                    (
+                        self.backscatter_geotiff_path
+                        if hasattr(self, 'backscatter_geotiff_path') and self.backscatter_geotiff_path
+                        else None
+                    ),
+                    save_dir,
                 ),
                 'geotiff_nan_value': float(getattr(self, 'geotiff_nan_value', -11000.0)),
                 'visualization_shapefile_paths': list(getattr(self, 'visualization_shapefile_paths', []) or []),
@@ -1019,8 +1153,11 @@ class ExportImportMixin:
 
             # Restore bathymetry GeoTIFF and optional backscatter GeoTIFF (if present).
             # This is best-effort: if geotiff paths are missing or incompatible, we continue.
-            geotiff_path = params.get('geotiff_path')
-            backscatter_geotiff_path = params.get('backscatter_geotiff_path')
+            params_dir = os.path.dirname(file_path)
+            geotiff_path = self._resolve_import_sidecar_path(params.get('geotiff_path'), params_dir)
+            backscatter_geotiff_path = self._resolve_import_sidecar_path(
+                params.get('backscatter_geotiff_path'), params_dir
+            )
             try:
                 if geotiff_path and hasattr(self, '_load_geotiff_from_path') and os.path.exists(geotiff_path):
                     # Load bathymetry first (needed so backscatter can be reprojected/aligned).
@@ -1096,7 +1233,9 @@ class ExportImportMixin:
             profile_csv_path = None
             profile_png_paths = []
             exported_geotiff_path = self._maybe_export_survey_geotiff(export_dir, export_name)
-            params_geotiff_path = self._resolve_export_params_geotiff_path(exported_geotiff_path)
+            params_geotiff_path = self._resolve_export_params_geotiff_path(
+                exported_geotiff_path, export_dir=export_dir
+            )
             export_shapefile = self._export_type_enabled("esri_shapefile")
             export_gpkg = self._export_type_enabled("gpkg")
             export_sis = self._export_type_enabled("sis_asciiplan")
@@ -1606,7 +1745,9 @@ class ExportImportMixin:
 
         try:
             exported_geotiff_path = self._maybe_export_survey_geotiff(export_dir, export_name)
-            geotiff_path = self._resolve_export_params_geotiff_path(exported_geotiff_path)
+            geotiff_path = self._resolve_export_params_geotiff_path(
+                exported_geotiff_path, export_dir=export_dir
+            )
             speed_kts = 8.0
             if hasattr(self, "performance_test_speed_entry"):
                 try:

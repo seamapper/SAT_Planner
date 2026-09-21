@@ -1293,7 +1293,9 @@ class CalibrationMixin:
                 else None
             )
             _cal_geotiff = (
-                self._resolve_export_params_geotiff_path(exported_geotiff_path)
+                self._resolve_export_params_geotiff_path(
+                    exported_geotiff_path, export_dir=export_dir
+                )
                 if hasattr(self, "_resolve_export_params_geotiff_path")
                 else (
                     self.current_geotiff_path
@@ -2008,6 +2010,10 @@ class CalibrationMixin:
                     pass
             elif imported_geojson_nan_cutoff is not None and hasattr(self, '_set_geotiff_nan_cutoff'):
                 self._set_geotiff_nan_cutoff(imported_geojson_nan_cutoff, update_entry=True)
+            if imported_geojson_geotiff_path and hasattr(self, "_resolve_import_sidecar_path"):
+                imported_geojson_geotiff_path = self._resolve_import_sidecar_path(
+                    imported_geojson_geotiff_path, dir_name
+                )
             if imported_geojson_geotiff_path and hasattr(self, '_load_geotiff_from_path'):
                 if os.path.exists(imported_geojson_geotiff_path):
                     self._load_geotiff_from_path(imported_geojson_geotiff_path)
@@ -2046,6 +2052,10 @@ class CalibrationMixin:
             if params and isinstance(params, dict):
                 if params.get("geotiff_path"):
                     imported_geotiff_path = params.get("geotiff_path")
+                    if hasattr(self, "_resolve_import_sidecar_path"):
+                        imported_geotiff_path = self._resolve_import_sidecar_path(
+                            imported_geotiff_path, dir_name
+                        )
                 if (
                     imported_geotiff_path
                     and os.path.exists(imported_geotiff_path)
@@ -2117,7 +2127,7 @@ class CalibrationMixin:
         split_topo_depths = self._gmrt_split_topo_depths_for_prefix("cal")
         self._download_gmrt_and_load(
             west, east, south, north,
-            resolution=100,
+            resolution=self._gmrt_import_resolution_meters("cal"),
             layer="topo",
             default_filename_prefix="GMRT_Bathy",
             log_func=lambda msg, append=True: self.set_cal_info_text(msg, append=append),

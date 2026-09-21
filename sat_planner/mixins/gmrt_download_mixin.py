@@ -182,7 +182,7 @@ class GMRTDownloadMixin:
         east,
         south,
         north,
-        resolution=100,
+        resolution=60,
         layer="topo",
         default_filename_prefix="GMRT_Bathy",
         log_func=None,
@@ -195,7 +195,7 @@ class GMRTDownloadMixin:
 
         Args:
             west, east, south, north: Bounds in degrees (WGS84).
-            resolution: Meter resolution (default 100).
+            resolution: Meter resolution (default 60).
             layer: GMRT layer (default "topo").
             default_filename_prefix: Used for default filename: {prefix}_{YYYYMMDD_HHMMSS}.tif.
             log_func: Optional callable(message, append=False) for activity log. If None, uses
@@ -324,15 +324,19 @@ class GMRTDownloadMixin:
                 origin_tab = getattr(self, "_gmrt_download_origin_tab_index", None)
                 if origin_tab is not None and hasattr(self, "_zoom_to_tab_plan"):
                     self._zoom_to_tab_plan(tab_index=origin_tab)
-                # On the Calibration tab, refresh pitch-line depth stats and
-                # the default export name from the freshly loaded GeoTIFF.
-                # ``_update_cal_line_offset_from_pitch_line`` is safe when the
-                # heading-line offset is locked to an imported value (depth
-                # labels refresh; offset entry unchanged). Export name refresh
-                # is skipped when locked to ``export_name`` in params.
-                if (hasattr(self, "param_notebook") and self.param_notebook.currentIndex() == 0
-                        and hasattr(self, "_update_cal_line_offset_from_pitch_line")):
+                # Refresh depth-dependent UI after the grid is available.
+                # Use the tab that started the download (user may have switched).
+                if origin_tab == 0 and hasattr(self, "_update_cal_line_offset_from_pitch_line"):
+                    # Calibration: pitch-line depth stats / offset labels.
                     self._update_cal_line_offset_from_pitch_line()
+                elif origin_tab == 1:
+                    # Accuracy: sample Central Pt Depth (and auto export name) now
+                    # that bathymetry exists. Import runs this too early when GMRT
+                    # is downloaded as part of the same import.
+                    if hasattr(self, "_ensure_depth_at_central_point_from_geotiff"):
+                        self._ensure_depth_at_central_point_from_geotiff(force=True)
+                    if hasattr(self, "_regenerate_auto_accuracy_export_name"):
+                        self._regenerate_auto_accuracy_export_name()
             else:
                 self._show_message("error", "GMRT Download", path_or_error)
                 log_func(f"GMRT download failed: {path_or_error}", append=True)

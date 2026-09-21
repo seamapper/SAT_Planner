@@ -370,6 +370,7 @@ class ConfigMixin:
             "buffer_mode": "percent",  # "degrees" or "percent"
             "buffer_deg": 0.5,
             "buffer_percent": 20.0,
+            "cell_size_m": 60,
             "split_topo_depths": True,
         }
 
@@ -391,6 +392,20 @@ class ConfigMixin:
         except (TypeError, ValueError):
             opts["buffer_percent"] = defaults["buffer_percent"]
         opts["buffer_percent"] = max(0.1, min(200.0, opts["buffer_percent"]))
+        try:
+            from sat_planner.bathymetry_download.data_sources import (
+                gmrt_cell_size_meters_options,
+            )
+            allowed = {int(v) for v in gmrt_cell_size_meters_options()}
+        except Exception:
+            allowed = {60, 120, 240, 480, 960}
+        try:
+            cell = int(round(float(options.get("cell_size_m", defaults["cell_size_m"]))))
+        except (TypeError, ValueError):
+            cell = int(defaults["cell_size_m"])
+        if cell not in allowed:
+            cell = int(defaults["cell_size_m"])
+        opts["cell_size_m"] = cell
         opts["split_topo_depths"] = bool(
             options.get("split_topo_depths", defaults["split_topo_depths"])
         )

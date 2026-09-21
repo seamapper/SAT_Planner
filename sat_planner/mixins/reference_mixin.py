@@ -436,7 +436,7 @@ class ReferenceMixin:
         split_topo_depths = self._gmrt_split_topo_depths_for_prefix("ref")
         self._download_gmrt_and_load(
             west, east, south, north,
-            resolution=100,
+            resolution=self._gmrt_import_resolution_meters("ref"),
             layer="topo",
             default_filename_prefix="GMRT_Bathy",
             log_func=lambda msg, append=True: self.set_ref_info_text(msg, append=append),
@@ -638,6 +638,10 @@ class ReferenceMixin:
                     params = json.load(f)
                 if isinstance(params, dict):
                     imported_params_geotiff_path = params.get("geotiff_path")
+                    if imported_params_geotiff_path and hasattr(self, "_resolve_import_sidecar_path"):
+                        imported_params_geotiff_path = self._resolve_import_sidecar_path(
+                            imported_params_geotiff_path, dir_name
+                        )
                     imported_params_shapefile_paths = params.get("visualization_shapefile_paths")
                 break
             except Exception as e:
@@ -788,6 +792,10 @@ class ReferenceMixin:
                                     self._update_multiplier_label_dist(dist_mult)
                         except (ValueError, TypeError, ZeroDivisionError):
                             pass
+                    # No params sidecar: clear prior Central Pt Depth until sampled from a grid.
+                    self._depth_at_picked_point = None
+                    if hasattr(self, "central_pt_depth_value_label"):
+                        self.central_pt_depth_value_label.setText("-")
                 if not self.export_name_entry.text().strip():
                     self.export_name_entry.clear()
                     self.export_name_entry.setText(base_name)
@@ -1119,6 +1127,10 @@ class ReferenceMixin:
                         params = json.load(f)
                     if isinstance(params, dict):
                         imported_params_geotiff_path = params.get('geotiff_path')
+                        if imported_params_geotiff_path and hasattr(self, "_resolve_import_sidecar_path"):
+                            imported_params_geotiff_path = self._resolve_import_sidecar_path(
+                                imported_params_geotiff_path, dir_name
+                            )
                         imported_params_shapefile_paths = params.get('visualization_shapefile_paths')
                 except Exception as e:
                     print(f"Warning: Could not load metadata file: {e}")
@@ -1267,6 +1279,11 @@ class ReferenceMixin:
                             except Exception:
                                 pass
 
+                    # No params sidecar: clear prior Central Pt Depth until sampled from a grid.
+                    self._depth_at_picked_point = None
+                    if hasattr(self, "central_pt_depth_value_label"):
+                        self.central_pt_depth_value_label.setText("-")
+
                     # Update export name if not set
                     if not self.export_name_entry.text().strip():
                         self.export_name_entry.clear()
@@ -1283,6 +1300,8 @@ class ReferenceMixin:
             ):
                 self._set_geotiff_nan_cutoff(imported_geojson_nan_cutoff, update_entry=True)
             geotiff_path_to_load = imported_params_geotiff_path or imported_geojson_geotiff_path
+            if geotiff_path_to_load and hasattr(self, "_resolve_import_sidecar_path"):
+                geotiff_path_to_load = self._resolve_import_sidecar_path(geotiff_path_to_load, dir_name)
             if geotiff_path_to_load and hasattr(self, '_load_geotiff_from_path'):
                 if os.path.exists(geotiff_path_to_load):
                     self._load_geotiff_from_path(geotiff_path_to_load)
@@ -1348,6 +1367,8 @@ class ReferenceMixin:
                     msg += " (parameters calculated from lines)"
                 self.set_ref_info_text(msg)
                 geotiff_path_to_load = imported_params_geotiff_path or imported_geojson_geotiff_path
+                if geotiff_path_to_load and hasattr(self, "_resolve_import_sidecar_path"):
+                    geotiff_path_to_load = self._resolve_import_sidecar_path(geotiff_path_to_load, dir_name)
                 self._maybe_prompt_gmrt_download_after_import(
                     geotiff_path=geotiff_path_to_load,
                     download_callback=self._download_and_load_gmrt_after_ref_import,
@@ -2249,13 +2270,16 @@ class ReferenceMixin:
         self._ensure_depth_at_central_point_from_geotiff()
         self._update_export_name()
 
-    def _ensure_depth_at_central_point_from_geotiff(self):
+    def _ensure_depth_at_central_point_from_geotiff(self, force=False):
         """Populate ``_depth_at_picked_point`` from the loaded GeoTIFF at the
         Accuracy central lat/lon when it is not already set.
 
+        ``force=True`` re-samples even if a depth is already cached (used after
+        a post-import GMRT load so Central Pt Depth updates from the new grid).
+
         Safe no-op if no GeoTIFF is loaded, no central coords are entered, or
         the sampled value is NaN/positive elevation (i.e. not bathymetry)."""
-        if getattr(self, "_depth_at_picked_point", None) is not None:
+        if not force and getattr(self, "_depth_at_picked_point", None) is not None:
             return
         if not hasattr(self, "_get_depth_at_point"):
             return

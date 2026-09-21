@@ -737,7 +737,9 @@ class AdcpMixin:
             else None
         )
         geotiff_path = (
-            self._resolve_export_params_geotiff_path(exported_geotiff_path)
+            self._resolve_export_params_geotiff_path(
+                exported_geotiff_path, export_dir=export_dir
+            )
             if hasattr(self, "_resolve_export_params_geotiff_path")
             else (
                 self.current_geotiff_path
@@ -1183,6 +1185,8 @@ class AdcpMixin:
                 self._set_geotiff_nan_cutoff(params.get("geotiff_nan_value"), update_entry=True)
             self._apply_geotiff_viz_params_from_params(params)
             gtp = params.get("geotiff_path")
+            if gtp and hasattr(self, "_resolve_import_sidecar_path"):
+                gtp = self._resolve_import_sidecar_path(gtp, dir_name)
             if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                 self._load_geotiff_from_path(gtp)
 
@@ -1197,6 +1201,10 @@ class AdcpMixin:
         imported_geotiff_path = None
         if params and isinstance(params, dict):
             imported_geotiff_path = params.get("geotiff_path")
+            if imported_geotiff_path and hasattr(self, "_resolve_import_sidecar_path"):
+                imported_geotiff_path = self._resolve_import_sidecar_path(
+                    imported_geotiff_path, dir_name
+                )
         self._maybe_prompt_gmrt_download_after_import(
             geotiff_path=imported_geotiff_path,
             download_callback=self._download_and_load_gmrt_after_adcp_import,
@@ -1214,7 +1222,7 @@ class AdcpMixin:
             east,
             south,
             north,
-            resolution=100,
+            resolution=self._gmrt_import_resolution_meters("adcp"),
             layer="topo",
             default_filename_prefix="GMRT_Bathy",
             log_func=lambda msg, append=True: self.set_adcp_activity_text(msg, append=append),
