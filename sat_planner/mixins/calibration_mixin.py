@@ -1269,13 +1269,13 @@ class CalibrationMixin:
         if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
             lines.append((line_num, 'Pitch', self.pitch_line_points))
             line_num += 1
+        if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
+            lines.append((line_num, 'Roll', self.roll_line_points))
+            line_num += 1
         if hasattr(self, 'heading_lines') and len(self.heading_lines) == 2:
             lines.append((line_num, 'Heading1', self.heading_lines[0]))
             line_num += 1
             lines.append((line_num, 'Heading2', self.heading_lines[1]))
-            line_num += 1
-        if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
-            lines.append((line_num, 'Roll', self.roll_line_points))
             line_num += 1
         if not lines:
             self._show_message("warning","No Data", "No calibration lines to export. Define at least one line.")
