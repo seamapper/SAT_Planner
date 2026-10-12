@@ -1372,7 +1372,7 @@ class CalibrationMixin:
                         "type": "FeatureCollection",
                         "properties": {
                             "geotiff_path": _cal_geotiff,
-                            "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                            "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)),
                             "show_contours_var": bool(getattr(self, "show_contours_var", False)),
                             "contour_interval_m": (
                                 float(self.contour_interval_entry.text())
@@ -1451,7 +1451,7 @@ class CalibrationMixin:
                 except Exception:
                     params['turn_time'] = 5.0
                 params['geotiff_path'] = _cal_geotiff
-                params['geotiff_nan_value'] = float(getattr(self, "geotiff_nan_value", -11000.0))
+                params['geotiff_nan_value'] = float(getattr(self, "geotiff_nan_value", -99999.0))
                 params['show_contours_var'] = bool(getattr(self, "show_contours_var", False))
                 params['contour_interval_m'] = (
                     float(self.contour_interval_entry.text())

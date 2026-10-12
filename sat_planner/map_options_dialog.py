@@ -31,6 +31,10 @@ class MapOptionsDialog(QDialog):
         slope_overlay_band_widgets,
         slope_overlay_opacity_label,
         slope_overlay_opacity_slider,
+        show_depth_overlay_checkbox,
+        depth_overlay_band_widgets,
+        depth_overlay_opacity_label,
+        depth_overlay_opacity_slider,
         elevation_slope_combo,
         shaded_relief_cmap_btn,
         dyn_vert_exag_btn,
@@ -39,7 +43,7 @@ class MapOptionsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Map Options")
         self.setModal(False)
-        self.resize(420, 500)
+        self.resize(420, 620)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -96,7 +100,10 @@ class MapOptionsDialog(QDialog):
         contours_row.addStretch()
         geotiff_layout.addLayout(contours_row)
 
-        geotiff_layout.addWidget(show_slope_overlay_checkbox)
+        slopes_group = QGroupBox("Slopes")
+        slopes_layout = QVBoxLayout(slopes_group)
+        slopes_layout.setSpacing(6)
+        slopes_layout.addWidget(show_slope_overlay_checkbox)
         for band_idx, (min_entry, max_entry, color_btn) in enumerate(slope_overlay_band_widgets):
             slopes_row = QHBoxLayout()
             slopes_row.addWidget(QLabel(f"Range {band_idx + 1}"))
@@ -107,13 +114,37 @@ class MapOptionsDialog(QDialog):
             slopes_row.addWidget(max_entry)
             slopes_row.addWidget(color_btn)
             slopes_row.addStretch()
-            geotiff_layout.addLayout(slopes_row)
+            slopes_layout.addLayout(slopes_row)
 
         opacity_row = QHBoxLayout()
         opacity_row.addWidget(slope_overlay_opacity_label)
         slope_overlay_opacity_slider.setMaximumWidth(160)
         opacity_row.addWidget(slope_overlay_opacity_slider, 1)
-        geotiff_layout.addLayout(opacity_row)
+        slopes_layout.addLayout(opacity_row)
+        geotiff_layout.addWidget(slopes_group)
+
+        depths_group = QGroupBox("Depths")
+        depths_layout = QVBoxLayout(depths_group)
+        depths_layout.setSpacing(6)
+        depths_layout.addWidget(show_depth_overlay_checkbox)
+        for band_idx, (min_entry, max_entry, color_btn) in enumerate(depth_overlay_band_widgets):
+            depths_row = QHBoxLayout()
+            depths_row.addWidget(QLabel(f"Range {band_idx + 1}"))
+            min_entry.setMaximumWidth(60)
+            depths_row.addWidget(min_entry)
+            depths_row.addWidget(QLabel("To"))
+            max_entry.setMaximumWidth(60)
+            depths_row.addWidget(max_entry)
+            depths_row.addWidget(color_btn)
+            depths_row.addStretch()
+            depths_layout.addLayout(depths_row)
+
+        depth_opacity_row = QHBoxLayout()
+        depth_opacity_row.addWidget(depth_overlay_opacity_label)
+        depth_overlay_opacity_slider.setMaximumWidth(160)
+        depth_opacity_row.addWidget(depth_overlay_opacity_slider, 1)
+        depths_layout.addLayout(depth_opacity_row)
+        geotiff_layout.addWidget(depths_group)
 
         layout.addWidget(geotiff_group)
         layout.addStretch()

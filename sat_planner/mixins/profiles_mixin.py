@@ -322,7 +322,8 @@ class ProfilesMixin:
             if hasattr(self, "_apply_geotiff_nan_filter"):
                 self._apply_geotiff_nan_filter(data)
             else:
-                data[data < -11000] = np.nan
+                cutoff = float(getattr(self, "geotiff_nan_value", -99999.0))
+                data[np.isclose(data, cutoff, rtol=0.0, atol=1e-9)] = np.nan
                 data[data >= 0] = np.nan
 
             left, right, bottom, top = extent

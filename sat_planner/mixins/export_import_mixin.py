@@ -1076,7 +1076,7 @@ class ExportImportMixin:
                     ),
                     save_dir,
                 ),
-                'geotiff_nan_value': float(getattr(self, 'geotiff_nan_value', -11000.0)),
+                'geotiff_nan_value': float(getattr(self, 'geotiff_nan_value', -99999.0)),
                 'visualization_shapefile_paths': list(getattr(self, 'visualization_shapefile_paths', []) or []),
                 'show_contours_var': bool(getattr(self, 'show_contours_var', False)),
                 'contour_interval_m': (
@@ -1351,7 +1351,7 @@ class ExportImportMixin:
                 "type": "FeatureCollection",
                 "properties": {
                     "geotiff_path": params_geotiff_path,
-                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)),
                 },
                 "features": geojson_features
             }
@@ -1551,7 +1551,7 @@ class ExportImportMixin:
                     params['survey_speed'] = 8.0  # Default
 
                 params['geotiff_path'] = params_geotiff_path
-                params['geotiff_nan_value'] = float(getattr(self, 'geotiff_nan_value', -11000.0))
+                params['geotiff_nan_value'] = float(getattr(self, 'geotiff_nan_value', -99999.0))
                 params['show_contours_var'] = bool(getattr(self, 'show_contours_var', False))
                 params['contour_interval_m'] = (
                     float(self.contour_interval_entry.text())
@@ -1859,7 +1859,7 @@ class ExportImportMixin:
                 "type": "FeatureCollection",
                 "properties": {
                     "geotiff_path": geotiff_path,
-                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)),
                     "plan_type": "performance",
                 },
                 "features": geojson_features,
@@ -1949,7 +1949,7 @@ class ExportImportMixin:
                 "export_name": export_name,
                 "plan_type": "performance",
                 "geotiff_path": geotiff_path,
-                "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)),
                 "visualization_shapefile_paths": list(getattr(self, 'visualization_shapefile_paths', []) or []),
                 "show_contours_var": bool(getattr(self, "show_contours_var", False)),
                 "contour_interval_m": (

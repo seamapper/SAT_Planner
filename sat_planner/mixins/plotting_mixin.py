@@ -133,6 +133,7 @@ class PlottingMixin:
         self.contour_plot = None
         self.basemap_image_plot = None
         self.slope_overlay_image_plot = None
+        self.depth_overlay_image_plot = None
         self.backscatter_slope_areas_overlay_plot = None
         self.backscatter_raster_plot = None
         if hasattr(self, "canvas"):
@@ -741,6 +742,7 @@ class PlottingMixin:
             self.contour_plot = None
             self.basemap_image_plot = None
             self.slope_overlay_image_plot = None
+            self.depth_overlay_image_plot = None
             self.backscatter_slope_areas_overlay_plot = None
             self.backscatter_raster_plot = None
 
@@ -1186,6 +1188,91 @@ class PlottingMixin:
                     except Exception:
                         pass
                     self.slope_overlay_image_plot = None
+
+            # Plot depth overlay if enabled
+            if (self.geotiff_data_array is not None and self.geotiff_extent is not None and
+                hasattr(self, 'show_depth_overlay_var') and self.show_depth_overlay_var):
+                try:
+                    if hasattr(self, 'depth_overlay_image_plot') and self.depth_overlay_image_plot is not None:
+                        try:
+                            self.depth_overlay_image_plot.remove()
+                        except Exception:
+                            pass
+                        self.depth_overlay_image_plot = None
+
+                    depth_data = self.geotiff_data_array
+                    bands = getattr(self, "depth_overlay_bands", None) or []
+                    overlay = np.zeros((depth_data.shape[0], depth_data.shape[1], 4), dtype=np.float32)
+                    any_band = False
+                    for band in bands:
+                        try:
+                            min_depth = band.get("min")
+                            max_depth = band.get("max")
+                            if min_depth is None or max_depth is None:
+                                continue
+                            if hasattr(self, "_depth_overlay_elevation_bounds"):
+                                min_depth, max_depth = self._depth_overlay_elevation_bounds(
+                                    min_depth, max_depth
+                                )
+                            else:
+                                min_depth = float(min_depth)
+                                max_depth = float(max_depth)
+                                if min_depth > 0 and max_depth > 0:
+                                    min_depth, max_depth = -min_depth, -max_depth
+                                if min_depth > max_depth:
+                                    min_depth, max_depth = max_depth, min_depth
+                        except (TypeError, ValueError):
+                            continue
+
+                        color_hex = str(band.get("color_hex", "#fa8072") or "#fa8072").strip()
+                        if not color_hex.startswith("#"):
+                            color_hex = f"#{color_hex}"
+                        try:
+                            r = int(color_hex[1:3], 16) / 255.0
+                            g = int(color_hex[3:5], 16) / 255.0
+                            b = int(color_hex[5:7], 16) / 255.0
+                        except Exception:
+                            r, g, b = 0.98, 0.50, 0.45
+
+                        mask = (
+                            np.isfinite(depth_data)
+                            & (depth_data >= min_depth)
+                            & (depth_data <= max_depth)
+                        )
+                        if not np.any(mask):
+                            continue
+                        any_band = True
+                        alpha = max(
+                            0.0,
+                            min(1.0, float(getattr(self, "depth_overlay_opacity", 40)) / 100.0),
+                        )
+                        overlay[mask, 0] = r
+                        overlay[mask, 1] = g
+                        overlay[mask, 2] = b
+                        overlay[mask, 3] = alpha
+
+                    if any_band:
+                        self.depth_overlay_image_plot = self.ax.imshow(
+                            overlay,
+                            extent=tuple(self.geotiff_extent),
+                            origin='upper',
+                            zorder=12,
+                            interpolation='bilinear'
+                        )
+                except Exception:
+                    if hasattr(self, 'depth_overlay_image_plot') and self.depth_overlay_image_plot is not None:
+                        try:
+                            self.depth_overlay_image_plot.remove()
+                        except Exception:
+                            pass
+                        self.depth_overlay_image_plot = None
+            else:
+                if hasattr(self, 'depth_overlay_image_plot') and self.depth_overlay_image_plot is not None:
+                    try:
+                        self.depth_overlay_image_plot.remove()
+                    except Exception:
+                        pass
+                    self.depth_overlay_image_plot = None
 
             # Backscatter analysis: magenta overlay for slope between Min and Max (degrees)
             if (self.geotiff_data_array is not None and self.geotiff_extent is not None and
@@ -1937,6 +2024,7 @@ class PlottingMixin:
             self.geotiff_image_plot = None
             self.geotiff_hillshade_plot = None
             self.slope_overlay_image_plot = None
+            self.depth_overlay_image_plot = None
             self.backscatter_slope_areas_overlay_plot = None
             self.backscatter_raster_plot = None
             self.contour_plot = None

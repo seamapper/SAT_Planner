@@ -6,7 +6,7 @@ import os
 import sys
 import traceback
 
-__version__ = "2026.43"
+__version__ = "2026.44"
 
 CONFIG_FILENAME = os.path.join(os.path.expanduser("~"), ".cal_ref_planner_config.json")
 
@@ -51,6 +51,13 @@ DEFAULT_SLOPE_OVERLAY_BANDS = (
     {"min": 10.0, "max": 20.0, "color_hex": "#00ff00"},
     {"min": None, "max": None, "color_hex": "#1e90ff"},  # dodgerblue
     {"min": None, "max": None, "color_hex": "#ff4500"},  # orangered
+)
+
+# GeoTIFF depth overlay bands: min/max elevation/depth (None = undefined), color as #rrggbb
+DEFAULT_DEPTH_OVERLAY_BANDS = (
+    {"min": None, "max": None, "color_hex": "#fa8072"},  # salmon
+    {"min": None, "max": None, "color_hex": "#3cb371"},  # mediumseagreen
+    {"min": None, "max": None, "color_hex": "#6a5acd"},  # slateblue
 )
 
 # Conditional imports for geospatial libraries (re-exported for use by SAT_Planner_PyQt)

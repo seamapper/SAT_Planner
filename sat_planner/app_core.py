@@ -29,7 +29,11 @@ import re
 import threading
 import time
 
-from .constants import DEFAULT_SHADED_RELIEF_CMAP, DEFAULT_SLOPE_OVERLAY_BANDS
+from .constants import (
+    DEFAULT_DEPTH_OVERLAY_BANDS,
+    DEFAULT_SHADED_RELIEF_CMAP,
+    DEFAULT_SLOPE_OVERLAY_BANDS,
+)
 from . import __version__, CONFIG_FILENAME, GEOSPATIAL_LIBS_AVAILABLE
 from .utils_ui import (
     show_message as _show_message_fn,
@@ -118,7 +122,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.geotiff_zoom_level = 1.0  # Current zoom level (1.0 = full resolution)
         self.geotiff_zoom_threshold = 0.1  # Zoom threshold for switching to higher resolution
         self.dynamic_resolution_enabled = True  # Toggle for dynamic resolution feature
-        self.geotiff_nan_value = -11000.0  # Values below this threshold are treated as NaN
+        self.geotiff_nan_value = -99999.0  # Sentinel values equal to this are treated as NaN
 
         # Restored: Variable for controlling elevation/slope overlay
         self.geotiff_display_mode = "elevation_dyn"  # Shaded Relief (dyn V.E. curve + elevation overlay)
@@ -137,6 +141,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.slope_overlay_color_hex = self.slope_overlay_bands[0]["color_hex"]
         self.slope_overlay_opacity = 40  # percent; matches former fixed alpha 0.4
         self.slope_overlay_image_plot = None  # Store slope overlay plot object for removal/update
+
+        # Depth overlay display variables
+        self.show_depth_overlay_var = False  # Default to off
+        self.depth_overlay_bands = [dict(band) for band in DEFAULT_DEPTH_OVERLAY_BANDS]
+        self.depth_overlay_opacity = 40
+        self.depth_overlay_image_plot = None
 
         # Backscatter bathymetry analysis: slope band overlay (magenta), separate from GeoTIFF "Slopes" overlay
         self.backscatter_slope_areas_show_var = False
@@ -565,6 +575,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self._sync_slope_overlay_band_widgets()
         if hasattr(self, "_sync_slope_overlay_opacity_widget"):
             self._sync_slope_overlay_opacity_widget()
+        self._load_depth_overlay_bands()
+        if hasattr(self, "_sync_depth_overlay_band_widgets"):
+            self._sync_depth_overlay_band_widgets()
+        if hasattr(self, "_sync_depth_overlay_opacity_widget"):
+            self._sync_depth_overlay_opacity_widget()
         if hasattr(self, "_refresh_visualization_shapefile_button_state"):
             self._refresh_visualization_shapefile_button_state()
 
@@ -855,6 +870,14 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 )),
                 self.slope_overlay_opacity_label,
                 self.slope_overlay_opacity_slider,
+                self.show_depth_overlay_checkbox,
+                list(zip(
+                    self.depth_overlay_min_entries,
+                    self.depth_overlay_max_entries,
+                    self.depth_overlay_color_btns,
+                )),
+                self.depth_overlay_opacity_label,
+                self.depth_overlay_opacity_slider,
                 self.elevation_slope_combo,
                 self.shaded_relief_cmap_btn,
                 self.dyn_vert_exag_btn,
@@ -1204,6 +1227,42 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.slope_overlay_opacity_slider.setValue(self.slope_overlay_opacity)
         self.slope_overlay_opacity_slider.setToolTip("Slope overlay opacity")
         self.slope_overlay_opacity_slider.valueChanged.connect(self._on_slope_overlay_opacity_changed)
+
+        self.show_depth_overlay_checkbox = QCheckBox("Depths")
+        self.show_depth_overlay_checkbox.setChecked(self.show_depth_overlay_var)
+        self.show_depth_overlay_checkbox.stateChanged.connect(self._on_depth_overlay_checkbox_changed)
+        self.depth_overlay_min_entries = []
+        self.depth_overlay_max_entries = []
+        self.depth_overlay_color_btns = []
+        depth_range_tooltip = (
+            "Enter min and max depth values. Two positive values are treated as "
+            "bathymetric depths and mapped to negative elevations (e.g. 100 to 200 "
+            "→ -200 to -100). Use '-' for min and/or max to leave this range undefined."
+        )
+        for band_idx in range(len(DEFAULT_DEPTH_OVERLAY_BANDS)):
+            min_entry = QLineEdit("-")
+            max_entry = QLineEdit("-")
+            min_entry.setToolTip(depth_range_tooltip)
+            max_entry.setToolTip(depth_range_tooltip)
+            color_btn = QPushButton("")
+            color_btn.setFixedSize(22, 22)
+            color_btn.setToolTip(f"Depth overlay range {band_idx + 1} color")
+            color_btn.clicked.connect(
+                lambda _checked=False, i=band_idx: self._on_depth_overlay_color_button_clicked(i)
+            )
+            self.depth_overlay_min_entries.append(min_entry)
+            self.depth_overlay_max_entries.append(max_entry)
+            self.depth_overlay_color_btns.append(color_btn)
+        if hasattr(self, "_sync_depth_overlay_band_widgets"):
+            self._sync_depth_overlay_band_widgets()
+        self.depth_overlay_opacity = int(getattr(self, "depth_overlay_opacity", 40))
+        self.depth_overlay_opacity_label = QLabel(f"Opacity: {self.depth_overlay_opacity}%")
+        self.depth_overlay_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.depth_overlay_opacity_slider.setMinimum(0)
+        self.depth_overlay_opacity_slider.setMaximum(100)
+        self.depth_overlay_opacity_slider.setValue(self.depth_overlay_opacity)
+        self.depth_overlay_opacity_slider.setToolTip("Depth overlay opacity")
+        self.depth_overlay_opacity_slider.valueChanged.connect(self._on_depth_overlay_opacity_changed)
 
         param_layout.addWidget(geotiff_groupbox)
 

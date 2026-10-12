@@ -472,10 +472,10 @@ class LinePlanningMixin:
                     export_speed = float(self.line_survey_speed_entry.text()) if hasattr(self, 'line_survey_speed_entry') and self.line_survey_speed_entry.text() else 8.0
                 except (ValueError, TypeError):
                     export_speed = 8.0
-                geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "survey_speed": export_speed, "geotiff_path": params_geotiff_path, "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0), "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
+                geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "survey_speed": export_speed, "geotiff_path": params_geotiff_path, "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0), "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
                 export_utils.remove_export_file(geojson_file_path)
                 with open(geojson_file_path, 'w') as f:
-                    json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": params_geotiff_path, "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0)}, "features": [geojson_feature]}, f, indent=2)
+                    json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": params_geotiff_path, "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0)}, "features": [geojson_feature]}, f, indent=2)
             lnw_file_path = None
             lnw_lines = [(export_name, list(self.line_planning_points))]
             if export_hypack and len(self.line_planning_points) >= 2:
@@ -575,7 +575,7 @@ class LinePlanningMixin:
                 params_payload = {
                     "survey_speed": line_speed,
                     "geotiff_path": params_geotiff_path,
-                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)),
                     "show_contours_var": bool(getattr(self, "show_contours_var", False)),
                     "contour_interval_m": (
                         float(self.contour_interval_entry.text())

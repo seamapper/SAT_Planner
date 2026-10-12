@@ -78,9 +78,9 @@ class GeoTIFFMixin:
     def _get_geotiff_nan_cutoff(self):
         """Return current lower-bound cutoff for setting GeoTIFF values to NaN."""
         try:
-            return float(getattr(self, "geotiff_nan_value", -11000.0))
+            return float(getattr(self, "geotiff_nan_value", -99999.0))
         except (TypeError, ValueError):
-            return -11000.0
+            return -99999.0
 
     def _detect_geotiff_nan_cutoff_from_dataset(self):
         """Choose default NaN cutoff from loaded dataset nodata when available."""
@@ -92,7 +92,7 @@ class GeoTIFFMixin:
                     return float(nodata_val)
             except (TypeError, ValueError):
                 pass
-        return -11000.0
+        return -99999.0
 
     def _get_backscatter_nan_cutoff(self):
         """Return current backscatter NaN sentinel value."""
@@ -809,7 +809,7 @@ class GeoTIFFMixin:
                 "type": "FeatureCollection",
                 "properties": {
                     "geotiff_path": params_geotiff_path,
-                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)),
                 },
                 "features": gj_features,
             }
@@ -1005,7 +1005,7 @@ class GeoTIFFMixin:
                     if hasattr(self, "_path_for_params_sidecar")
                     else (self.backscatter_geotiff_path if hasattr(self, "backscatter_geotiff_path") else None)
                 ),
-                "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)),
                 "show_contours_var": bool(getattr(self, "show_contours_var", False)),
                 "contour_interval_m": (
                     float(self.contour_interval_entry.text())
@@ -2337,6 +2337,250 @@ class GeoTIFFMixin:
     def _apply_slope_overlay_max_changed(self):
         """Backward-compatible alias for band 0 max updates."""
         self._apply_slope_overlay_bound_changed(0)
+
+    def _on_depth_overlay_checkbox_changed(self):
+        """Handle checkbox change for showing/hiding depth overlay."""
+        if hasattr(self, "show_depth_overlay_checkbox"):
+            is_checked = self.show_depth_overlay_checkbox.isChecked()
+        else:
+            is_checked = False
+
+        if not GEOSPATIAL_LIBS_AVAILABLE:
+            self._show_message(
+                "warning",
+                "Disabled Feature",
+                "Geospatial libraries not loaded. Cannot show depth overlay.",
+            )
+            self.show_depth_overlay_var = False
+            if hasattr(self, "show_depth_overlay_checkbox"):
+                self.show_depth_overlay_checkbox.setChecked(False)
+            return
+
+        if self.geotiff_data_array is None:
+            self._show_message("warning", "No GeoTIFF", "Load a GeoTIFF first to show depth overlay.")
+            self.show_depth_overlay_var = False
+            if hasattr(self, "show_depth_overlay_checkbox"):
+                self.show_depth_overlay_checkbox.setChecked(False)
+            return
+
+        self.show_depth_overlay_var = is_checked
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_depth_overlay_min_changed(self, band_idx=0):
+        """Handle depth overlay min entry change with a short typing debounce."""
+        timers = getattr(self, "_depth_overlay_min_update_timers", None)
+        if timers is None:
+            self._depth_overlay_min_update_timers = {}
+            timers = self._depth_overlay_min_update_timers
+        if band_idx not in timers:
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda i=band_idx: self._apply_depth_overlay_bound_changed(i))
+            timers[band_idx] = timer
+        timers[band_idx].start(450)
+
+    def _on_depth_overlay_max_changed(self, band_idx=0):
+        """Handle depth overlay max entry change with a short typing debounce."""
+        timers = getattr(self, "_depth_overlay_max_update_timers", None)
+        if timers is None:
+            self._depth_overlay_max_update_timers = {}
+            timers = self._depth_overlay_max_update_timers
+        if band_idx not in timers:
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda i=band_idx: self._apply_depth_overlay_bound_changed(i))
+            timers[band_idx] = timer
+        timers[band_idx].start(450)
+
+    def _parse_depth_overlay_bound_text(self, text):
+        """Parse a depth bound field; '-' / blank → None, else float."""
+        return self._parse_slope_overlay_bound_text(text)
+
+    def _format_depth_overlay_bound(self, value):
+        return self._format_slope_overlay_bound(value)
+
+    def _depth_overlay_elevation_bounds(self, min_depth, max_depth):
+        """Return (lo, hi) elevation bounds for GeoTIFF depth-overlay masking.
+
+        Bathymetry GeoTIFFs store elevations as negative values. If the user
+        enters two positive depths (e.g. 100 to 200), treat them as depths and
+        convert to elevations (-200 to -100).
+        """
+        lo = float(min_depth)
+        hi = float(max_depth)
+        if lo > 0 and hi > 0:
+            lo, hi = -lo, -hi
+        if lo > hi:
+            lo, hi = hi, lo
+        return lo, hi
+
+    def _apply_depth_overlay_bound_changed(self, band_idx=0):
+        """Apply depth overlay min/max updates after debounce delay."""
+        bands = getattr(self, "depth_overlay_bands", None)
+        if not bands or band_idx < 0 or band_idx >= len(bands):
+            return
+        min_entries = getattr(self, "depth_overlay_min_entries", None) or []
+        max_entries = getattr(self, "depth_overlay_max_entries", None) or []
+        try:
+            if band_idx < len(min_entries):
+                bands[band_idx]["min"] = self._parse_depth_overlay_bound_text(min_entries[band_idx].text())
+            if band_idx < len(max_entries):
+                bands[band_idx]["max"] = self._parse_depth_overlay_bound_text(max_entries[band_idx].text())
+        except (ValueError, AttributeError):
+            pass
+        if hasattr(self, "_save_depth_overlay_bands"):
+            self._save_depth_overlay_bands()
+
+        if not (hasattr(self, "show_depth_overlay_var") and self.show_depth_overlay_var):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _normalize_depth_overlay_color_hex(self, color_value, fallback="#fa8072"):
+        """Normalize a #rrggbb depth overlay color string."""
+        return self._normalize_slope_overlay_color_hex(color_value, fallback=fallback)
+
+    def _sync_depth_overlay_band_widgets(self):
+        """Push depth_overlay_bands into min/max/color widgets."""
+        bands = getattr(self, "depth_overlay_bands", None)
+        if not bands:
+            return
+        min_entries = getattr(self, "depth_overlay_min_entries", None) or []
+        max_entries = getattr(self, "depth_overlay_max_entries", None) or []
+        color_btns = getattr(self, "depth_overlay_color_btns", None) or []
+        fallbacks = ("#fa8072", "#3cb371", "#6a5acd")
+        for i, band in enumerate(bands):
+            if i < len(min_entries):
+                min_entries[i].blockSignals(True)
+                min_entries[i].setText(self._format_depth_overlay_bound(band.get("min")))
+                min_entries[i].blockSignals(False)
+            if i < len(max_entries):
+                max_entries[i].blockSignals(True)
+                max_entries[i].setText(self._format_depth_overlay_bound(band.get("max")))
+                max_entries[i].blockSignals(False)
+            if i < len(color_btns):
+                color_hex = self._normalize_depth_overlay_color_hex(
+                    band.get("color_hex"),
+                    fallback=fallbacks[min(i, 2)],
+                )
+                band["color_hex"] = color_hex
+                color_btns[i].setStyleSheet(
+                    f"QPushButton {{ background-color: {color_hex}; border: 1px solid #555; }}"
+                )
+
+    def _update_depth_overlay_color_button(self, band_idx=None):
+        """Refresh GeoTIFF depth overlay color swatch button(s)."""
+        if band_idx is None:
+            self._sync_depth_overlay_band_widgets()
+            return
+        bands = getattr(self, "depth_overlay_bands", None) or []
+        color_btns = getattr(self, "depth_overlay_color_btns", None) or []
+        if band_idx < 0 or band_idx >= len(bands) or band_idx >= len(color_btns):
+            return
+        fallback = ("#fa8072", "#3cb371", "#6a5acd")[min(band_idx, 2)]
+        color_hex = self._normalize_depth_overlay_color_hex(
+            bands[band_idx].get("color_hex"), fallback=fallback
+        )
+        bands[band_idx]["color_hex"] = color_hex
+        color_btns[band_idx].setStyleSheet(
+            f"QPushButton {{ background-color: {color_hex}; border: 1px solid #555; }}"
+        )
+
+    def _on_depth_overlay_color_button_clicked(self, band_idx=0):
+        """Pick GeoTIFF depth overlay color for a band and redraw if visible."""
+        bands = getattr(self, "depth_overlay_bands", None) or []
+        if band_idx < 0 or band_idx >= len(bands):
+            return
+        chosen = QColorDialog.getColor(
+            parent=self, title=f"Choose Depth Overlay Color (Range {band_idx + 1})"
+        )
+        if not chosen.isValid():
+            return
+        fallback = ("#fa8072", "#3cb371", "#6a5acd")[min(band_idx, 2)]
+        bands[band_idx]["color_hex"] = self._normalize_depth_overlay_color_hex(
+            chosen.name(), fallback=fallback
+        )
+        self._update_depth_overlay_color_button(band_idx)
+        if hasattr(self, "_save_depth_overlay_bands"):
+            self._save_depth_overlay_bands()
+        if not getattr(self, "show_depth_overlay_var", False):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _on_depth_overlay_opacity_changed(self, value):
+        """Update GeoTIFF depth overlay opacity and redraw if visible."""
+        try:
+            opacity = max(0, min(100, int(value)))
+        except (TypeError, ValueError):
+            opacity = 40
+        self.depth_overlay_opacity = opacity
+        if hasattr(self, "depth_overlay_opacity_label"):
+            self.depth_overlay_opacity_label.setText(f"Opacity: {opacity}%")
+        if hasattr(self, "_save_depth_overlay_opacity"):
+            self._save_depth_overlay_opacity()
+        elif hasattr(self, "_save_depth_overlay_bands"):
+            self._save_depth_overlay_bands()
+        if not getattr(self, "show_depth_overlay_var", False):
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_data_array is None:
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            pass
+
+    def _sync_depth_overlay_opacity_widget(self):
+        """Push saved opacity into the depth slider/label."""
+        try:
+            opacity = max(0, min(100, int(getattr(self, "depth_overlay_opacity", 40))))
+        except (TypeError, ValueError):
+            opacity = 40
+        self.depth_overlay_opacity = opacity
+        slider = getattr(self, "depth_overlay_opacity_slider", None)
+        if slider is not None:
+            slider.blockSignals(True)
+            slider.setValue(opacity)
+            slider.blockSignals(False)
+        label = getattr(self, "depth_overlay_opacity_label", None)
+        if label is not None:
+            label.setText(f"Opacity: {opacity}%")
 
     def _on_backscatter_slope_areas_checkbox_changed(self):
         """Show/hide Backscatter bathymetry slope band overlay (magenta)."""

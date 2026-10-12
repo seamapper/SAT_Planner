@@ -847,7 +847,7 @@ class AdcpMixin:
                 "type": "FeatureCollection",
                 "properties": {
                     "geotiff_path": geotiff_path,
-                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)),
                     "plan_type": "adcp",
                     "circle_diameter_m": diameter_m,
                     "survey_speed_kts": speed_kts,
@@ -918,7 +918,7 @@ class AdcpMixin:
                 "export_name": export_name,
                 "plan_type": "adcp",
                 "geotiff_path": geotiff_path,
-                "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -11000.0)),
+                "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)),
                 "circle_diameter_m": diameter_m,
                 "survey_speed_kts": speed_kts,
                 "turn_time_min": turn_min,

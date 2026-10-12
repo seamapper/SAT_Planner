@@ -155,6 +155,17 @@ class DeferredParamsMixin:
                 entry, lambda _w, i=band_idx: self._on_slope_overlay_max_changed(i)
             )
 
+        depth_min_entries = getattr(self, "depth_overlay_min_entries", None) or []
+        depth_max_entries = getattr(self, "depth_overlay_max_entries", None) or []
+        for band_idx, entry in enumerate(depth_min_entries):
+            self._bind_deferred_param(
+                entry, lambda _w, i=band_idx: self._on_depth_overlay_min_changed(i)
+            )
+        for band_idx, entry in enumerate(depth_max_entries):
+            self._bind_deferred_param(
+                entry, lambda _w, i=band_idx: self._on_depth_overlay_max_changed(i)
+            )
+
         cal_lead = getattr(self, "cal_lead_in_entry", None)
         if cal_lead is not None:
             self._bind_deferred_param(cal_lead, self._apply_cal_survey_info_commit)
