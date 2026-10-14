@@ -4699,7 +4699,10 @@ class GeoTIFFMixin:
             return
         if not hasattr(self, 'geotiff_extent') or self.geotiff_extent is None:
             return
-        if not hasattr(self, 'geotiff_display_mode') or self.geotiff_display_mode not in ('elevation', 'elevation_dyn'):
+        depth_modes_on = bool(self._active_kongsberg_depth_modes()) if hasattr(self, "_active_kongsberg_depth_modes") else False
+        if not depth_modes_on and (
+            not hasattr(self, 'geotiff_display_mode') or self.geotiff_display_mode not in ('elevation', 'elevation_dyn')
+        ):
             return
         if not hasattr(self, 'geotiff_image_plot') or self.geotiff_image_plot is None:
             return

@@ -6,12 +6,21 @@ import textwrap
 import traceback
 import numpy as np
 import matplotlib.image as mpimg
-from matplotlib.colors import LightSource
+from matplotlib.cm import ScalarMappable
+from matplotlib.colors import LightSource, ListedColormap, Normalize, to_rgb
 from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from matplotlib.patches import FancyArrowPatch, Polygon
 from matplotlib.ticker import FuncFormatter
 
-from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, CRSError, PLANNING_PLACEHOLDER_TEXT
+from sat_planner.constants import (
+    DEPTH_MODE_NONE_LABEL,
+    GEOSPATIAL_LIBS_AVAILABLE,
+    KONGSBERG_DEPTH_MODES,
+    PLANNING_PLACEHOLDER_TEXT,
+    CRSError,
+    kongsberg_depth_mode_indices,
+    pyproj,
+)
 from sat_planner.utils_geo import decimal_degrees_to_ddm
 from sat_planner.utils_ui import get_about_program_info
 
@@ -717,6 +726,150 @@ class PlottingMixin:
                 keep[lbl] = True
         return keep[labels]
 
+    def _active_kongsberg_depth_modes(self):
+        """Return the selected system's depth-mode bands, or None when the overlay is off."""
+        if not getattr(self, "show_depth_modes_var", False):
+            return None
+        system = getattr(self, "depth_mode_system_var", DEPTH_MODE_NONE_LABEL)
+        return KONGSBERG_DEPTH_MODES.get(system)
+
+    def _depth_mode_name_at_elevation(self, elevation):
+        """Name of the depth mode at an elevation, or None when the depth is outside every mode."""
+        bands = self._active_kongsberg_depth_modes()
+        if not bands or elevation is None:
+            return None
+        try:
+            elevation = float(elevation)
+        except (TypeError, ValueError):
+            return None
+        if np.isnan(elevation):
+            return None
+        index = int(kongsberg_depth_mode_indices(np.array([-elevation]), bands)[0])
+        if index < 0:
+            return None
+        return bands[index]["name"]
+
+    def _on_show_depth_modes_toggled(self, checked):
+        """Enable the system list and recolor bathymetry when Show Kongsberg Depth Modes changes."""
+        self.show_depth_modes_var = bool(checked)
+        if hasattr(self, "depth_mode_system_combo"):
+            self.depth_mode_system_combo.setEnabled(bool(checked))
+        self._replot_for_depth_modes()
+
+    def _on_depth_mode_system_changed(self, system_name):
+        """Recolor bathymetry when a Kongsberg system is chosen."""
+        self.depth_mode_system_var = system_name
+        if not getattr(self, "show_depth_modes_var", False):
+            return
+        self._replot_for_depth_modes()
+
+    def _replot_for_depth_modes(self):
+        """Redraw the map, keeping the current view, after a depth-mode control change."""
+        if not hasattr(self, "canvas") or not hasattr(self, "ax"):
+            return
+        try:
+            xlim = self.ax.get_xlim()
+            ylim = self.ax.get_ylim()
+            self._plot_survey_plan(preserve_view_limits=True)
+            if xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            traceback.print_exc()
+
+    def _depth_mode_range_label(self, band):
+        """Legend text for one mode, with the shared boundary shown on the deeper mode."""
+        min_m = int(band["min_m"])
+        max_m = band["max_m"]
+        if max_m is None:
+            return f"{band['name']}\n≥{min_m:,} m"
+        return f"{band['name']}\n{min_m:,}–{int(max_m):,} m"
+
+    def _visible_elevation_limits(self, data):
+        """Min/max elevation in the current axes window, ignoring NaNs."""
+        xlim = self.ax.get_xlim()
+        ylim = self.ax.get_ylim()
+        left, right, bottom, top = tuple(self.geotiff_extent)
+        nrows, ncols = data.shape
+        width = right - left
+        height = top - bottom
+        if width == 0 or height == 0:
+            return None, None
+        col_min = int(np.clip((min(xlim) - left) / width * (ncols - 1), 0, ncols - 1))
+        col_max = int(np.clip((max(xlim) - left) / width * (ncols - 1), 0, ncols - 1))
+        row_min = int(np.clip((top - max(ylim)) / height * (nrows - 1), 0, nrows - 1))
+        row_max = int(np.clip((top - min(ylim)) / height * (nrows - 1), 0, nrows - 1))
+        r0, r1 = sorted([row_min, row_max])
+        c0, c1 = sorted([col_min, col_max])
+        visible = data[r0:r1 + 1, c0:c1 + 1]
+        if visible.size > 0 and not np.all(np.isnan(visible)):
+            return float(np.nanmin(visible)), float(np.nanmax(visible))
+        if np.all(np.isnan(data)):
+            return None, None
+        return float(np.nanmin(data)), float(np.nanmax(data))
+
+    def _draw_kongsberg_depth_mode_overlay(self, bands):
+        """Paint depth-mode colors over the Shaded Relief hillshade.
+
+        Cells shallower than the first mode keep the normal elevation colors.
+        Mode cells use one solid color at the same half opacity as Shaded Relief.
+        """
+        elev = self.geotiff_data_array
+        depth_m = -np.asarray(elev, dtype=float)
+        mode_index = kongsberg_depth_mode_indices(depth_m, bands)
+        shallow = np.isfinite(elev) & (mode_index < 0)
+
+        self.geotiff_image_plot = None
+        self.depth_mode_image_plot = None
+        if np.any(shallow):
+            cmap = self._normalize_shaded_relief_cmap(getattr(self, "shaded_relief_cmap", None))
+            masked_elev = np.ma.array(elev, mask=~shallow)
+            vmin_elev, vmax_elev = self._visible_elevation_limits(elev)
+            imshow_kwargs = dict(
+                extent=tuple(self.geotiff_extent),
+                cmap=cmap,
+                origin="upper",
+                alpha=0.5,
+                zorder=-1,
+            )
+            if vmin_elev is not None and vmax_elev is not None and vmin_elev != vmax_elev:
+                imshow_kwargs["vmin"] = vmin_elev
+                imshow_kwargs["vmax"] = vmax_elev
+            self.geotiff_image_plot = self.ax.imshow(masked_elev, **imshow_kwargs)
+
+        rgba = np.zeros(elev.shape + (4,), dtype=np.float32)
+        for i, band in enumerate(bands):
+            selected = mode_index == i
+            if not np.any(selected):
+                continue
+            rgba[selected, :3] = to_rgb(band["color_hex"])
+            rgba[selected, 3] = 0.5
+        self.depth_mode_image_plot = self.ax.imshow(
+            rgba,
+            extent=tuple(self.geotiff_extent),
+            origin="upper",
+            interpolation="nearest",
+            zorder=-1,
+        )
+
+        cmap = ListedColormap([band["color_hex"] for band in bands])
+        mappable = ScalarMappable(cmap=cmap, norm=Normalize(vmin=0, vmax=len(bands)))
+        mappable.set_array(np.array([]))
+        self.elevation_colorbar = self.figure.colorbar(
+            mappable,
+            ax=self.ax,
+            orientation="vertical",
+            label="Depth mode",
+            pad=0.02,
+            fraction=0.1,
+            shrink=1.0,
+            aspect=20,
+        )
+        self.elevation_colorbar.set_ticks([i + 0.5 for i in range(len(bands))])
+        self.elevation_colorbar.set_ticklabels([self._depth_mode_range_label(band) for band in bands])
+        self.elevation_colorbar.ax.tick_params(labelsize=7)
+
     def _plot_survey_plan(self, preserve_view_limits=True):
         try:
             if not self._has_map_planning_content():
@@ -739,6 +892,7 @@ class PlottingMixin:
             # After clearing, reset image plot references (do not try to remove them)
             self.geotiff_image_plot = None
             self.geotiff_hillshade_plot = None
+            self.depth_mode_image_plot = None
             self.contour_plot = None
             self.basemap_image_plot = None
             self.slope_overlay_image_plot = None
@@ -774,13 +928,15 @@ class PlottingMixin:
             if self.geotiff_data_array is not None and self.geotiff_extent is not None:
                 # Reset flag for logging vertical exaggeration (only log once per plot cycle)
                 self._vert_exag_logged_this_cycle = False
-                if self.hillshade_vs_slope_viz_mode == "hillshade":
+                depth_mode_bands = self._active_kongsberg_depth_modes()
+                if self.hillshade_vs_slope_viz_mode == "hillshade" or depth_mode_bands:
                     # Use multidirectional hillshade: average of 4 azimuths
                     masked_data = np.ma.array(self.geotiff_data_array, mask=np.isnan(self.geotiff_data_array))
                     data_for_hillshade = np.nan_to_num(masked_data.filled(np.nanmin(self.geotiff_data_array)))
                     # Calculate adaptive vertical exaggeration based on elevation range
                     # Hillshade-based display modes use the dyn V.E. curve.
-                    use_inverted_vert_exag = self.geotiff_display_mode in ("elevation_dyn", "hillshade_only", "slope")
+                    use_inverted_vert_exag = bool(depth_mode_bands) or self.geotiff_display_mode in (
+                        "elevation_dyn", "hillshade_only", "slope")
                     vert_exag = self._calculate_adaptive_vert_exag(
                         self.geotiff_data_array, inverted=use_inverted_vert_exag)
                     # Log vertical exaggeration to activity log (once per plot cycle)
@@ -809,8 +965,11 @@ class PlottingMixin:
                                                                 cmap='gray', origin='upper',
                                                                 zorder=-2)  # Plot beneath everything
 
-                    # Restored: Conditional plotting for elevation or slope overlay
-                    if self.geotiff_display_mode in ("elevation", "elevation_dyn"):
+                    # Restored: Conditional plotting for elevation or slope overlay.
+                    # Depth modes reuse this hillshade and replace the elevation colors.
+                    if depth_mode_bands:
+                        self._draw_kongsberg_depth_mode_overlay(depth_mode_bands)
+                    elif self.geotiff_display_mode in ("elevation", "elevation_dyn"):
                         display_data = self.geotiff_data_array
                         cmap = self._normalize_shaded_relief_cmap(
                             getattr(self, "shaded_relief_cmap", None)
@@ -1060,7 +1219,10 @@ class PlottingMixin:
                             # Plot contours using matplotlib contour
                             # Use cyan color when in shaded slope, hillshade, or slope mode, black for shaded relief
                             if hasattr(self, 'geotiff_display_mode'):
-                                contour_color = 'cyan' if self.geotiff_display_mode in ["slope", "hillshade_only", "slope_viz"] else 'black'
+                                contour_color = 'cyan' if (
+                                    not depth_mode_bands
+                                    and self.geotiff_display_mode in ["slope", "hillshade_only", "slope_viz"]
+                                ) else 'black'
                             else:
                                 contour_color = 'black'
                             self.contour_plot = self.ax.contour(lon_mesh, lat_mesh, bathymetry_data_flipped,
@@ -2023,6 +2185,7 @@ class PlottingMixin:
             self.initial_geotiff_ylim = None
             self.geotiff_image_plot = None
             self.geotiff_hillshade_plot = None
+            self.depth_mode_image_plot = None
             self.slope_overlay_image_plot = None
             self.depth_overlay_image_plot = None
             self.backscatter_slope_areas_overlay_plot = None

@@ -33,6 +33,8 @@ from .constants import (
     DEFAULT_DEPTH_OVERLAY_BANDS,
     DEFAULT_SHADED_RELIEF_CMAP,
     DEFAULT_SLOPE_OVERLAY_BANDS,
+    DEPTH_MODE_NONE_LABEL,
+    KONGSBERG_DEPTH_MODE_SYSTEMS,
 )
 from . import __version__, CONFIG_FILENAME, GEOSPATIAL_LIBS_AVAILABLE
 from .utils_ui import (
@@ -128,6 +130,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.geotiff_display_mode = "elevation_dyn"  # Shaded Relief (dyn V.E. curve + elevation overlay)
 
         self.hillshade_vs_slope_viz_mode = "hillshade"  # "hillshade" or "slope_viz" (for main underlay)
+        self.show_depth_modes_var = False
+        self.depth_mode_system_var = DEPTH_MODE_NONE_LABEL
 
         # Contour display variables
         self.show_contours_var = False  # Default to off
@@ -1434,6 +1438,28 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_plot_control_layout = QVBoxLayout(ref_plot_control_groupbox)
         ref_plot_control_layout.setSpacing(0)
         ref_plot_control_layout.setContentsMargins(9, 9, 9, 9)
+
+        depth_mode_row = QWidget()
+        depth_mode_layout = QHBoxLayout(depth_mode_row)
+        depth_mode_layout.setContentsMargins(0, 0, 0, 0)
+        depth_mode_layout.setSpacing(6)
+        self.show_depth_modes_checkbox = QCheckBox("Show Kongsberg Depth Modes")
+        self.show_depth_modes_checkbox.setChecked(False)
+        self.show_depth_modes_checkbox.setToolTip(
+            "Color bathymetry by the selected Kongsberg system's depth modes"
+        )
+        self.show_depth_modes_checkbox.toggled.connect(self._on_show_depth_modes_toggled)
+        self.depth_mode_system_combo = QComboBox()
+        self.depth_mode_system_combo.blockSignals(True)
+        self.depth_mode_system_combo.addItem(DEPTH_MODE_NONE_LABEL)
+        self.depth_mode_system_combo.addItems(list(KONGSBERG_DEPTH_MODE_SYSTEMS))
+        self.depth_mode_system_combo.setEnabled(False)
+        self.depth_mode_system_combo.blockSignals(False)
+        self.depth_mode_system_combo.currentTextChanged.connect(self._on_depth_mode_system_changed)
+        depth_mode_layout.addWidget(self.show_depth_modes_checkbox)
+        depth_mode_layout.addWidget(self.depth_mode_system_combo, 1)
+        ref_plot_control_layout.addWidget(depth_mode_row)
+        ref_plot_control_layout.addSpacing(3)
 
         self.zoom_to_plan_btn = QPushButton("Zoom to Accuracy Survey Plan")
         self.zoom_to_plan_btn.clicked.connect(self._zoom_to_plan)

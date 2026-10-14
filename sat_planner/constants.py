@@ -60,6 +60,79 @@ DEFAULT_DEPTH_OVERLAY_BANDS = (
     {"min": None, "max": None, "color_hex": "#6a5acd"},  # slateblue
 )
 
+# Kongsberg depth modes. Depths are positive down, in meters.
+# min_m is inclusive. A shared boundary belongs to the deeper mode, so max_m is
+# exclusive. max_m None means the mode continues to full ocean depth.
+# Color is chosen by mode name, so the same name matches across systems.
+DEPTH_MODE_NONE_LABEL = "No system selected"
+
+DEPTH_MODE_COLORS = {
+    "Very Shallow": "#EEBABA",
+    "Shallow": "#FF4B4B",
+    "Medium": "#FFB84F",
+    "Deep": "#FFF529",
+    "Deeper": "#33CC33",
+    "Very Deep": "#1DD4FF",
+    "Extra Deep": "#FF40FF",
+    "Extreme Deep": "#9966FF",
+}
+
+
+def _kongsberg_modes(specs):
+    return tuple(
+        {
+            "name": name,
+            "min_m": min_m,
+            "max_m": max_m,
+            "color_hex": DEPTH_MODE_COLORS[name],
+        }
+        for name, min_m, max_m in specs
+    )
+
+
+KONGSBERG_DEPTH_MODES = {
+    "EM712": _kongsberg_modes((
+        ("Very Shallow", 2, 100),
+        ("Shallow", 100, 200),
+        ("Medium", 200, 300),
+        ("Deep", 300, 500),
+        ("Very Deep", 500, 1000),
+        ("Extra Deep", 1000, None),
+    )),
+    "EM304": _kongsberg_modes((
+        ("Shallow", 10, 250),
+        ("Medium", 250, 750),
+        ("Deep", 750, 1000),
+        ("Deeper", 1000, 3300),
+        ("Very Deep", 3300, 5000),
+        ("Extra Deep", 5000, 7000),
+        ("Extreme Deep", 7000, None),
+    )),
+    "EM124": _kongsberg_modes((
+        ("Shallow", 10, 450),
+        ("Medium", 450, 1000),
+        ("Deep", 1000, 2600),
+        ("Deeper", 2600, 9000),
+        ("Very Deep", 9000, None),
+    )),
+}
+KONGSBERG_DEPTH_MODE_SYSTEMS = ("EM712", "EM304", "EM124")
+
+
+def kongsberg_depth_mode_indices(depth_m, bands):
+    """Mode index for each positive-down depth. -1 means no mode (too shallow or NaN).
+
+    Bands must be shallow-to-deep. A depth equal to a boundary takes the deeper mode.
+    """
+    import numpy as np
+
+    depth = np.asarray(depth_m, dtype=float)
+    indices = np.full(depth.shape, -1, dtype=np.int16)
+    finite = np.isfinite(depth)
+    for i, band in enumerate(bands):
+        indices = np.where(finite & (depth >= band["min_m"]), i, indices)
+    return indices
+
 # Conditional imports for geospatial libraries (re-exported for use by SAT_Planner_PyQt)
 GEOSPATIAL_LIBS_AVAILABLE = True
 rasterio = None

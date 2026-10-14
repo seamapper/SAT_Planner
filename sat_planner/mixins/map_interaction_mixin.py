@@ -1544,6 +1544,9 @@ class MapInteractionMixin:
         lat_str = decimal_degrees_to_ddm(mouse_lat, is_latitude=True)
         lon_str = decimal_degrees_to_ddm(mouse_lon, is_latitude=False)
         info_str = f"Lat: {lat_str}\nLon: {lon_str}\nElevation: {elev_str}\nSlope: {slope_str}"
+        if hasattr(self, "_active_kongsberg_depth_modes") and self._active_kongsberg_depth_modes():
+            mode_name = self._depth_mode_name_at_elevation(elevation)
+            info_str += f"\nDepth Mode: {mode_name if mode_name else '-'}"
         if getattr(self, "measurement_tool_mode", False):
             start_point = getattr(self, "measurement_start_point", None)
             if start_point is None:
