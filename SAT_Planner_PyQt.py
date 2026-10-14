@@ -11,6 +11,18 @@ Copyright (c) 2025, UNH/CCOM-JHC. BSD 3-Clause License (see LICENSE in repo root
 """
 import sys
 import os
+
+# Fledermaus ships DLLs that collide with conda rasterio/GDAL. Drop any
+# Fledermaus folder from this process only so the system PATH stays unchanged.
+def _is_fledermaus_path(entry):
+    parts = os.path.normcase(os.path.normpath(entry)).split(os.sep)
+    return "fledermaus" in parts
+
+os.environ["PATH"] = os.pathsep.join(
+    entry for entry in os.environ.get("PATH", "").split(os.pathsep)
+    if entry and not _is_fledermaus_path(entry)
+)
+
 # Import geospatial libs here so PyInstaller (one-file exe) traces and bundles them.
 # They are used via sat_planner.constants; without this, the exe misses them after refactoring.
 try:
