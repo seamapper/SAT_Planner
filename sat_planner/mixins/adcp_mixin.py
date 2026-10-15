@@ -334,6 +334,7 @@ class AdcpMixin:
             self.adcp_clear_btn.setEnabled(self._adcp_plan_has_any_geometry())
         if hasattr(self, "adcp_show_info_btn"):
             self.adcp_show_info_btn.setEnabled(self._adcp_plan_complete())
+        self._adcp_update_next_pick_prompt(c1_center, c1_done, c2_center, c2_done)
         if hasattr(self, "_update_shared_survey_io_ui"):
             self._update_shared_survey_io_ui()
         if hasattr(self, "adcp_show_direction_checkbox"):
@@ -342,6 +343,25 @@ class AdcpMixin:
                 or getattr(self, "adcp_circle2_segments", None)
             )
             self.adcp_show_direction_checkbox.setEnabled(has_geotiff and has_segments)
+
+    def _adcp_update_next_pick_prompt(self, c1_center, c1_done, c2_center, c2_done):
+        """Highlight the next pick button's text until that point is chosen."""
+        if not hasattr(self, "_set_button_text_emphasis"):
+            return
+        if c1_center and not c1_done:
+            next_attr = "adcp_pick_circle1_start_btn"
+        elif c1_done and not c2_center:
+            next_attr = "adcp_pick_circle2_center_btn"
+        elif c2_center and not c2_done:
+            next_attr = "adcp_pick_circle2_start_btn"
+        else:
+            next_attr = None
+        for attr in (
+            "adcp_pick_circle1_start_btn",
+            "adcp_pick_circle2_center_btn",
+            "adcp_pick_circle2_start_btn",
+        ):
+            self._set_button_text_emphasis(getattr(self, attr, None), attr == next_attr)
 
     def _on_adcp_show_direction_changed(self, *_args):
         if hasattr(self, "_update_travel_direction_arrows"):

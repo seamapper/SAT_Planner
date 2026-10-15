@@ -9,6 +9,7 @@ import math
 import os
 import shutil
 
+from PyQt6.QtGui import QColor, QFont, QPalette
 from PyQt6.QtWidgets import (
     QFileDialog,
     QDialog,
@@ -538,12 +539,82 @@ class ExportImportMixin:
             return False
         return True
 
+    def _survey_line_defined(self, points):
+        """True when a line has two coordinate endpoints."""
+        if not points or len(points) != 2:
+            return False
+        return all(pt is not None and len(pt) >= 2 for pt in points)
+
+    def _survey_plan_ready_for_export(self, tab_index):
+        """True when every part of the current test type has been generated."""
+        if tab_index == 0:
+            headings = getattr(self, "heading_lines", None) or []
+            return (
+                self._survey_line_defined(getattr(self, "pitch_line_points", None))
+                and self._survey_line_defined(getattr(self, "roll_line_points", None))
+                and len(headings) >= 2
+                and self._survey_line_defined(headings[0])
+                and self._survey_line_defined(headings[1])
+            )
+        if tab_index == 1:
+            if not getattr(self, "survey_lines_data", None):
+                return False
+            try:
+                passes = int(self.crossline_passes_entry.text()) if self.crossline_passes_entry.text() else 2
+            except (AttributeError, TypeError, ValueError):
+                passes = 2
+            if passes > 0:
+                return self._survey_line_defined(getattr(self, "cross_line_data", None))
+            return True
+        if tab_index == 2:
+            return len(getattr(self, "line_planning_points", None) or []) >= 2
+        if tab_index == 3:
+            centerline = getattr(self, "backscatter_box_centerline", None)
+            return (
+                centerline is not None
+                and len(centerline) == 2
+                and centerline[0] is not None
+                and centerline[1] is not None
+            )
+        if tab_index == 4:
+            return len(getattr(self, "performance_test_lines_data", None) or []) == 4
+        if tab_index == 5 and hasattr(self, "_adcp_plan_complete"):
+            return bool(self._adcp_plan_complete())
+        return False
+
     def _shared_survey_io_export_enabled(self, tab_index):
         if tab_index == 5 and hasattr(self, "_adcp_plan_complete"):
             return self._adcp_plan_complete()
         if self._survey_io_spec(tab_index).get("requires_geospatial") and not GEOSPATIAL_LIBS_AVAILABLE:
             return False
         return True
+
+    _SHOW_TEST_INFO_BUTTONS = (
+        "cal_show_stats_btn",
+        "ref_show_info_btn",
+        "line_show_info_btn",
+        "backscatter_show_info_btn",
+        "performance_show_test_info_btn",
+        "adcp_show_info_btn",
+    )
+
+    def _set_button_text_emphasis(self, button, emphasized):
+        """Orange bold label text, or the normal label, without changing the button face."""
+        if button is None:
+            return
+        button.setStyleSheet("")
+        text_color = (
+            QColor(255, 165, 0)
+            if emphasized
+            else self.palette().color(QPalette.ColorRole.ButtonText)
+        )
+        palette = button.palette()
+        for group in (QPalette.ColorGroup.Active, QPalette.ColorGroup.Inactive):
+            palette.setColor(group, QPalette.ColorRole.ButtonText, text_color)
+        button.setPalette(palette)
+        font = QFont(button.font())
+        font.setBold(bool(emphasized))
+        button.setFont(font)
 
     def _update_shared_survey_io_ui(self):
         if not hasattr(self, "param_notebook") or not hasattr(self, "shared_import_btn"):
@@ -555,6 +626,10 @@ class ExportImportMixin:
         self.shared_export_btn.setText(spec["export_label"])
         self.shared_import_btn.setEnabled(self._shared_survey_io_import_enabled(tab_index))
         self.shared_export_btn.setEnabled(self._shared_survey_io_export_enabled(tab_index))
+        plan_ready = self._survey_plan_ready_for_export(tab_index)
+        self._set_button_text_emphasis(self.shared_export_btn, plan_ready)
+        info_attr = self._SHOW_TEST_INFO_BUTTONS[tab_index]
+        self._set_button_text_emphasis(getattr(self, info_attr, None), plan_ready)
 
     def _import_has_planning_geotiff(self, geotiff_path=None):
         """True when the imported survey references an existing planning GeoTIFF.

@@ -2152,6 +2152,9 @@ class PlottingMixin:
             if hasattr(self, "_connect_map_axis_callbacks"):
                 self._connect_map_axis_callbacks()
 
+            if hasattr(self, "_update_shared_survey_io_ui"):
+                self._update_shared_survey_io_ui()
+
             self.canvas.draw_idle()
 
         except Exception as e:
@@ -2312,6 +2315,8 @@ class PlottingMixin:
                 self._show_map_planning_placeholder()
             if hasattr(self, "_show_profile_planning_placeholder"):
                 self._show_profile_planning_placeholder()
+            if hasattr(self, "_update_shared_survey_io_ui"):
+                self._update_shared_survey_io_ui()
             return
 
         # Reset plot elements
