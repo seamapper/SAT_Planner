@@ -32,6 +32,8 @@ class PlottingMixin:
         """True when the map has bathymetry or any survey/plan geometry to display."""
         if self.geotiff_data_array is not None and self.geotiff_extent is not None:
             return True
+        if getattr(self, "topography_data_array", None) is not None and getattr(self, "topography_extent", None) is not None:
+            return True
         if getattr(self, "survey_lines_data", None):
             return True
         if getattr(self, "cross_line_data", None):
@@ -508,6 +510,48 @@ class PlottingMixin:
             if not has_any_colorbar and hasattr(self, '_axes_pos_with_colorbar'):
                 delattr(self, '_axes_pos_with_colorbar')
 
+    def _multidirectional_hillshade(self, data, vert_exag, altitude=45):
+        """Average hillshades from the four directions used by Shaded Relief."""
+        hillshades = []
+        for azimuth in (45, 135, 225, 315):
+            light = LightSource(azdeg=azimuth, altdeg=altitude)
+            hillshades.append(light.hillshade(data, vert_exag=vert_exag))
+        return np.mean(hillshades, axis=0)
+
+    def _draw_topography_underlay(self):
+        """Draw the land GeoTIFF under every other map layer."""
+        data = getattr(self, "topography_data_array", None)
+        extent = getattr(self, "topography_extent", None)
+        self.topography_hillshade_plot = None
+        self.topography_image_plot = None
+        if data is None or extent is None or not np.any(np.isfinite(data)):
+            return
+        finite = np.isfinite(data)
+        filled = np.nan_to_num(data, nan=float(np.nanmin(data)))
+        vert_exag = self._calculate_adaptive_vert_exag(data, inverted=True)
+        hillshade = self._multidirectional_hillshade(filled, vert_exag)
+        masked_hillshade = np.ma.masked_where(~finite, hillshade)
+        self.topography_hillshade_plot = self.ax.imshow(
+            masked_hillshade,
+            extent=tuple(extent),
+            cmap="gray",
+            origin="upper",
+            zorder=-5,
+        )
+        masked_elev = np.ma.array(data, mask=~finite)
+        vmin, vmax = self._visible_elevation_limits(data, extent)
+        image_kwargs = dict(
+            extent=tuple(extent),
+            cmap="gray",
+            origin="upper",
+            alpha=0.5,
+            zorder=-4,
+        )
+        if vmin is not None and vmax is not None and vmin != vmax:
+            image_kwargs["vmin"] = vmin
+            image_kwargs["vmax"] = vmax
+        self.topography_image_plot = self.ax.imshow(masked_elev, **image_kwargs)
+
     def _calculate_adaptive_vert_exag(self, data_array, inverted=False):
         """
         Calculate adaptive vertical exaggeration based on elevation range.
@@ -571,12 +615,15 @@ class PlottingMixin:
 
     def _calculate_consistent_plot_limits(self):
         """Calculate plot limits that maintain consistent window size regardless of GeoTIFF dimensions."""
-        if self.geotiff_extent is None:
+        extent = self.geotiff_extent
+        if extent is None:
+            extent = getattr(self, "topography_extent", None)
+        if extent is None:
             # No GeoTIFF loaded, use global limits
             return self.fixed_xlim, self.fixed_ylim
 
         # Get GeoTIFF extent
-        min_lon, max_lon, min_lat, max_lat = self.geotiff_extent
+        min_lon, max_lon, min_lat, max_lat = extent
 
         # Calculate the center of the GeoTIFF
         center_lon = (min_lon + max_lon) / 2
@@ -786,11 +833,11 @@ class PlottingMixin:
             return f"{band['name']}\n≥{min_m:,} m"
         return f"{band['name']}\n{min_m:,}–{int(max_m):,} m"
 
-    def _visible_elevation_limits(self, data):
+    def _visible_elevation_limits(self, data, extent=None):
         """Min/max elevation in the current axes window, ignoring NaNs."""
         xlim = self.ax.get_xlim()
         ylim = self.ax.get_ylim()
-        left, right, bottom, top = tuple(self.geotiff_extent)
+        left, right, bottom, top = tuple(self.geotiff_extent if extent is None else extent)
         nrows, ncols = data.shape
         width = right - left
         height = top - bottom
@@ -871,6 +918,13 @@ class PlottingMixin:
         self.elevation_colorbar.ax.tick_params(labelsize=7)
 
     def _plot_survey_plan(self, preserve_view_limits=True):
+        self._plotting_survey_plan = True
+        try:
+            self._plot_survey_plan_impl(preserve_view_limits=preserve_view_limits)
+        finally:
+            self._plotting_survey_plan = False
+
+    def _plot_survey_plan_impl(self, preserve_view_limits=True):
         try:
             if not self._has_map_planning_content():
                 self._show_map_planning_placeholder()
@@ -893,6 +947,8 @@ class PlottingMixin:
             self.geotiff_image_plot = None
             self.geotiff_hillshade_plot = None
             self.depth_mode_image_plot = None
+            self.topography_hillshade_plot = None
+            self.topography_image_plot = None
             self.contour_plot = None
             self.basemap_image_plot = None
             self.slope_overlay_image_plot = None
@@ -919,6 +975,9 @@ class PlottingMixin:
                 self.ax.set_ylim(self.current_ylim)
                 preserved_xlim = None
                 preserved_ylim = None
+
+            # Land sits under the imagery basemap and the bathymetry.
+            self._draw_topography_underlay()
 
             # Plot imagery basemap if enabled (plot first so it's in the background)
             if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
@@ -950,15 +1009,7 @@ class PlottingMixin:
                         elif current_tab == 2 and hasattr(self, 'set_line_info_text'):
                             self.set_line_info_text(f"{vert_exag_label}: {vert_exag:.3f}")
                     self._vert_exag_logged_this_cycle = True
-                    azimuths = [45, 135, 225, 315]
-                    altitude = 45
-                    hillshades = []
-                    for az in azimuths:
-                        ls = LightSource(azdeg=az, altdeg=altitude)
-                        hillshade = ls.hillshade(data_for_hillshade, vert_exag=vert_exag)
-                        hillshades.append(hillshade)
-                    # Average the hillshades
-                    hillshade_array = np.mean(hillshades, axis=0)
+                    hillshade_array = self._multidirectional_hillshade(data_for_hillshade, vert_exag)
                     # Mask NaN values to make them transparent
                     masked_hillshade = np.ma.masked_where(np.isnan(self.geotiff_data_array), hillshade_array)
                     self.geotiff_hillshade_plot = self.ax.imshow(masked_hillshade, extent=tuple(self.geotiff_extent),
@@ -2276,7 +2327,15 @@ class PlottingMixin:
                 self.load_geotiff_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
 
         if full_clear:
-            self._show_map_planning_placeholder()
+            self.topography_hillshade_plot = None
+            self.topography_image_plot = None
+            if (
+                getattr(self, "topography_data_array", None) is not None
+                and not getattr(self, "_plotting_survey_plan", False)
+            ):
+                self._plot_survey_plan(preserve_view_limits=False)
+            else:
+                self._show_map_planning_placeholder()
             if hasattr(self, "_show_profile_planning_placeholder"):
                 self._show_profile_planning_placeholder()
             return

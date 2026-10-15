@@ -1088,6 +1088,8 @@ class ExportImportMixin:
                 'line_length_multiplier': self.line_length_multiplier,
                 'dist_between_lines_multiplier': self.dist_between_lines_multiplier
             }
+            if hasattr(self, "_stamp_topography_export_path"):
+                self._stamp_topography_export_path(params, save_dir)
             self._add_geotiff_viz_params_to_params(params)
 
             # Save to JSON file
@@ -1180,6 +1182,9 @@ class ExportImportMixin:
                     self._load_backscatter_geotiff_from_path(backscatter_geotiff_path)
             except Exception:
                 pass
+
+            if hasattr(self, "_maybe_load_topography_geotiff"):
+                self._maybe_load_topography_geotiff(params.get("topography_geotiff_path"), params_dir)
 
             # Regenerate the plot with loaded parameters
             self._generate_and_plot()
@@ -1355,6 +1360,8 @@ class ExportImportMixin:
                 },
                 "features": geojson_features
             }
+            if hasattr(self, "_stamp_topography_export_path"):
+                self._stamp_topography_export_path(geojson_collection["properties"], export_dir)
             export_utils.remove_export_file(geojson_file_path)
             with open(geojson_file_path, 'w') as f:
                 json.dump(geojson_collection, f, indent=2)
@@ -1551,6 +1558,8 @@ class ExportImportMixin:
                     params['survey_speed'] = 8.0  # Default
 
                 params['geotiff_path'] = params_geotiff_path
+                if hasattr(self, "_stamp_topography_export_path"):
+                    self._stamp_topography_export_path(params, export_dir)
                 params['geotiff_nan_value'] = float(getattr(self, 'geotiff_nan_value', -99999.0))
                 params['show_contours_var'] = bool(getattr(self, 'show_contours_var', False))
                 params['contour_interval_m'] = (
@@ -1864,6 +1873,8 @@ class ExportImportMixin:
                 },
                 "features": geojson_features,
             }
+            if hasattr(self, "_stamp_topography_export_path"):
+                self._stamp_topography_export_path(geojson_collection["properties"], export_dir)
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
             export_utils.remove_export_file(geojson_file_path)
             with open(geojson_file_path, "w", encoding="utf-8") as f:
@@ -1959,6 +1970,8 @@ class ExportImportMixin:
                 ),
                 "test_speed_kts": speed_kts,
             }
+            if hasattr(self, "_stamp_topography_export_path"):
+                self._stamp_topography_export_path(pmeta, export_dir)
             for key, attr in (
                 ("central_lat", "performance_central_lat_entry"),
                 ("central_lon", "performance_central_lon_entry"),

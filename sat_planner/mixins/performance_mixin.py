@@ -1150,6 +1150,8 @@ class PerformanceMixin:
                     gtp = self._resolve_import_sidecar_path(gtp, dir_name)
                 if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                     self._load_geotiff_from_path(gtp)
+                if hasattr(self, "_maybe_load_topography_geotiff"):
+                    self._maybe_load_topography_geotiff(params.get("topography_geotiff_path"), dir_name)
             elif all_pts and pyproj is not None:
                 geod = pyproj.Geod(ellps="WGS84")
                 all_lats = [p[0] for p in all_pts]
@@ -1370,6 +1372,11 @@ class PerformanceMixin:
                                 break
                     if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                         self._load_geotiff_from_path(gtp)
+                    if hasattr(self, "_maybe_load_topography_geotiff"):
+                        self._maybe_load_topography_geotiff(
+                            (geojson_data.get("properties") or {}).get("topography_geotiff_path"),
+                            import_dir,
+                        )
                     spd = None
                     for feat in geojson_data.get("features") or []:
                         pr = feat.get("properties") or {}

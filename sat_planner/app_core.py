@@ -109,6 +109,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         self.geotiff_dataset_original = None  # Original rasterio dataset (keeps its CRS)
         self.current_geotiff_path = None  # Path of the currently loaded GeoTIFF (for suggested export names)
+        self.topography_geotiff_path = None
+        self.topography_data_array = None
+        self.topography_extent = None
+        self.topography_hillshade_plot = None
+        self.topography_image_plot = None
         # Short tag for Download Data origin (GMRT/GEBCO/NCEI/CCOM); None for Load GeoTIFF / unknown
         self.current_geotiff_bathy_source_tag = None
         self.geotiff_data_array = None  # NumPy array of *reprojected* GeoTIFF elevation data (WGS84)

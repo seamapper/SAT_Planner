@@ -628,6 +628,7 @@ class ReferenceMixin:
                 base_name_candidates.append(base_name[: -len(suffix)])
         params = None
         imported_params_geotiff_path = None
+        imported_params_topography_path = None
         imported_params_shapefile_paths = None
         for candidate in base_name_candidates:
             metadata_path = os.path.join(dir_name, f"{candidate}_params.json")
@@ -642,6 +643,7 @@ class ReferenceMixin:
                         imported_params_geotiff_path = self._resolve_import_sidecar_path(
                             imported_params_geotiff_path, dir_name
                         )
+                    imported_params_topography_path = params.get("topography_geotiff_path")
                     imported_params_shapefile_paths = params.get("visualization_shapefile_paths")
                 break
             except Exception as e:
@@ -806,6 +808,8 @@ class ReferenceMixin:
                 self._load_geotiff_from_path(imported_params_geotiff_path)
             else:
                 self.set_ref_info_text(f"Saved GeoTIFF not found: {imported_params_geotiff_path}. Continuing without GeoTIFF.", append=True)
+        if hasattr(self, "_maybe_load_topography_geotiff"):
+            self._maybe_load_topography_geotiff(imported_params_topography_path, dir_name)
         # Migrate legacy auto-generated export names to acc_depth<m>m_cross<deg>deg.
         # Done after the GeoTIFF load so the depth
         # can be sampled from the grid for older surveys whose *_params.json
@@ -898,7 +902,9 @@ class ReferenceMixin:
             imported_geojson_survey_speed = None
             imported_geojson_geotiff_path = None
             imported_geojson_nan_cutoff = None
+            imported_geojson_topography_path = None
             imported_params_geotiff_path = None
+            imported_params_topography_path = None
 
             # DDD / DMS / DMM / LNW: use calibration parsers + reference assignment dialog
             if file_ext == '.lnw':
@@ -1048,6 +1054,7 @@ class ReferenceMixin:
                     collection_props = geojson_data.get('properties') or {}
                     imported_geojson_geotiff_path = collection_props.get('geotiff_path')
                     imported_geojson_nan_cutoff = collection_props.get('geotiff_nan_value')
+                    imported_geojson_topography_path = collection_props.get('topography_geotiff_path')
                 elif geojson_data.get('type') == 'Feature':
                     features = [geojson_data]
                 else:
@@ -1066,6 +1073,8 @@ class ReferenceMixin:
                         properties = {}
                     if imported_geojson_geotiff_path is None:
                         imported_geojson_geotiff_path = properties.get('geotiff_path')
+                    if imported_geojson_topography_path is None:
+                        imported_geojson_topography_path = properties.get('topography_geotiff_path')
                     if imported_geojson_nan_cutoff is None:
                         imported_geojson_nan_cutoff = properties.get('geotiff_nan_value')
                     line_num = properties.get('line_num', 0)
@@ -1131,6 +1140,7 @@ class ReferenceMixin:
                             imported_params_geotiff_path = self._resolve_import_sidecar_path(
                                 imported_params_geotiff_path, dir_name
                             )
+                        imported_params_topography_path = params.get('topography_geotiff_path')
                         imported_params_shapefile_paths = params.get('visualization_shapefile_paths')
                 except Exception as e:
                     print(f"Warning: Could not load metadata file: {e}")
@@ -1307,6 +1317,11 @@ class ReferenceMixin:
                     self._load_geotiff_from_path(geotiff_path_to_load)
                 else:
                     self.set_ref_info_text(f"Saved GeoTIFF not found: {geotiff_path_to_load}. Continuing without GeoTIFF.", append=True)
+            if hasattr(self, "_maybe_load_topography_geotiff"):
+                self._maybe_load_topography_geotiff(
+                    imported_params_topography_path or imported_geojson_topography_path,
+                    dir_name,
+                )
             # Migrate legacy auto-generated export names to acc_depth<m>m_cross<deg>deg.
             # Done after the GeoTIFF load so the depth can be sampled from the
             # grid for older surveys whose *_params.json did not store

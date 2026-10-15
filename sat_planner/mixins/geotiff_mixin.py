@@ -4,6 +4,7 @@ GeoTIFF loading, display mode, dynamic resolution, and contour controls.
 import os
 import csv
 import json
+import traceback
 import datetime
 import re
 import xml.etree.ElementTree as ET
@@ -432,6 +433,7 @@ class GeoTIFFMixin:
                 self._save_last_backscatter_import_dir()
 
         points = []
+        imported_topo_path = None
         ext = os.path.splitext(file_path)[1].lower()
         try:
             if file_path.lower().endswith("_ddd.txt") and hasattr(self, "_parse_ddd_txt_file_as_polyline"):
@@ -462,6 +464,8 @@ class GeoTIFFMixin:
                 with open(file_path, "r", encoding="utf-8") as f:
                     gj = json.load(f)
                 feats = gj.get("features", []) if gj.get("type") == "FeatureCollection" else []
+                if gj.get("type") == "FeatureCollection":
+                    imported_topo_path = (gj.get("properties") or {}).get("topography_geotiff_path")
                 for feat in feats:
                     geom = feat.get("geometry", {})
                     if geom.get("type") == "LineString":
@@ -705,6 +709,9 @@ class GeoTIFFMixin:
                     self._load_backscatter_geotiff_from_path(bs_geotiff_path)
                 except Exception:
                     pass
+            self._maybe_load_topography_geotiff(
+                params.get("topography_geotiff_path") or imported_topo_path, import_dir
+            )
 
             self.backscatter_box_stats = self._compute_backscatter_box_stats()
             self._plot_survey_plan(preserve_view_limits=True)
@@ -813,6 +820,7 @@ class GeoTIFFMixin:
                 },
                 "features": gj_features,
             }
+            self._stamp_topography_export_path(geojson_collection["properties"], export_dir)
             try:
                 export_utils.remove_export_file(geojson_file_path)
                 with open(geojson_file_path, "w", encoding="utf-8") as f:
@@ -1013,6 +1021,7 @@ class GeoTIFFMixin:
                     else 200.0
                 ),
             }
+            self._stamp_topography_export_path(payload, export_dir)
             self._add_geotiff_viz_params_to_params(payload)
             export_utils.remove_export_file(params_json_path)
             with open(params_json_path, "w", encoding="utf-8") as f:
@@ -1593,6 +1602,169 @@ class GeoTIFFMixin:
             self.ax.set_xlim(self.current_xlim)
             self.ax.set_ylim(self.current_ylim)
         self.canvas.draw_idle()
+
+    def _sync_topography_button(self):
+        """Match the Map Options button label to whether a land GeoTIFF is loaded."""
+        dialog = getattr(self, "map_options_dialog", None)
+        button = getattr(dialog, "load_topography_btn", None) if dialog is not None else None
+        if button is None:
+            return
+        loaded = getattr(self, "topography_data_array", None) is not None
+        button.setText("Unload Topography GeoTIFF" if loaded else "Load Topography GeoTIFF")
+
+    def _toggle_topography_geotiff(self):
+        """Load a land GeoTIFF, or unload it when one is already shown."""
+        if getattr(self, "topography_data_array", None) is not None:
+            self._unload_topography_geotiff()
+            return
+        if not GEOSPATIAL_LIBS_AVAILABLE:
+            self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot load GeoTIFF.")
+            return
+        start_dir = getattr(self, "last_geotiff_dir", "") or ""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Topography GeoTIFF",
+            start_dir,
+            "GeoTIFF files (*.tif *.tiff);;All files (*.*)",
+        )
+        if not file_path:
+            return
+        self.last_geotiff_dir = os.path.dirname(file_path)
+        if hasattr(self, "_save_last_geotiff_dir"):
+            self._save_last_geotiff_dir()
+        self._load_topography_geotiff_from_path(file_path)
+
+    def _unload_topography_geotiff(self):
+        """Remove the land underlay and restore the load button."""
+        self.topography_geotiff_path = None
+        self.topography_data_array = None
+        self.topography_extent = None
+        self.topography_hillshade_plot = None
+        self.topography_image_plot = None
+        self._sync_topography_button()
+        self._replot_after_topography_change()
+
+    def _load_topography_geotiff_from_path(self, file_path):
+        """Read a topography GeoTIFF into its own grid and redraw the map."""
+        if not file_path or not os.path.isfile(file_path):
+            return False
+        if not GEOSPATIAL_LIBS_AVAILABLE or rasterio is None:
+            self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot load GeoTIFF.")
+            return False
+        try:
+            data, extent = self._read_wgs84_geotiff_array(file_path)
+        except Exception as e:
+            self._show_message("error", "Topography GeoTIFF", f"Could not load topography GeoTIFF:\n{e}")
+            return False
+        if data is None or not np.any(np.isfinite(data)):
+            self._show_message("warning", "Topography GeoTIFF", "The selected GeoTIFF has no usable elevation values.")
+            return False
+        self.topography_data_array = data
+        self.topography_extent = extent
+        self.topography_geotiff_path = file_path
+        self._sync_topography_button()
+        self._replot_after_topography_change()
+        return True
+
+    def _replot_after_topography_change(self):
+        if not hasattr(self, "canvas") or not hasattr(self, "_plot_survey_plan"):
+            return
+        try:
+            preserve = getattr(self, "geotiff_data_array", None) is not None
+            xlim = self.ax.get_xlim() if preserve and hasattr(self, "ax") else None
+            ylim = self.ax.get_ylim() if preserve and hasattr(self, "ax") else None
+            self._plot_survey_plan(preserve_view_limits=preserve)
+            if preserve and xlim and ylim:
+                self.ax.set_xlim(xlim)
+                self.ax.set_ylim(ylim)
+            self.canvas.draw_idle()
+        except Exception:
+            traceback.print_exc()
+
+    def _read_wgs84_geotiff_array(self, file_path):
+        """Return (array, [left, right, bottom, top]) in WGS84 for a GeoTIFF."""
+        with rasterio.open(file_path) as src:
+            total_pixels = src.width * src.height
+            downsample = 4 if total_pixels > 10000000 else 2 if total_pixels > 5000000 else 1
+            target_h = max(1, src.height // downsample)
+            target_w = max(1, src.width // downsample)
+            data = src.read(1, out_shape=(target_h, target_w), resampling=Resampling.bilinear)
+            data = data.astype(float)
+            nodata = getattr(src, "nodata", None)
+            try:
+                if nodata is not None and np.isfinite(float(nodata)):
+                    atol = max(1e-6, abs(float(nodata)) * 1e-9)
+                    data[np.isclose(data, float(nodata), rtol=0.0, atol=atol)] = np.nan
+            except (TypeError, ValueError):
+                pass
+            cutoff = self._get_geotiff_nan_cutoff() if hasattr(self, "_get_geotiff_nan_cutoff") else -99999.0
+            data[np.isclose(data, float(cutoff), rtol=0.0, atol=1e-6)] = np.nan
+
+            src_crs = src.crs
+            bounds = src.bounds
+            if src_crs is None or src_crs == "EPSG:4326":
+                return data, [bounds.left, bounds.right, bounds.bottom, bounds.top]
+
+            dst_left, dst_bottom, dst_right, dst_top = rasterio.warp.transform_bounds(
+                src_crs, "EPSG:4326",
+                float(bounds.left), float(bounds.bottom), float(bounds.right), float(bounds.top),
+                densify_pts=21,
+            )
+            scaled_transform = src.transform * src.transform.scale(
+                src.width / data.shape[1],
+                src.height / data.shape[0],
+            )
+            destination = np.full(data.shape, np.nan, dtype=float)
+            reproject(
+                source=data,
+                destination=destination,
+                src_transform=scaled_transform,
+                src_crs=src_crs,
+                src_nodata=np.nan,
+                dst_transform=transform.from_bounds(
+                    dst_left, dst_bottom, dst_right, dst_top, data.shape[1], data.shape[0]
+                ),
+                dst_crs="EPSG:4326",
+                dst_nodata=np.nan,
+                resampling=Resampling.bilinear,
+            )
+            return destination, [dst_left, dst_right, dst_bottom, dst_top]
+
+    def _topography_path_for_export(self, export_dir=None):
+        """Portable topography GeoTIFF path for a survey GeoJSON, or None."""
+        path = getattr(self, "topography_geotiff_path", None)
+        if not path or not os.path.isfile(path):
+            return None
+        if hasattr(self, "_path_for_params_sidecar"):
+            return self._path_for_params_sidecar(path, export_dir)
+        return os.path.abspath(path)
+
+    def _stamp_topography_export_path(self, properties, export_dir=None):
+        """Add topography_geotiff_path to a GeoJSON properties dict when a land file is loaded."""
+        if not isinstance(properties, dict):
+            return properties
+        path = self._topography_path_for_export(export_dir)
+        if path:
+            properties["topography_geotiff_path"] = path
+        return properties
+
+    def _maybe_load_topography_geotiff(self, stored_path, base_dir=None):
+        """Load a topography GeoTIFF saved in a survey file, when the path still exists."""
+        if not stored_path:
+            return False
+        path = stored_path
+        if hasattr(self, "_resolve_import_sidecar_path"):
+            path = self._resolve_import_sidecar_path(stored_path, base_dir)
+        if not path or not os.path.isfile(path):
+            return False
+        existing = getattr(self, "topography_geotiff_path", None)
+        if (
+            existing
+            and getattr(self, "topography_data_array", None) is not None
+            and os.path.normcase(os.path.abspath(existing)) == os.path.normcase(os.path.abspath(path))
+        ):
+            return True
+        return bool(self._load_topography_geotiff_from_path(path))
 
     def _load_geotiff(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -4693,8 +4865,22 @@ class GeoTIFFMixin:
             print(f"Error getting depth: {e}")
             return 0.0
 
+    def _update_topography_visible_clim(self):
+        """Stretch the land gray overlay across elevations in the current map window."""
+        image = getattr(self, "topography_image_plot", None)
+        data = getattr(self, "topography_data_array", None)
+        extent = getattr(self, "topography_extent", None)
+        if image is None or data is None or extent is None:
+            return
+        if not hasattr(self, "_visible_elevation_limits"):
+            return
+        vmin, vmax = self._visible_elevation_limits(data, extent)
+        if vmin is not None and vmax is not None and vmin != vmax:
+            image.set_clim(vmin=vmin, vmax=vmax)
+
     def _on_draw_event_update_colormap(self, event=None):
         """Update elevation colormap to visible region when view changes."""
+        self._update_topography_visible_clim()
         if not hasattr(self, 'geotiff_data_array') or self.geotiff_data_array is None:
             return
         if not hasattr(self, 'geotiff_extent') or self.geotiff_extent is None:

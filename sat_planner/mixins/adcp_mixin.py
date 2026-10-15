@@ -859,6 +859,8 @@ class AdcpMixin:
                 },
                 "features": geojson_features,
             }
+            if hasattr(self, "_stamp_topography_export_path"):
+                self._stamp_topography_export_path(geojson_collection["properties"], export_dir)
             geojson_file_path = os.path.join(export_dir, f"{export_name}.geojson")
             export_utils.remove_export_file(geojson_file_path)
             with open(geojson_file_path, "w", encoding="utf-8") as f:
@@ -935,6 +937,8 @@ class AdcpMixin:
                     else 200.0
                 ),
             }
+            if hasattr(self, "_stamp_topography_export_path"):
+                self._stamp_topography_export_path(meta, export_dir)
             self._add_geotiff_viz_params_to_params(meta)
             export_utils.remove_export_file(json_metadata_path)
             with open(json_metadata_path, "w", encoding="utf-8") as f:
@@ -1189,6 +1193,8 @@ class AdcpMixin:
                 gtp = self._resolve_import_sidecar_path(gtp, dir_name)
             if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                 self._load_geotiff_from_path(gtp)
+            if hasattr(self, "_maybe_load_topography_geotiff"):
+                self._maybe_load_topography_geotiff(params.get("topography_geotiff_path"), dir_name)
 
         self._update_adcp_button_states()
         self._plot_survey_plan(preserve_view_limits=True)
@@ -1272,6 +1278,11 @@ class AdcpMixin:
                     gtp = (geojson_data.get("properties") or {}).get("geotiff_path")
                     if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                         self._load_geotiff_from_path(gtp)
+                    if hasattr(self, "_maybe_load_topography_geotiff"):
+                        self._maybe_load_topography_geotiff(
+                            (geojson_data.get("properties") or {}).get("topography_geotiff_path"),
+                            import_dir,
+                        )
                     self._adcp_import_post_import(file_path)
                     return
                 self._show_message(

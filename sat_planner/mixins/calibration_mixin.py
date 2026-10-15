@@ -1366,25 +1366,24 @@ class CalibrationMixin:
                     "properties": {"line_num": num, "line_name": name},
                 })
             export_utils.remove_export_file(geojson_file_path)
+            cal_geojson = {
+                "type": "FeatureCollection",
+                "properties": {
+                    "geotiff_path": _cal_geotiff,
+                    "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)),
+                    "show_contours_var": bool(getattr(self, "show_contours_var", False)),
+                    "contour_interval_m": (
+                        float(self.contour_interval_entry.text())
+                        if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text()
+                        else 200.0
+                    ),
+                },
+                "features": geojson_features,
+            }
+            if hasattr(self, "_stamp_topography_export_path"):
+                self._stamp_topography_export_path(cal_geojson["properties"], export_dir)
             with open(geojson_file_path, 'w', encoding='utf-8') as f:
-                json.dump(
-                    {
-                        "type": "FeatureCollection",
-                        "properties": {
-                            "geotiff_path": _cal_geotiff,
-                            "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)),
-                            "show_contours_var": bool(getattr(self, "show_contours_var", False)),
-                            "contour_interval_m": (
-                                float(self.contour_interval_entry.text())
-                                if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text()
-                                else 200.0
-                            ),
-                        },
-                        "features": geojson_features,
-                    },
-                    f,
-                    indent=2,
-                )
+                json.dump(cal_geojson, f, indent=2)
             lnw_file_path = None
             lnw_lines = [(name, list(pts)) for _num, name, pts in export_lines]
             if export_hypack and lnw_lines:
@@ -1451,6 +1450,8 @@ class CalibrationMixin:
                 except Exception:
                     params['turn_time'] = 5.0
                 params['geotiff_path'] = _cal_geotiff
+                if hasattr(self, "_stamp_topography_export_path"):
+                    self._stamp_topography_export_path(params, export_dir)
                 params['geotiff_nan_value'] = float(getattr(self, "geotiff_nan_value", -99999.0))
                 params['show_contours_var'] = bool(getattr(self, "show_contours_var", False))
                 params['contour_interval_m'] = (
@@ -1699,6 +1700,7 @@ class CalibrationMixin:
             file_processed = False
             imported_geojson_geotiff_path = None
             imported_geojson_nan_cutoff = None
+            imported_geojson_topography_path = None
 
             # Handle *.lnw format (Hypack LNW)
             if file_ext == '.lnw':
@@ -1884,6 +1886,7 @@ class CalibrationMixin:
                     fc_props = geojson_data.get('properties') or {}
                     imported_geojson_geotiff_path = fc_props.get('geotiff_path')
                     imported_geojson_nan_cutoff = fc_props.get('geotiff_nan_value')
+                    imported_geojson_topography_path = fc_props.get('topography_geotiff_path')
                 elif geojson_data.get('type') == 'Feature':
                     features = [geojson_data]
                 else:
@@ -1902,6 +1905,8 @@ class CalibrationMixin:
                     properties = feature.get('properties', {}) or {}
                     if imported_geojson_geotiff_path is None:
                         imported_geojson_geotiff_path = properties.get('geotiff_path')
+                    if imported_geojson_topography_path is None:
+                        imported_geojson_topography_path = properties.get('topography_geotiff_path')
                     if imported_geojson_nan_cutoff is None:
                         imported_geojson_nan_cutoff = properties.get('geotiff_nan_value')
                     line_name = str(properties.get('line_name', '')).strip().lower()
@@ -2019,6 +2024,11 @@ class CalibrationMixin:
                     self._load_geotiff_from_path(imported_geojson_geotiff_path)
                 else:
                     self.set_cal_info_text(f"Saved GeoTIFF not found: {imported_geojson_geotiff_path}. Continuing without GeoTIFF.", append=True)
+            topo_stored = imported_geojson_topography_path
+            if params and isinstance(params, dict) and params.get("topography_geotiff_path"):
+                topo_stored = params.get("topography_geotiff_path")
+            if hasattr(self, "_maybe_load_topography_geotiff"):
+                self._maybe_load_topography_geotiff(topo_stored, dir_name)
             # Resolve the heading-line offset to display.
             #
             # Order of preference for an *imported* calibration plan:

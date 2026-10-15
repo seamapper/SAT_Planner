@@ -473,9 +473,13 @@ class LinePlanningMixin:
                 except (ValueError, TypeError):
                     export_speed = 8.0
                 geojson_feature = {"type": "Feature", "geometry": _shapely_mapping(shapely_line), "properties": {"name": export_name, "survey_speed": export_speed, "geotiff_path": params_geotiff_path, "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0), "points": [{"point_num": i + 1, "lat": lat, "lon": lon} for i, (lat, lon) in enumerate(self.line_planning_points)]}}
+                line_collection_props = {"geotiff_path": params_geotiff_path, "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0)}
+                if hasattr(self, "_stamp_topography_export_path"):
+                    self._stamp_topography_export_path(line_collection_props, export_dir)
+                    self._stamp_topography_export_path(geojson_feature["properties"], export_dir)
                 export_utils.remove_export_file(geojson_file_path)
                 with open(geojson_file_path, 'w') as f:
-                    json.dump({"type": "FeatureCollection", "properties": {"geotiff_path": params_geotiff_path, "geotiff_nan_value": float(getattr(self, "geotiff_nan_value", -99999.0)), "show_contours_var": bool(getattr(self, "show_contours_var", False)), "contour_interval_m": (float(self.contour_interval_entry.text()) if hasattr(self, "contour_interval_entry") and self.contour_interval_entry.text() else 200.0)}, "features": [geojson_feature]}, f, indent=2)
+                    json.dump({"type": "FeatureCollection", "properties": line_collection_props, "features": [geojson_feature]}, f, indent=2)
             lnw_file_path = None
             lnw_lines = [(export_name, list(self.line_planning_points))]
             if export_hypack and len(self.line_planning_points) >= 2:
@@ -586,6 +590,8 @@ class LinePlanningMixin:
                         getattr(self, "visualization_shapefile_paths", []) or []
                     ),
                 }
+                if hasattr(self, "_stamp_topography_export_path"):
+                    self._stamp_topography_export_path(params_payload, export_dir)
                 self._add_geotiff_viz_params_to_params(params_payload)
                 with open(params_json_path, "w", encoding="utf-8") as f:
                     json.dump(params_payload, f, indent=2)
@@ -819,10 +825,12 @@ class LinePlanningMixin:
                 features = geojson_data.get('features', []) if geojson_data.get('type') == 'FeatureCollection' else [geojson_data] if geojson_data.get('type') == 'Feature' else []
                 imported_geotiff_path = None
                 imported_nan_cutoff = None
+                imported_topo_path = None
                 if geojson_data.get('type') == 'FeatureCollection':
                     collection_props = geojson_data.get('properties') or {}
                     imported_geotiff_path = collection_props.get('geotiff_path')
                     imported_nan_cutoff = collection_props.get('geotiff_nan_value')
+                    imported_topo_path = collection_props.get('topography_geotiff_path')
                 imported_survey_speed = None
                 for feature in features:
                     if feature.get('type') != 'Feature':
@@ -834,6 +842,8 @@ class LinePlanningMixin:
                         props = feature.get('properties') or {}
                         if imported_geotiff_path is None:
                             imported_geotiff_path = props.get('geotiff_path')
+                        if imported_topo_path is None:
+                            imported_topo_path = props.get('topography_geotiff_path')
                         if imported_nan_cutoff is None:
                             imported_nan_cutoff = props.get('geotiff_nan_value')
                         for _key in ('survey_speed', 'speed_knots', 'surveySpeed', 'speedKnots'):
@@ -860,6 +870,8 @@ class LinePlanningMixin:
                         self._load_geotiff_from_path(imported_geotiff_path)
                     else:
                         self.set_line_info_text(f"Saved GeoTIFF not found: {imported_geotiff_path}. Continuing without GeoTIFF.", append=True)
+                if hasattr(self, "_maybe_load_topography_geotiff"):
+                    self._maybe_load_topography_geotiff(imported_topo_path, dir_name)
                 file_processed = True
 
             if not file_processed:
@@ -896,6 +908,10 @@ class LinePlanningMixin:
                         gtp = self._resolve_import_sidecar_path(gtp, dir_name)
                     if gtp and hasattr(self, "_load_geotiff_from_path") and os.path.exists(gtp):
                         self._load_geotiff_from_path(gtp)
+                    if hasattr(self, "_maybe_load_topography_geotiff"):
+                        self._maybe_load_topography_geotiff(
+                            sidecar_params.get("topography_geotiff_path"), dir_name
+                        )
                 except Exception:
                     pass
             if hasattr(self, 'line_export_name_entry'):
