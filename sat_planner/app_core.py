@@ -34,7 +34,7 @@ from .constants import (
     DEFAULT_SHADED_RELIEF_CMAP,
     DEFAULT_SLOPE_OVERLAY_BANDS,
     DEPTH_MODE_NONE_LABEL,
-    KONGSBERG_DEPTH_MODE_SYSTEMS,
+    KONGSBERG_DEPTH_MODE_DISPLAY_LABELS,
 )
 from . import __version__, CONFIG_FILENAME, GEOSPATIAL_LIBS_AVAILABLE
 from .utils_ui import (
@@ -1113,7 +1113,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         param_layout = QVBoxLayout(param_widget)
 
         # --- GeoTIFF Control GroupBox (above tabs) ---
-        geotiff_groupbox = QGroupBox("Bathymetry GeoTIFF")
+        geotiff_groupbox = QGroupBox("Bathymetry/Topography GeoTIFFs")
         geotiff_layout = QVBoxLayout(geotiff_groupbox)
         geotiff_layout.setSpacing(0)
         geotiff_layout.setContentsMargins(9, 9, 9, 9)
@@ -1123,7 +1123,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         geotiff_load_layout = QHBoxLayout(geotiff_load_row)
         geotiff_load_layout.setContentsMargins(0, 0, 0, 0)
         geotiff_load_layout.setSpacing(4)
-        self.load_geotiff_btn = QPushButton("Load GeoTIFF")
+        self.load_geotiff_btn = QPushButton("Load Bathymetry GeoTIFF")
         self.load_geotiff_btn.clicked.connect(self._load_geotiff)
         self.load_geotiff_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
         self.load_geotiff_btn.setMinimumWidth(0)
@@ -1145,13 +1145,13 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         geotiff_zoom_remove_layout = QHBoxLayout(geotiff_zoom_remove_row)
         geotiff_zoom_remove_layout.setContentsMargins(0, 0, 0, 0)
         geotiff_zoom_remove_layout.setSpacing(4)
-        self.zoom_to_geotiff_btn = QPushButton("Zoom to GeoTIFF")
+        self.zoom_to_geotiff_btn = QPushButton("Zoom to Bathymetry GeoTIFF")
         self.zoom_to_geotiff_btn.clicked.connect(self._zoom_to_geotiff)
         self.zoom_to_geotiff_btn.setEnabled(False)
         self.zoom_to_geotiff_btn.setMinimumWidth(0)
         self.zoom_to_geotiff_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         geotiff_zoom_remove_layout.addWidget(self.zoom_to_geotiff_btn, 1)
-        self.remove_geotiff_btn = QPushButton("Remove GeoTIFF")
+        self.remove_geotiff_btn = QPushButton("Remove Bathymetry GeoTIFF")
         self.remove_geotiff_btn.clicked.connect(self._remove_geotiff)
         self.remove_geotiff_btn.setEnabled(False)
         self.remove_geotiff_btn.setMinimumWidth(0)
@@ -1173,9 +1173,29 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         geotiff_layout.addWidget(download_data_row)
         geotiff_layout.addSpacing(3)
 
+        topography_row = QWidget()
+        topography_layout = QHBoxLayout(topography_row)
+        topography_layout.setContentsMargins(0, 0, 0, 0)
+        topography_layout.setSpacing(4)
+        self.load_topography_btn = QPushButton("Load Topography GeoTIFF")
+        self.load_topography_btn.clicked.connect(self._toggle_topography_geotiff)
+        self.load_topography_btn.setMinimumWidth(0)
+        self.load_topography_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        topography_layout.addWidget(self.load_topography_btn, 1)
+        self.remove_topography_btn = QPushButton("Remove Topography GeoTIFF")
+        self.remove_topography_btn.clicked.connect(self._unload_topography_geotiff)
+        self.remove_topography_btn.setEnabled(False)
+        self.remove_topography_btn.setMinimumWidth(0)
+        self.remove_topography_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        topography_layout.addWidget(self.remove_topography_btn, 1)
+        geotiff_layout.addWidget(topography_row)
+        geotiff_layout.addSpacing(3)
+
         # Map display / colormap controls (hosted in Map Options dialog)
         self.elevation_slope_combo = QComboBox()
-        self.elevation_slope_combo.addItems(["Shaded Relief", "Shaded Slope", "Hillshade", "Slope"])
+        self.elevation_slope_combo.addItems(
+            ["Shaded Relief", "Shaded Slope", "Hillshade", "Slope", *KONGSBERG_DEPTH_MODE_DISPLAY_LABELS.values()]
+        )
         self.elevation_slope_combo.setCurrentText("Shaded Relief")
         self.elevation_slope_combo.currentTextChanged.connect(self._on_geotiff_display_mode_changed)
         self.elevation_slope_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -1443,28 +1463,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_plot_control_layout = QVBoxLayout(ref_plot_control_groupbox)
         ref_plot_control_layout.setSpacing(0)
         ref_plot_control_layout.setContentsMargins(9, 9, 9, 9)
-
-        depth_mode_row = QWidget()
-        depth_mode_layout = QHBoxLayout(depth_mode_row)
-        depth_mode_layout.setContentsMargins(0, 0, 0, 0)
-        depth_mode_layout.setSpacing(6)
-        self.show_depth_modes_checkbox = QCheckBox("Show Kongsberg Depth Modes")
-        self.show_depth_modes_checkbox.setChecked(False)
-        self.show_depth_modes_checkbox.setToolTip(
-            "Color bathymetry by the selected Kongsberg system's depth modes"
-        )
-        self.show_depth_modes_checkbox.toggled.connect(self._on_show_depth_modes_toggled)
-        self.depth_mode_system_combo = QComboBox()
-        self.depth_mode_system_combo.blockSignals(True)
-        self.depth_mode_system_combo.addItem(DEPTH_MODE_NONE_LABEL)
-        self.depth_mode_system_combo.addItems(list(KONGSBERG_DEPTH_MODE_SYSTEMS))
-        self.depth_mode_system_combo.setEnabled(False)
-        self.depth_mode_system_combo.blockSignals(False)
-        self.depth_mode_system_combo.currentTextChanged.connect(self._on_depth_mode_system_changed)
-        depth_mode_layout.addWidget(self.show_depth_modes_checkbox)
-        depth_mode_layout.addWidget(self.depth_mode_system_combo, 1)
-        ref_plot_control_layout.addWidget(depth_mode_row)
-        ref_plot_control_layout.addSpacing(3)
 
         self.zoom_to_plan_btn = QPushButton("Zoom to Accuracy Survey Plan")
         self.zoom_to_plan_btn.clicked.connect(self._zoom_to_plan)

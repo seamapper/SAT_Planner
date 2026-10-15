@@ -148,14 +148,6 @@ class MapOptionsDialog(QDialog):
 
         layout.addWidget(geotiff_group)
 
-        topo_group = QGroupBox("Topography/Land")
-        topo_layout = QVBoxLayout(topo_group)
-        topo_layout.setSpacing(6)
-        self.load_topography_btn = QPushButton("Load Topography GeoTIFF")
-        self.load_topography_btn.clicked.connect(self._on_topography_button_clicked)
-        topo_layout.addWidget(self.load_topography_btn)
-        layout.addWidget(topo_group)
-
         layout.addStretch()
 
         # Prevent Enter in text fields from activating Add Shapefile / other buttons.
@@ -167,15 +159,7 @@ class MapOptionsDialog(QDialog):
             btn.setAutoDefault(False)
             btn.setDefault(False)
 
-    def _on_topography_button_clicked(self):
-        parent = self.parent()
-        if parent is not None and hasattr(parent, "_toggle_topography_geotiff"):
-            parent._toggle_topography_geotiff()
-
     def showEvent(self, event):
         super().showEvent(event)
         # Buttons can regain auto-default behavior when reparented/shown.
         self._disable_dialog_button_defaults()
-        parent = self.parent()
-        if parent is not None and hasattr(parent, "_sync_topography_button"):
-            parent._sync_topography_button()

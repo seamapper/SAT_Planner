@@ -117,6 +117,11 @@ KONGSBERG_DEPTH_MODES = {
     )),
 }
 KONGSBERG_DEPTH_MODE_SYSTEMS = ("EM712", "EM304", "EM124")
+KONGSBERG_DEPTH_MODE_DISPLAY_LABELS = {
+    "EM712": "EM712 Depth Modes",
+    "EM304": "EM304 Depth Modes",
+    "EM124": "EM124 Depth Modes",
+}
 
 
 def kongsberg_depth_mode_indices(depth_m, bands):

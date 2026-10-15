@@ -796,35 +796,6 @@ class PlottingMixin:
             return None
         return bands[index]["name"]
 
-    def _on_show_depth_modes_toggled(self, checked):
-        """Enable the system list and recolor bathymetry when Show Kongsberg Depth Modes changes."""
-        self.show_depth_modes_var = bool(checked)
-        if hasattr(self, "depth_mode_system_combo"):
-            self.depth_mode_system_combo.setEnabled(bool(checked))
-        self._replot_for_depth_modes()
-
-    def _on_depth_mode_system_changed(self, system_name):
-        """Recolor bathymetry when a Kongsberg system is chosen."""
-        self.depth_mode_system_var = system_name
-        if not getattr(self, "show_depth_modes_var", False):
-            return
-        self._replot_for_depth_modes()
-
-    def _replot_for_depth_modes(self):
-        """Redraw the map, keeping the current view, after a depth-mode control change."""
-        if not hasattr(self, "canvas") or not hasattr(self, "ax"):
-            return
-        try:
-            xlim = self.ax.get_xlim()
-            ylim = self.ax.get_ylim()
-            self._plot_survey_plan(preserve_view_limits=True)
-            if xlim and ylim:
-                self.ax.set_xlim(xlim)
-                self.ax.set_ylim(ylim)
-            self.canvas.draw_idle()
-        except Exception:
-            traceback.print_exc()
-
     def _depth_mode_range_label(self, band):
         """Legend text for one mode, with the shared boundary shown on the deeper mode."""
         min_m = int(band["min_m"])
@@ -916,6 +887,7 @@ class PlottingMixin:
         self.elevation_colorbar.set_ticks([i + 0.5 for i in range(len(bands))])
         self.elevation_colorbar.set_ticklabels([self._depth_mode_range_label(band) for band in bands])
         self.elevation_colorbar.ax.tick_params(labelsize=7)
+        self.elevation_colorbar.ax.invert_yaxis()
 
     def _plot_survey_plan(self, preserve_view_limits=True):
         self._plotting_survey_plan = True
@@ -2248,6 +2220,8 @@ class PlottingMixin:
 
             # Restored: geotiff_display_mode reset
             self.geotiff_display_mode = "elevation_dyn"
+            self.show_depth_modes_var = False
+            self.depth_mode_system_var = DEPTH_MODE_NONE_LABEL
             # Update combo box if it exists
             if hasattr(self, 'elevation_slope_combo'):
                 self._update_display_mode_combo()

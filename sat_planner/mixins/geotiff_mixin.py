@@ -29,6 +29,7 @@ from sat_planner.dyn_vert_exag_dialog import DynVertExagDialog
 from sat_planner.constants import (
     DEFAULT_SHADED_RELIEF_CMAP,
     GEOSPATIAL_LIBS_AVAILABLE,
+    KONGSBERG_DEPTH_MODE_DISPLAY_LABELS,
     LineString,
     RasterioIOError,
     Resampling,
@@ -1604,19 +1605,14 @@ class GeoTIFFMixin:
         self.canvas.draw_idle()
 
     def _sync_topography_button(self):
-        """Match the Map Options button label to whether a land GeoTIFF is loaded."""
-        dialog = getattr(self, "map_options_dialog", None)
-        button = getattr(dialog, "load_topography_btn", None) if dialog is not None else None
+        """Enable Remove Topography GeoTIFF only while a land grid is loaded."""
+        button = getattr(self, "remove_topography_btn", None)
         if button is None:
             return
-        loaded = getattr(self, "topography_data_array", None) is not None
-        button.setText("Unload Topography GeoTIFF" if loaded else "Load Topography GeoTIFF")
+        button.setEnabled(getattr(self, "topography_data_array", None) is not None)
 
     def _toggle_topography_geotiff(self):
-        """Load a land GeoTIFF, or unload it when one is already shown."""
-        if getattr(self, "topography_data_array", None) is not None:
-            self._unload_topography_geotiff()
-            return
+        """Open a file selector and load a land GeoTIFF."""
         if not GEOSPATIAL_LIBS_AVAILABLE:
             self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot load GeoTIFF.")
             return
@@ -1635,7 +1631,7 @@ class GeoTIFFMixin:
         self._load_topography_geotiff_from_path(file_path)
 
     def _unload_topography_geotiff(self):
-        """Remove the land underlay and restore the load button."""
+        """Remove the land underlay."""
         self.topography_geotiff_path = None
         self.topography_data_array = None
         self.topography_extent = None
@@ -2109,17 +2105,31 @@ class GeoTIFFMixin:
                 self._update_display_mode_combo()
             return
 
-        # Map combo box text to internal display modes
-        if mode_text == "Shaded Relief":
+        # Map combo box text to internal display modes.
+        # A Kongsberg entry colors bathymetry by that system's depth modes.
+        depth_system = next(
+            (system for system, label in KONGSBERG_DEPTH_MODE_DISPLAY_LABELS.items() if label == mode_text),
+            None,
+        )
+        if depth_system is not None:
+            self.show_depth_modes_var = True
+            self.depth_mode_system_var = depth_system
+            self.geotiff_display_mode = "elevation_dyn"
+            self.hillshade_vs_slope_viz_mode = "hillshade"
+        elif mode_text == "Shaded Relief":
+            self.show_depth_modes_var = False
             self.geotiff_display_mode = "elevation_dyn"
             self.hillshade_vs_slope_viz_mode = "hillshade"
         elif mode_text == "Shaded Slope":
+            self.show_depth_modes_var = False
             self.geotiff_display_mode = "slope"
             self.hillshade_vs_slope_viz_mode = "hillshade"
         elif mode_text == "Hillshade":
+            self.show_depth_modes_var = False
             self.geotiff_display_mode = "hillshade_only"
             self.hillshade_vs_slope_viz_mode = "hillshade"
         elif mode_text == "Slope":
+            self.show_depth_modes_var = False
             self.geotiff_display_mode = "slope_viz"
             self.hillshade_vs_slope_viz_mode = "slope_viz"
 
@@ -2146,7 +2156,14 @@ class GeoTIFFMixin:
             return
 
         # Map internal display mode to combo box text
-        if self.geotiff_display_mode in ("elevation", "elevation_dyn"):
+        depth_label = None
+        if getattr(self, "show_depth_modes_var", False):
+            depth_label = KONGSBERG_DEPTH_MODE_DISPLAY_LABELS.get(
+                getattr(self, "depth_mode_system_var", None)
+            )
+        if depth_label:
+            mode_text = depth_label
+        elif self.geotiff_display_mode in ("elevation", "elevation_dyn"):
             mode_text = "Shaded Relief"
         elif self.geotiff_display_mode == "slope":
             mode_text = "Shaded Slope"
