@@ -18,14 +18,13 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 
 ### Core Functionality
 - **Multi-tab Interface**: Calibration, Accuracy, Line, Backscatter, Performance, and ADCP tabs (left panel)
-- **Shared Import/Export**: A single **Import/Export** group above the tab notebook; **Import Survey** / **Export Survey** labels and the **Export Name** field follow the active tab
+- **Shared Import/Export**: A single **Import/Export** group above the tab notebook; **Import Survey** / **Export Survey** labels and the **Export Name** field follow the active tab. When that tab’s plan is complete, the **Export** label and the tab’s **Show … Info** label turn **orange and bold** (the button face does not change). A plan is complete when every part of that test exists: Calibration = pitch, roll, and both heading lines; Accuracy = survey lines, plus the crossline when crossline passes is greater than 0; Line = a line with at least two points; Backscatter = a centerline; Performance = four swath lines; ADCP = both circles
 - **Dark Theme**: Qt GUI always uses a dark theme; map (matplotlib) keeps default styling
 - **Startup Guidance**: The map and profile plots show *Load a Test Plan or Bathymetry to begin planning* until bathymetry or survey geometry is loaded
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
-- **Download Online Bathymetry**: **Download Online Bathymetry** in the Bathymetry GeoTIFF panel opens an interactive dialog (GEBCO 2026, GMRT Topo-Bathy / Observed Only, NCEI multibeam mosaics, WGOM-LI-SNE) with map preview, AOI selection, and GeoTIFF download into the planner
+- **Download Online Bathymetry**: **Download Online Bathymetry** in the **Bathymetry/Topography GeoTIFFs** panel opens an interactive dialog (GEBCO 2026, GMRT Topo-Bathy / Observed Only, NCEI multibeam mosaics, WGOM-LI-SNE) with map preview, AOI selection, and GeoTIFF download into the planner
 - **GMRT on Import**: After you **select a survey file**, if the import has **no planning bathymetry** (no `geotiff_path` in metadata, or the saved file is missing), a dialog offers **GMRT download** for the survey area (**Cell Size** 60/120/240/480/960 m matching Download Bathymetry, default **60 m**; buffer; optional Split Topo/Depths). If bathymetry was loaded from the survey, the dialog is skipped. While a download is in flight, **Import Survey** turns orange as **Downloading GMRT - Click to Cancel**; clicking again cancels the worker, removes any partial file, and restores the button
-- **Map Display** / **Color Map**: Display mode dropdown and colormap cycle button remain in the Bathymetry GeoTIFF panel; **Vertical Exaggeration** and **Dyn Res** live in **Map Options**
-- **Map Options** (icon, lower-left of the map): Non-modal dialog for Imagery Basemap, NOAA ENC + opacity, EEZs + opacity, Add/Remove Shapefile, Vertical Exaggeration, Dyn Res, Contours, and multi-range Slopes overlay (Qt overlay icons are not included in exported map PNGs)
+- **Map Options** (icon, lower-left of the map): Non-modal dialog for Imagery Basemap, NOAA ENC + opacity, EEZs + opacity, Add/Remove Shapefile, **Map Display**, **Color Map**, Vertical Exaggeration, Dyn Res, Contours, and multi-range Slopes overlay (Qt overlay icons are not included in exported map PNGs)
 - **Measurement Tool** (icon to the right of Map Options): Toggle distance/heading measure mode; orange thick `+` cursor while active; bottom-strip prompt explains how to deactivate
 - **Interactive Plotting**: Pan (middle mouse), zoom (scroll), and interact with survey plans on the map (no toolbar)
 - **Real-time Statistics**: Calculate survey distances, times, and comprehensive statistics
@@ -108,16 +107,25 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Optional GMRT download offered after import when no planning GeoTIFF is present
 
 ### ADCP Calibration Planning
-- **ADCP** tab: dual-circle calibration tracks (36 segments per circle), diameter/speed/turn-time parameters, and map markers for circle centers and travel direction
+- **ADCP** tab: dual-circle calibration tracks (36 segments per circle), diameter/speed/turn-time parameters, and map markers for circle centers and travel direction. After each pick, the next button’s label turns **orange and bold** (**Pick Circle 1 Start**, then **Pick Circle 2 Center**, then **Pick Circle 2 Start**) and returns to normal once that point is chosen
 - **ADCP Plot Control**: Zoom to plan, show direction of travel, clear plan, **Show ADCP Cal Info**
 - Import/export ADCP calibration (same survey file families as other tabs where applicable); `{name}_adcp_params.json` sidecar; **GMRT download offered after import** when no planning GeoTIFF is present
 - Elevation profile follows circle segments when bathymetry is loaded
 
+### Bathymetry and topography grids
+- The **Bathymetry/Topography GeoTIFFs** panel holds **Load Bathymetry GeoTIFF**, **NaN Value**, **Zoom to Bathymetry GeoTIFF**, **Remove Bathymetry GeoTIFF**, **Download Online Bathymetry**, **Load Topography GeoTIFF**, and **Remove Topography GeoTIFF**
+- **Load Topography GeoTIFF** adds a land underlay beneath the imagery basemap and the bathymetry. It uses the same four-direction hillshade as Shaded Relief, plus a gray overlay at half opacity stretched to the land elevations in the current map window (the stretch updates on pan and zoom). Bathymetry covers the land where the bathymetry grid has data; land shows through where bathymetry is empty. **Remove Topography GeoTIFF** is enabled only while a land grid is loaded and does not remove the bathymetry
+- When a land file is loaded, survey GeoJSON and `*_params.json` store **`topography_geotiff_path`** the same way as **`geotiff_path`** (basename when the file is in the export folder). Import reloads it when the path still exists
+
 ### GeoTIFF Visualization
-- **Map Display** modes (dropdown in Bathymetry GeoTIFF): **Shaded Relief** (default), **Shaded Slope**, **Hillshade**, **Slope**
+- **Map Display** (in **Map Options**): **Shaded Relief** (default), **Shaded Slope**, **Hillshade**, **Slope**, plus **EM712 Depth Modes**, **EM304 Depth Modes**, and **EM124 Depth Modes**
 - **Shaded Relief**: Multidirectional hillshade underlay plus semi-transparent elevation color overlay (default colormap **rainbow**); uses the **dynamic vertical exaggeration** curve (`shaded_relief_dyn` column)
+- **Kongsberg depth modes**: Choosing **EM712 Depth Modes**, **EM304 Depth Modes**, or **EM124 Depth Modes** keeps the Shaded Relief hillshade and colors bathymetry by that system’s depth modes (same mode name uses the same color on every system). Depths shallower than the first mode keep the normal elevation colors. The depth-mode color bar lists the shallowest mode at the top and the deepest at the bottom. The map hover tooltip adds **Depth Mode** while a depth-mode display is selected. Choosing any other Map Display entry turns the depth-mode colors off. Mode ranges (positive-down meters; a boundary belongs to the deeper mode):
+  - **EM712**: Very Shallow 2–100, Shallow 100–200, Medium 200–300, Deep 300–500, Very Deep 500–1000, Extra Deep ≥1000
+  - **EM304**: Shallow 10–250, Medium 250–750, Deep 750–1000, Deeper 1000–3300, Very Deep 3300–5000, Extra Deep 5000–7000, Extreme Deep ≥7000
+  - **EM124**: Shallow 10–450, Medium 450–1000, Deep 1000–2600, Deeper 2600–9000, Very Deep ≥9000
 - **Shaded Slope** / **Hillshade**: Same dynamic vertical exaggeration curve as Shaded Relief for hillshade rendering; Shaded Slope adds a slope-degree overlay
-- **Color Map** button: Cycles the Shaded Relief elevation overlay colormap through rainbow, viridis, cividis, turbo, CnBu (inverted), Greys (inverted), ice / arctic / sapphire / torch (when the optional `colormaps` package is installed), RdYlBu (inverted), Spectral (inverted), hsv (inverted), jet, and winter; choice is saved between sessions and in survey `*_params.json`
+- **Color Map** (in **Map Options**, under **GeoTIFF Overlay Options**): Cycles the Shaded Relief elevation overlay colormap through rainbow, viridis, cividis, turbo, CnBu (inverted), Greys (inverted), ice / arctic / sapphire / torch (when the optional `colormaps` package is installed), RdYlBu (inverted), Spectral (inverted), hsv (inverted), jet, and winter; choice is saved between sessions and in survey `*_params.json`
 - **Map Options** dialog (map icon):
   - **Vertical Exaggeration**: Opens the breakpoint table (**Shaded Relief** values; **Shaded Relief Dyn** auto-derived); **Reset to Defaults** restores built-in breakpoints; saved in config and `*_params.json`
   - **Dyn Res: ON/OFF**: Toggle dynamic resolution loading for performance
@@ -131,7 +139,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - EEZ overlay reloads on pan/zoom and supports paused-hover name lookup
 
 ### GeoJSON metadata (and sidecar JSON)
-- **All survey `*_params.json` sidecars** (Calibration, Accuracy, Line, Backscatter, Performance, ADCP as applicable) may include **`vert_exag_table`**, **`shaded_relief_cmap`**, **`slope_overlay_bands`**, and **`slope_overlay_opacity`** so hillshade V.E., Shaded Relief colormap, and slope-overlay settings travel with the survey on export/import.
+- **All survey `*_params.json` sidecars** (Calibration, Accuracy, Line, Backscatter, Performance, ADCP as applicable) may include **`vert_exag_table`**, **`shaded_relief_cmap`**, **`slope_overlay_bands`**, and **`slope_overlay_opacity`** so hillshade V.E., Shaded Relief colormap, and slope-overlay settings travel with the survey on export/import. When a topography GeoTIFF is loaded, they also include **`topography_geotiff_path`**.
 - **Calibration**: GeoJSON holds line geometry and `line_num` / `line_name` only. The FeatureCollection **`properties`** may include **`geotiff_path`** so a saved raster can be reopened on import. **Survey speed**, **turn time (min)**, **lead-in (m)**, **heading line offset**, and **export name** live in **`{export_name}_params.json`** next to the GeoJSON (not in the `.geojson`). On import, that sidecar is optional; if it is absent, the app uses defaults and may repopulate the heading offset from the pitch line after load.
 - **Accuracy**: GeoJSON exports include **`survey_speed`**; saved raster path is stored in **`{export_name}_params.json`** as **`geotiff_path`**.
 - **Line** GeoJSON exports can include **`survey_speed`** and **`geotiff_path`** (collection and/or feature properties as applicable).
@@ -198,7 +206,7 @@ The application is organized as a package plus a launcher:
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `SAT_Planner_v2026.39.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
+- `SAT_Planner_v2026.45.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
 - `SAT_Planner.app` (macOS) — if available
 
 No installation required - just run the executable or app bundle.
@@ -261,8 +269,8 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 
 ### Basic Workflow
 
-1. **Load bathymetry** (optional): Click **Load GeoTIFF**, or **Download Online Bathymetry** to fetch a grid (GEBCO, GMRT, NCEI, WGOM, etc.) and load it into the planner. Until bathymetry or a survey plan is loaded, the map and profile show a short *Load a Test Plan or Bathymetry to begin planning* message.
-2. **GeoTIFF display** (optional): Use **Map Display** (Shaded Relief, Shaded Slope, Hillshade, Slope) and **Color Map** in the Bathymetry GeoTIFF panel; open **Map Options** (map icon) for Vertical Exaggeration, Dyn Res, Contours, and Slopes
+1. **Load bathymetry** (optional): Click **Load Bathymetry GeoTIFF**, or **Download Online Bathymetry** to fetch a grid (GEBCO, GMRT, NCEI, WGOM, etc.) and load it into the planner. Optionally click **Load Topography GeoTIFF** for a land underlay. Until bathymetry, topography, or a survey plan is loaded, the map and profile show a short *Load a Test Plan or Bathymetry to begin planning* message.
+2. **GeoTIFF display** (optional): Open **Map Options** (map icon) for **Map Display** (Shaded Relief, Shaded Slope, Hillshade, Slope, or a Kongsberg depth-mode entry), **Color Map**, Vertical Exaggeration, Dyn Res, Contours, and Slopes
 3. **Map overlays / measure** (optional): Use **Map Options** for Imagery Basemap, NOAA ENC, EEZs, and shapefiles; use the **Measurement** icon for distance/heading
 4. **Select Planning Mode**: Choose Calibration, Accuracy, Line, Backscatter, Performance, or ADCP
 5. **Configure Parameters**: Set survey parameters in the appropriate tab
@@ -325,12 +333,12 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 
 1. Load bathymetry (recommended).
 2. Open the **ADCP** tab; set circle diameter, survey speed, turn time, and related parameters.
-3. Place or import the dual-circle calibration plan; use **Zoom to ADCP Cal** and **Show ADCP Cal Info** as needed.
+3. Pick **Circle 1 Center**, then follow the orange bold label: **Pick Circle 1 Start**, **Pick Circle 2 Center**, then **Pick Circle 2 Start**. Use **Zoom to ADCP Cal** and **Show ADCP Cal Info** as needed.
 4. Use **Import Survey** / **Export Survey** to share geometry and `{name}_adcp_params.json` metadata.
 
 ### Download Online Bathymetry
 
-Click **Download Online Bathymetry** in the **Bathymetry GeoTIFF** panel to open the interactive download dialog. Sources include:
+Click **Download Online Bathymetry** in the **Bathymetry/Topography GeoTIFFs** panel to open the interactive download dialog. Sources include:
 
 - **GMRT Topo-Bathy** (default) and **GMRT Topo-Bathy (Observed Only)**
 - **GEBCO 2026**
@@ -364,6 +372,7 @@ Map controls sit as **Qt icons on the lower-left of the map** (not drawn into ex
 
 1. **Map Options** (`options_off.png` / `options_on.png` while the dialog is open): Non-modal dialog with:
    - **Imagery Basemap**, **NOAA ENC Charts** (+ opacity), **Show EEZs** (+ opacity), **Add/Remove Shapefile**
+   - **Map Display** and **Color Map**
    - **Vertical Exaggeration** and **Dyn Res**
    - **Contours (m)** and **Slopes** (three ranges + shared opacity)
    - Basemap/ENC/EEZ layers update as you pan and zoom; large-area views use wrap-aware basemap alignment
@@ -416,7 +425,7 @@ In the **Select Export Directory** dialog, click **Export Types** to enable or d
 
 Backscatter **map** PNG toggles also control `{name}_backscatter_stats.png` (+ optional `*_backscatter_stats_low.png`). Legacy configs that only stored `map_png` / `profiles_png` are migrated to set both high and low to the former value.
 
-When **GeoTIFF (Full)** or **GeoTIFF (View)** writes a file, `geotiff_path` in `*_params.json` (and GeoJSON collection properties where present) points at that exported file; otherwise it points at the loaded planning GeoTIFF, or `null` if none is in use. If the GeoTIFF is in the same directory as the export package, `geotiff_path` is stored as a **relative filename** (basename only) so the folder can be moved as a unit; otherwise an absolute path is stored. On import, relative paths resolve against the survey/`*_params.json` directory; absolute paths that no longer exist also fall back to the same-directory basename. `cell` is the larger of X/Y pixel size as integer meters. Optional `_SOURCE` is `_GMRT`, `_GEBCO`, `_NCEI`, or `_CCOM` when the grid came from **Download Data** / post-import GMRT; omitted for **Load GeoTIFF** and other unknown origins.
+When **GeoTIFF (Full)** or **GeoTIFF (View)** writes a file, `geotiff_path` in `*_params.json` (and GeoJSON collection properties where present) points at that exported file; otherwise it points at the loaded planning GeoTIFF, or `null` if none is in use. If the GeoTIFF is in the same directory as the export package, `geotiff_path` is stored as a **relative filename** (basename only) so the folder can be moved as a unit; otherwise an absolute path is stored. On import, relative paths resolve against the survey/`*_params.json` directory; absolute paths that no longer exist also fall back to the same-directory basename. `cell` is the larger of X/Y pixel size as integer meters. Optional `_SOURCE` is `_GMRT`, `_GEBCO`, `_NCEI`, or `_CCOM` when the grid came from **Download Data** / post-import GMRT; omitted for **Load Bathymetry GeoTIFF** and other unknown origins. A loaded land grid is recorded the same way as **`topography_geotiff_path`** (the land file itself is not copied).
 
 ### Other export notes
 - **Export Name preservation**: Auto-suggested names update only when the field is blank or still matches a known auto pattern (e.g. `acc_depth…`, `perf_swell…`, `cal_depth…`, `ADCP_Cal_Circle…`, `BS_YYYYMMDD_…`). User-edited custom names are not reset on Enter/blur or when related plan parameters regenerate.
@@ -441,6 +450,7 @@ When **GeoTIFF (Full)** or **GeoTIFF (View)** writes a file, `geotiff_path` in `
 - Check that the file uses a supported CRS
 - Large files may take time to load - be patient
 - Try enabling **Dyn Res** for better performance
+- If `rasterio` fails to load a DLL and a QPS Fledermaus install is on `PATH`, the launcher drops Fledermaus folders from this process only (the Windows system `PATH` is not changed)
 
 ### Import Errors
 
@@ -466,6 +476,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.45**: **Bathymetry/Topography GeoTIFFs** panel (**Load / Zoom to / Remove Bathymetry GeoTIFF**, **Load Topography GeoTIFF**, **Remove Topography GeoTIFF**). Land is a gray hillshade underlay under imagery and bathymetry; its path is stored as **`topography_geotiff_path`** and reloaded on import. **Map Display** (in Map Options) adds **EM712 / EM304 / EM124 Depth Modes** (hillshade plus named mode colors; color bar runs shallow-to-deep from top to bottom; hover shows **Depth Mode**). When a test plan is complete, the **Export** label and that tab’s **Show … Info** label turn orange and bold. ADCP pick buttons highlight the next step’s label (Circle 1 Start, Circle 2 Center, Circle 2 Start) in orange bold text.
 - **v2026.43**: Portable `geotiff_path` in survey packages. When an exported GeoTIFF (or other planning raster) lives in the same directory as `*_params.json` / GeoJSON, the path is stored as a relative filename so the package can be moved; import resolves relative paths (and missing absolute paths) against the survey directory. Same treatment for `backscatter_geotiff_path` when applicable. Post-import GMRT prompt **Cell Size (m)** pulldown (60/120/240/480/960, default **60**) matching Download Bathymetry presets; selection persists in `gmrt_import_options`.
 - **v2026.39**: **Shared Import/Export** group above the tab notebook (import/export labels and Export Name follow the active tab). **Download Online Bathymetry** replaces the GeoTIFF **Download Data** source dropdown (GEBCO, GMRT, NCEI, WGOM interactive dialog with map preview). **GMRT on import** runs **after** survey file selection and prompts only when no planning GeoTIFF is available (missing path or absent metadata). Map and profile **startup placeholders** (*Load a Test Plan or Bathymetry to begin planning*). Added `import_survey_dialog.py`, `bathymetry_download/` package, and ADCP tab documentation in README.
 - **v2026.37**: Map chrome declutter. **Map Options** icon (lower-left of map) opens a non-modal dialog for basemap/ENC/EEZ/shapefile, **Vertical Exaggeration**, **Dyn Res**, Contours, and **Slopes** (three ranges with colors, shared opacity, `-` = undefined/off). **Measurement Tool** is a map icon with orange thick `+` cursor and bottom-strip deactivate prompt. Bathymetry panel keeps **Map Display** and **Color Map** (extra ice/arctic/sapphire/torch when `colormaps` is installed; RdYlBu inverted). **Export Types** moved into the **Select Export Directory** dialog. Slope overlay bands/opacity and colormap persist in config and `*_params.json`.
