@@ -54,7 +54,7 @@ from .ui_layout import build_main_window_ui
 class DownloadBathymetryDialog(QDialog):
     """Full interactive bathymetry download dialog with map preview and AOI selection."""
 
-    geotiff_downloaded = pyqtSignal(str)
+    geotiff_downloaded = pyqtSignal(str, str)
 
     def __init__(self, parent=None, initial_source=None):
         super().__init__(parent)
@@ -1516,6 +1516,7 @@ class DownloadBathymetryDialog(QDialog):
         self.download_btn.setFont(font)
 
         path_to_load = paths[0]
+        topo_to_load = ""
         split_cb = getattr(self, "split_topo_depths_checkbox", None)
         if split_cb is not None and split_cb.isChecked() and split_cb.isEnabled():
             try:
@@ -1524,19 +1525,23 @@ class DownloadBathymetryDialog(QDialog):
                 result = split_topo_bathy(path_to_load)
                 if result.bathy_path and os.path.isfile(result.bathy_path):
                     path_to_load = result.bathy_path
+                    if result.topo_path and os.path.isfile(result.topo_path):
+                        topo_to_load = result.topo_path
                     try:
                         if os.path.isfile(paths[0]) and os.path.abspath(paths[0]) != os.path.abspath(path_to_load):
                             os.remove(paths[0])
                     except OSError:
                         pass
                     self.log_message(f"Split complete. Bathymetry file: {path_to_load}")
+                    if topo_to_load:
+                        self.log_message(f"Topography file: {topo_to_load}")
                 else:
                     self.log_message("Split produced no bathymetry file; keeping combined grid.")
             except Exception as exc:
                 self.log_message(f"Split failed ({exc}); keeping combined grid.")
 
         QMessageBox.information(self, "Success", f"GeoTIFF saved to:\n{display}")
-        self.geotiff_downloaded.emit(path_to_load)
+        self.geotiff_downloaded.emit(path_to_load, topo_to_load)
         
     def on_download_error(self, error_message):
         """Handle download error."""

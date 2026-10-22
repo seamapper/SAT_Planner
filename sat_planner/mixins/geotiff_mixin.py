@@ -1640,7 +1640,7 @@ class GeoTIFFMixin:
         self._sync_topography_button()
         self._replot_after_topography_change()
 
-    def _load_topography_geotiff_from_path(self, file_path):
+    def _load_topography_geotiff_from_path(self, file_path, replot=True):
         """Read a topography GeoTIFF into its own grid and redraw the map."""
         if not file_path or not os.path.isfile(file_path):
             return False
@@ -1659,7 +1659,8 @@ class GeoTIFFMixin:
         self.topography_extent = extent
         self.topography_geotiff_path = file_path
         self._sync_topography_button()
-        self._replot_after_topography_change()
+        if replot:
+            self._replot_after_topography_change()
         return True
 
     def _replot_after_topography_change(self):

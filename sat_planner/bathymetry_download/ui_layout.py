@@ -310,7 +310,7 @@ def _build_right_panel(window):
     window.split_topo_depths_checkbox = QCheckBox("Split Topo/Depths after download")
     window.split_topo_depths_checkbox.setChecked(True)
     window.split_topo_depths_checkbox.setToolTip(
-        "When on, split the downloaded grid and load only the bathymetry file into SAT Planner."
+        "When on, split the downloaded grid. SAT Planner loads the bathymetry file, and the topography file when the split creates one."
     )
     right_layout.addWidget(window.split_topo_depths_checkbox)
 

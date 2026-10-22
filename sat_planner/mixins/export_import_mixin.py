@@ -176,8 +176,9 @@ class ExportImportMixin:
         split_cb.setChecked(True)
         split_cb.setToolTip(
             "When on, the downloaded GMRT GeoTIFF is split into a topography file "
-            "(values >= 0) and a bathymetry file (values < 0); SAT Planner loads only "
-            "the bathymetry file. When off, a single combined topo+bathy GeoTIFF is loaded."
+            "(values >= 0) and a bathymetry file (values < 0). SAT Planner loads the "
+            "bathymetry file, and the topography file when the split creates one. "
+            "When off, a single combined topo+bathy GeoTIFF is loaded."
         )
         split_cb.setEnabled(download_cb.isChecked())
         download_cb.toggled.connect(split_cb.setEnabled)

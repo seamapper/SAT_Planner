@@ -203,10 +203,11 @@ class GMRTDownloadMixin:
             default_directory: Optional directory for the save dialog (e.g. directory of imported survey file).
                               If None, uses last_geotiff_dir or user home.
             split_topo_depths: When True, after a successful download the GeoTIFF is split into
-                              a topography file (values >= 0) and a bathymetry file (values < 0);
-                              SAT Planner loads only the bathymetry file. When False, the combined
-                              GeoTIFF is loaded as-is. If the bathymetry partition is empty the
-                              downloaded files are deleted and the user is warned.
+                              a topography file (values >= 0) and a bathymetry file (values < 0).
+                              SAT Planner loads the bathymetry file, and the topography file when
+                              the split creates one. When False, the combined GeoTIFF is loaded
+                              as-is. If the bathymetry partition is empty the downloaded files are
+                              deleted and the user is warned.
         """
         if requests is None:
             self._show_message(
@@ -299,11 +300,19 @@ class GMRTDownloadMixin:
                 return
             if success:
                 log_func("GMRT grid downloaded.", append=True)
-                path_to_load = self._maybe_split_gmrt_grid(path_or_error, split_topo_depths, log_func)
+                path_to_load, topo_path = self._maybe_split_gmrt_grid(
+                    path_or_error, split_topo_depths, log_func
+                )
                 if path_to_load is None:
                     # Split was requested but produced no bathymetry; files have been removed and
                     # the user has been warned. Do not load anything.
                     return
+                if topo_path and hasattr(self, "_load_topography_geotiff_from_path"):
+                    if self._load_topography_geotiff_from_path(topo_path, replot=False):
+                        log_func(
+                            f"Loaded topography GeoTIFF: {os.path.basename(topo_path)}",
+                            append=True,
+                        )
                 log_func("Loading GeoTIFF...", append=True)
                 if hasattr(self, "_load_geotiff_from_path"):
                     # Suppress the load-time auto-zoom so the existing plan-
@@ -350,13 +359,14 @@ class GMRTDownloadMixin:
     def _maybe_split_gmrt_grid(self, downloaded_path, split_topo_depths, log_func):
         """Apply optional topo/bathy split to a freshly downloaded GMRT GeoTIFF.
 
-        Returns the path the caller should load, or None if nothing should be loaded
-        (e.g., split requested but no bathymetry in the download). When None is returned,
-        all downloaded artifacts (combined, topo, bathy) have been deleted and the user
+        Returns (path_to_load, topo_path). path_to_load is the bathymetry (or combined)
+        GeoTIFF, or None if nothing should be loaded. topo_path is the land GeoTIFF when
+        the split wrote one and bathymetry will be loaded, otherwise None. When
+        path_to_load is None, all downloaded artifacts have been deleted and the user
         has been informed.
         """
         if not split_topo_depths:
-            return downloaded_path
+            return downloaded_path, None
 
         result = split_topo_bathy(
             downloaded_path,
@@ -369,7 +379,7 @@ class GMRTDownloadMixin:
                 f"{result.error}\n\nLoading the combined GeoTIFF instead.",
             )
             log_func(f"GMRT split failed: {result.error}", append=True)
-            return downloaded_path
+            return downloaded_path, None
 
         if result.bathy_path is None:
             # No bathymetry in the downloaded extent. Per user request: warn and
@@ -396,7 +406,7 @@ class GMRTDownloadMixin:
                 "The downloaded GMRT grid contains no bathymetry (no values below 0 m). "
                 "The downloaded file(s) have been deleted and nothing was loaded.",
             )
-            return None
+            return None, None
 
         # Split succeeded and we have a bathy file. Remove the original combined file.
         if os.path.exists(downloaded_path):
@@ -411,4 +421,5 @@ class GMRTDownloadMixin:
                     f"Failed to delete combined GeoTIFF {os.path.basename(downloaded_path)}: {exc}",
                     append=True,
                 )
-        return result.bathy_path
+        topo_path = result.topo_path if result.topo_path and os.path.isfile(result.topo_path) else None
+        return result.bathy_path, topo_path

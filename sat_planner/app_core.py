@@ -1041,8 +1041,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
     def _on_bathymetry_download_dialog_finished(self, _result=None):
         self._bathymetry_download_dialog = None
 
-    def _on_bathymetry_dialog_geotiff_downloaded(self, path):
-        """Load a downloaded GeoTIFF into the map and refresh the profile."""
+    def _on_bathymetry_dialog_geotiff_downloaded(self, path, topography_path=""):
+        """Load a downloaded GeoTIFF into the map and refresh the profile.
+
+        When the download split also wrote a land GeoTIFF, load that file as
+        the topography underlay before the bathymetry plot.
+        """
         tag = None
         dlg = getattr(self, "_bathymetry_download_dialog", None)
         if dlg is not None:
@@ -1052,6 +1056,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 tag = export_source_tag_for_data_source(source_name)
             except Exception:
                 tag = None
+        if (
+            topography_path
+            and os.path.isfile(topography_path)
+            and hasattr(self, "_load_topography_geotiff_from_path")
+        ):
+            self._load_topography_geotiff_from_path(topography_path, replot=False)
         if path and hasattr(self, "_load_geotiff_from_path"):
             self._load_geotiff_from_path(path, bathy_source_tag=tag)
         if hasattr(self, "_draw_current_profile"):

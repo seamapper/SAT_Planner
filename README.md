@@ -114,7 +114,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 
 ### Bathymetry and topography grids
 - The **Bathymetry/Topography GeoTIFFs** panel holds **Load Bathymetry GeoTIFF**, **NaN Value**, **Zoom to Bathymetry GeoTIFF**, **Remove Bathymetry GeoTIFF**, **Download Online Bathymetry**, **Load Topography GeoTIFF**, and **Remove Topography GeoTIFF**
-- **Load Topography GeoTIFF** adds a land underlay beneath the imagery basemap and the bathymetry. It uses the same four-direction hillshade as Shaded Relief, plus a gray overlay at half opacity stretched to the land elevations in the current map window (the stretch updates on pan and zoom). Bathymetry covers the land where the bathymetry grid has data; land shows through where bathymetry is empty. **Remove Topography GeoTIFF** is enabled only while a land grid is loaded and does not remove the bathymetry
+- **Load Topography GeoTIFF** adds a land underlay beneath the imagery basemap and the bathymetry. The same underlay is loaded automatically when **Download Online Bathymetry** or a post-import GMRT download splits the grid and writes a topography GeoTIFF. It uses the same four-direction hillshade as Shaded Relief, plus a gray overlay at half opacity stretched to the land elevations in the current map window (the stretch updates on pan and zoom). Bathymetry covers the land where the bathymetry grid has data; land shows through where bathymetry is empty. **Remove Topography GeoTIFF** is enabled only while a land grid is loaded and does not remove the bathymetry
 - When a land file is loaded, survey GeoJSON and `*_params.json` store **`topography_geotiff_path`** the same way as **`geotiff_path`** (basename when the file is in the export folder). Import reloads it when the path still exists
 
 ### GeoTIFF Visualization
@@ -352,7 +352,7 @@ In the dialog you can:
 - Choose cell size / resolution where the source supports it (meter presets for GMRT and WGOM)
 - Download a GeoTIFF; on success the grid is loaded into SAT Planner
 
-GMRT sources support optional **Split Topo/Depths** (load bathymetry only). Large GMRT requests may warn when estimated pixels exceed limits.
+GMRT and GEBCO sources support optional **Split Topo/Depths**. When the split writes a topography GeoTIFF, that file is loaded as the land underlay and the bathymetry file is loaded as the planning grid. Large GMRT requests may warn when estimated pixels exceed limits.
 
 ### Legacy Download GMRT Grid Dialog
 
