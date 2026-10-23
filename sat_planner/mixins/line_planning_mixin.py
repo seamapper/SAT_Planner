@@ -317,12 +317,16 @@ class LinePlanningMixin:
             self.line_planning_points.append((lat, lon))
             lats = [p[0] for p in self.line_planning_points]
             lons = [p[1] for p in self.line_planning_points]
-            if self.line_planning_line is None:
+            line = getattr(self, "line_planning_line", None)
+            if line is None or getattr(line, "axes", None) is None:
                 self.line_planning_line, = self.ax.plot(lons, lats, color='orange', linewidth=2, marker='o', label='Line Planning')
             else:
-                self.line_planning_line.set_data(lons, lats)
+                line.set_data(lons, lats)
             if hasattr(self, 'line_planning_temp_line') and self.line_planning_temp_line is not None:
-                self.line_planning_temp_line.remove()
+                try:
+                    self.line_planning_temp_line.remove()
+                except (NotImplementedError, ValueError, AttributeError):
+                    pass
                 self.line_planning_temp_line = None
             self.canvas.draw_idle()
             return True
@@ -373,13 +377,22 @@ class LinePlanningMixin:
                 if len(self.line_planning_points) > 0:
                     self.line_planning_points = []
                     if hasattr(self, 'line_planning_line') and self.line_planning_line is not None:
-                        self.line_planning_line.remove()
+                        try:
+                            self.line_planning_line.remove()
+                        except (NotImplementedError, ValueError, AttributeError):
+                            pass
                         self.line_planning_line = None
             if hasattr(self, 'line_planning_temp_line') and self.line_planning_temp_line is not None:
-                self.line_planning_temp_line.remove()
+                try:
+                    self.line_planning_temp_line.remove()
+                except (NotImplementedError, ValueError, AttributeError):
+                    pass
                 self.line_planning_temp_line = None
             if hasattr(self, 'line_planning_info_text') and self.line_planning_info_text is not None:
-                self.line_planning_info_text.set_visible(False)
+                try:
+                    self.line_planning_info_text.set_visible(False)
+                except (NotImplementedError, ValueError, AttributeError):
+                    pass
                 self.line_planning_info_text = None
             if len(self.line_planning_points) >= 2:
                 self._plot_survey_plan(preserve_view_limits=True)
@@ -961,8 +974,9 @@ class LinePlanningMixin:
         lons = [p[1] for p in self.line_planning_points] + [event.xdata]
         if event.ydata is None or event.xdata is None:
             return
-        if hasattr(self, 'line_planning_temp_line') and self.line_planning_temp_line is not None:
-            self.line_planning_temp_line.set_data(lons, lats)
+        temp_line = getattr(self, "line_planning_temp_line", None)
+        if temp_line is not None and getattr(temp_line, "axes", None) is not None:
+            temp_line.set_data(lons, lats)
         else:
             self.line_planning_temp_line, = self.ax.plot(lons, lats, color='orange', linewidth=2, linestyle='--', alpha=0.7)
         if hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None:
@@ -1043,6 +1057,7 @@ class LinePlanningMixin:
             self.line_edit_btn.setText("Click to Stop Editing Line Planning")
             self.canvas_widget.setCursor(Qt.CursorShape.SizeAllCursor)
             self.set_line_info_text("You can drag the red (start), green (waypoints), and blue (end) points to edit the line planning route.")
+            self._publish_drag_handles()
         else:
             if self.line_planning_handles:
                 self._plot_survey_plan(preserve_view_limits=True)
@@ -1118,6 +1133,7 @@ class LinePlanningMixin:
                 handle = self.ax.scatter([lon], [lat], color=color, s=100, marker='o', edgecolors='black', linewidth=2, zorder=10, picker=5)
                 self.line_planning_handles.append(handle)
             self.dragging_line_planning_handle = None
+            self._publish_drag_handles()
             if hasattr(self, "_update_line_info_depth_labels"):
                 self._update_line_info_depth_labels()
 

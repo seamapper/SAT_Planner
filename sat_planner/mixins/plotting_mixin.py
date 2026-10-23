@@ -7,9 +7,10 @@ import traceback
 import numpy as np
 import matplotlib.image as mpimg
 from matplotlib.cm import ScalarMappable
-from matplotlib.colors import LightSource, ListedColormap, Normalize, to_rgb
+from matplotlib.colors import LightSource, ListedColormap, Normalize, to_hex, to_rgb
 from matplotlib.offsetbox import AnnotationBbox, OffsetImage
 from matplotlib.patches import FancyArrowPatch, Polygon
+from matplotlib.text import Annotation
 from matplotlib.ticker import FuncFormatter
 
 from sat_planner.constants import (
@@ -32,7 +33,11 @@ class PlottingMixin:
         """True when the map has bathymetry or any survey/plan geometry to display."""
         if self.geotiff_data_array is not None and self.geotiff_extent is not None:
             return True
-        if getattr(self, "topography_data_array", None) is not None and getattr(self, "topography_extent", None) is not None:
+        if (
+            getattr(self, "show_topography_var", True)
+            and getattr(self, "topography_data_array", None) is not None
+            and getattr(self, "topography_extent", None) is not None
+        ):
             return True
         if getattr(self, "survey_lines_data", None):
             return True
@@ -149,6 +154,797 @@ class PlottingMixin:
         self.backscatter_raster_plot = None
         if hasattr(self, "canvas"):
             self.canvas.draw_idle()
+        self._sync_maplibre_plan()
+
+    @staticmethod
+    def _css_color(color):
+        try:
+            arr = np.asarray(color, dtype=float)
+            if arr.ndim >= 2:
+                color = arr.reshape(-1, arr.shape[-1])[0]
+        except Exception:
+            pass
+        try:
+            return to_hex(color)
+        except Exception:
+            return "#1f4e79"
+
+    @staticmethod
+    def _line_style_drawn(style):
+        return style not in (None, "None", "none", " ", "")
+
+    @staticmethod
+    def _line_style_dashed(style):
+        if isinstance(style, tuple):
+            return True
+        return style in ("--", "dashed", ":", "dotted", "-.", "dashdot")
+
+    def _plan_features_from_axes(self):
+        """Line, marker, polygon, and label features currently drawn on the map axes."""
+        ax = getattr(self, "ax", None)
+        if ax is None:
+            return []
+        features = []
+        for line in ax.get_lines():
+            if not line.get_visible():
+                continue
+            xs = np.asarray(line.get_xdata(), dtype=float).ravel()
+            ys = np.asarray(line.get_ydata(), dtype=float).ravel()
+            count = min(xs.size, ys.size)
+            coords = []
+            for lon, lat in zip(xs[:count], ys[:count]):
+                if np.isfinite(lon) and np.isfinite(lat):
+                    coords.append([float(lon), float(lat)])
+            if not coords:
+                continue
+            color = self._css_color(line.get_color())
+            width = float(line.get_linewidth() or 2)
+            style = line.get_linestyle()
+            if len(coords) >= 2 and self._line_style_drawn(style):
+                features.append({
+                    "type": "Feature",
+                    "properties": {
+                        "color": color,
+                        "width": max(1.0, width),
+                        "dash": self._line_style_dashed(style),
+                    },
+                    "geometry": {"type": "LineString", "coordinates": coords},
+                })
+            marker = line.get_marker()
+            if marker not in (None, "None", "none", "", " "):
+                for coord in coords:
+                    features.append({
+                        "type": "Feature",
+                        "properties": {"color": color, "marker": True},
+                        "geometry": {"type": "Point", "coordinates": coord},
+                    })
+        for patch in ax.patches:
+            if not isinstance(patch, Polygon) or not patch.get_visible():
+                continue
+            xy = np.asarray(patch.get_xy(), dtype=float)
+            if xy.ndim != 2 or xy.shape[0] < 2 or xy.shape[1] < 2:
+                continue
+            coords = []
+            for lon, lat in xy[:, :2]:
+                if np.isfinite(lon) and np.isfinite(lat):
+                    coords.append([float(lon), float(lat)])
+            if len(coords) < 2:
+                continue
+            if coords[0] != coords[-1]:
+                coords.append(coords[0])
+            features.append({
+                "type": "Feature",
+                "properties": {
+                    "color": self._css_color(patch.get_edgecolor()),
+                    "width": max(1.0, float(patch.get_linewidth() or 2)),
+                    "dash": self._line_style_dashed(patch.get_linestyle()),
+                },
+                "geometry": {"type": "LineString", "coordinates": coords},
+            })
+        for text in ax.texts:
+            if not text.get_visible():
+                continue
+            label = (text.get_text() or "").strip()
+            if not label:
+                continue
+            if isinstance(text, Annotation):
+                lon, lat = text.xy
+            elif text.get_transform() is ax.transData:
+                lon, lat = text.get_position()
+            else:
+                continue
+            try:
+                lon = float(lon)
+                lat = float(lat)
+            except (TypeError, ValueError):
+                continue
+            if not (np.isfinite(lon) and np.isfinite(lat)):
+                continue
+            features.append({
+                "type": "Feature",
+                "properties": {"label": label, "marker": False},
+                "geometry": {"type": "Point", "coordinates": [lon, lat]},
+            })
+        features.extend(self._travel_arrow_features())
+        for coll in getattr(ax, "collections", []):
+            if not coll.get_visible() or not coll.get_picker():
+                continue
+            try:
+                offsets = np.asarray(coll.get_offsets(), dtype=float)
+            except (TypeError, ValueError):
+                continue
+            if offsets.ndim != 2 or offsets.shape[1] < 2:
+                continue
+            try:
+                facecolors = coll.get_facecolor()
+                color = self._css_color(facecolors[0]) if len(facecolors) else "#1f4e79"
+            except Exception:
+                color = "#1f4e79"
+            for lon, lat in offsets[:, :2]:
+                if not (np.isfinite(lon) and np.isfinite(lat)):
+                    continue
+                features.append({
+                    "type": "Feature",
+                    "properties": {"color": color, "marker": True, "pick": True},
+                    "geometry": {"type": "Point", "coordinates": [float(lon), float(lat)]},
+                })
+        return features
+
+    def _plan_view_bounds(self, features):
+        """Bounds for the map. Prefer the axes window when it is a local view."""
+        coords = []
+        for feature in features:
+            geometry = feature.get("geometry") or {}
+            geom_coords = geometry.get("coordinates") or []
+            if geometry.get("type") == "Point":
+                coords.append(geom_coords)
+            elif geometry.get("type") == "LineString":
+                coords.extend(geom_coords)
+        if not coords:
+            return None
+        lons = [c[0] for c in coords if len(c) >= 2 and np.isfinite(c[0]) and np.isfinite(c[1])]
+        lats = [c[1] for c in coords if len(c) >= 2 and np.isfinite(c[0]) and np.isfinite(c[1])]
+        if not lons:
+            return None
+        west, east = min(lons), max(lons)
+        south, north = min(lats), max(lats)
+        ax = self.ax
+        if ax is not None:
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            view_west, view_east = sorted((float(xlim[0]), float(xlim[1])))
+            view_south, view_north = sorted((float(ylim[0]), float(ylim[1])))
+            local_view = (view_east - view_west) < 300 and (view_north - view_south) < 150
+            contains_plan = view_west <= west and view_east >= east and view_south <= south and view_north >= north
+            if local_view and contains_plan and np.isfinite([view_west, view_east, view_south, view_north]).all():
+                west, east, south, north = view_west, view_east, view_south, view_north
+        pad_lon = max((east - west) * 0.08, 0.002)
+        pad_lat = max((north - south) * 0.08, 0.002)
+        return [west - pad_lon, south - pad_lat, east + pad_lon, north + pad_lat]
+
+    def _fit_maplibre_to_axes(self):
+        """Frame the visible map on the current axes window."""
+        view = getattr(self, "map_view", None)
+        ax = getattr(self, "ax", None)
+        if view is None or ax is None or not hasattr(view, "fit_bounds"):
+            return
+        try:
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            west, east = sorted((float(xlim[0]), float(xlim[1])))
+            south, north = sorted((float(ylim[0]), float(ylim[1])))
+        except (TypeError, ValueError):
+            return
+        if not np.isfinite([west, south, east, north]).all():
+            return
+        if east - west < 1e-8 or north - south < 1e-8:
+            return
+        self._programmatic_zoom = True
+        view.fit_bounds(west, south, east, north)
+        self._hold_programmatic_zoom()
+
+    def _hold_programmatic_zoom(self):
+        """Ignore map echoes briefly so a zoom button is not pulled back."""
+        from PyQt6.QtCore import QTimer
+
+        self._programmatic_zoom = True
+        timer = getattr(self, "_programmatic_zoom_timer", None)
+        if timer is None:
+            timer = QTimer()
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda: setattr(self, "_programmatic_zoom", False))
+            self._programmatic_zoom_timer = timer
+        timer.start(800)
+
+    def _fit_maplibre_to_limits(self, xlim, ylim):
+        """Frame the visible map on a longitude window and a latitude window."""
+        view = getattr(self, "map_view", None)
+        if view is None or not hasattr(view, "fit_bounds"):
+            return
+        try:
+            west, east = sorted((float(xlim[0]), float(xlim[1])))
+            south, north = sorted((float(ylim[0]), float(ylim[1])))
+        except (TypeError, ValueError, IndexError):
+            return
+        if not self._is_geographic_box(west, south, east, north):
+            return
+        south = min(max(south, -90.0), 90.0)
+        north = min(max(north, -90.0), 90.0)
+        if north - south < 1e-8:
+            return
+        self._programmatic_zoom = True
+        view.fit_bounds(west, south, east, north)
+        self._hold_programmatic_zoom()
+
+    def _sync_maplibre_plan(self, fit=True, terrain=None):
+        """Copy the current matplotlib plan onto the visible MapLibre map.
+
+        fit recenters the map on the plan. terrain replaces the depth image.
+        A redraw that is keeping the user's zoom passes fit=False and terrain=True.
+        """
+        view = getattr(self, "map_view", None)
+        if view is None or not hasattr(view, "show_plan"):
+            return
+        try:
+            if getattr(self, "_maplibre_hold_view", False):
+                fit = False
+            if terrain is None:
+                terrain = bool(fit)
+            # A settled pan replaces the depth image and leaves the survey lines alone.
+            if not getattr(self, "_maplibre_terrain_only", False):
+                features = self._plan_features_from_axes()
+                bounds = self._plan_view_bounds(features) if features and fit else None
+                view.show_plan({"type": "FeatureCollection", "features": features}, bounds)
+            self._sync_maplibre_web_layers()
+            if terrain:
+                self._sync_maplibre_bathymetry()
+            self._sync_map_legend_overlay()
+        except Exception:
+            traceback.print_exc()
+
+    def _publish_drag_handles(self):
+        """Show draggable waypoint handles on the map without redrawing the grid."""
+        if hasattr(self, "_sync_maplibre_plan"):
+            self._sync_maplibre_plan(fit=False, terrain=False)
+
+    def _sync_maplibre_web_layers(self):
+        """Push imagery and NOAA chart visibility onto the map tile layers."""
+        view = getattr(self, "map_view", None)
+        if view is None or not hasattr(view, "set_web_layers"):
+            return
+        opacity = float(getattr(self, "noaa_charts_opacity", 50) or 0) / 100.0
+        view.set_web_layers(
+            bool(getattr(self, "show_imagery_basemap_var", False)),
+            bool(getattr(self, "show_noaa_charts_var", False)),
+            opacity,
+        )
+
+    def _sync_maplibre_bathymetry(self):
+        """Send hillshade, depth modes, contours, and slope bands as one image."""
+        view = getattr(self, "map_view", None)
+        if view is None or not hasattr(view, "show_bathymetry"):
+            return
+        url, bounds = "", None
+        # Contours are drawn on the axes, so a close view keeps that screenshot.
+        # The grid itself is colored from the elevation array so it stays sharp
+        # even when the axes are still showing the whole world.
+        if self._axes_frame_grid() and getattr(self, "contour_plot", None) is not None:
+            url, bounds = self._terrain_png_data_url()
+        if not url:
+            url, bounds = self._grid_raster_data_url()
+        if not url and self._axes_frame_grid():
+            url, bounds = self._terrain_png_data_url()
+        if not url or not bounds:
+            view.show_bathymetry("", None, None, None, None)
+            self._sync_map_colorbar_overlay()
+            return
+        west, south, east, north = bounds
+        view.show_bathymetry(url, west, south, east, north)
+        self._sync_map_colorbar_overlay()
+
+    def _on_map_colorbar_checkbox_changed(self, _state=None):
+        """Show or hide the on-screen colorbar. Exports are unchanged."""
+        checkbox = getattr(self, "show_map_colorbar_checkbox", None)
+        self.show_map_colorbar_var = bool(checkbox.isChecked()) if checkbox is not None else False
+        if hasattr(self, "_save_show_map_colorbar"):
+            self._save_show_map_colorbar()
+        self._sync_map_colorbar_overlay()
+
+    def _on_show_topography_checkbox_changed(self, _state=None):
+        """Show or hide a loaded topography grid."""
+        checkbox = getattr(self, "show_topography_checkbox", None)
+        self.show_topography_var = bool(checkbox.isChecked()) if checkbox is not None else True
+        if getattr(self, "topography_data_array", None) is None:
+            return
+        self._plot_survey_plan(preserve_view_limits=True)
+
+    def _on_map_legend_checkbox_changed(self, _state=None):
+        """Show or hide the on-screen legend. Exports always keep one."""
+        checkbox = getattr(self, "show_map_legend_checkbox", None)
+        self.show_map_legend_var = bool(checkbox.isChecked()) if checkbox is not None else False
+        if hasattr(self, "_save_show_map_legend"):
+            self._save_show_map_legend()
+        self._sync_map_legend_overlay()
+
+    def _legend_entries(self):
+        ax = getattr(self, "ax", None)
+        if ax is None:
+            return [], []
+        handles, labels = ax.get_legend_handles_labels()
+        kept_handles = []
+        kept_labels = []
+        for handle, label in zip(handles, labels):
+            text = (label or "").strip()
+            if not text or text.startswith("_"):
+                continue
+            kept_handles.append(handle)
+            kept_labels.append(text)
+        return kept_handles, kept_labels
+
+    def _render_legend_png(self):
+        """Draw the survey-line legend to PNG bytes."""
+        import io
+
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+
+        handles, labels = self._legend_entries()
+        if not handles:
+            return None
+        try:
+            figure = Figure(figsize=(2.4, 0.28 * len(labels) + 0.2), dpi=130)
+            FigureCanvasAgg(figure)
+            axes = figure.add_axes([0, 0, 1, 1])
+            axes.axis("off")
+            legend = axes.legend(
+                handles,
+                labels,
+                loc="upper left",
+                frameon=True,
+                fontsize=9,
+                borderpad=0.2,
+                labelspacing=0.15,
+                handlelength=1.5,
+                handletextpad=0.35,
+                borderaxespad=0,
+            )
+            figure.canvas.draw()
+            bbox = legend.get_window_extent().transformed(figure.dpi_scale_trans.inverted())
+            buffer = io.BytesIO()
+            figure.savefig(
+                buffer,
+                format="png",
+                dpi=130,
+                bbox_inches=bbox.expanded(1.01, 1.04),
+                transparent=True,
+                pad_inches=0,
+            )
+            return buffer.getvalue()
+        except Exception:
+            traceback.print_exc()
+            return None
+
+    def _sync_map_legend_overlay(self):
+        """Put the legend on the visible map when the Map Options toggle is on."""
+        import base64
+
+        view = getattr(self, "map_view", None)
+        if view is None or not hasattr(view, "set_legend"):
+            return
+        png = self._render_legend_png()
+        self._map_legend_png_bytes = png
+        if not png:
+            view.set_legend("", False)
+            return
+        url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+        view.set_legend(url, bool(getattr(self, "show_map_legend_var", False)))
+
+    def _active_map_colorbar(self):
+        for name in ("elevation_colorbar", "slope_colorbar"):
+            colorbar = getattr(self, name, None)
+            if colorbar is not None and getattr(colorbar, "ax", None) is not None:
+                return colorbar
+        return None
+
+    def _render_colorbar_png(self):
+        """Draw the current depth or slope scale to PNG bytes."""
+        import io
+
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+
+        colorbar = self._active_map_colorbar()
+        if colorbar is None:
+            return None
+        try:
+            label = colorbar.ax.get_ylabel() or ""
+        except Exception:
+            label = ""
+        try:
+            ticks = [float(tick) for tick in colorbar.get_ticks()]
+        except Exception:
+            ticks = []
+        try:
+            ticklabels = [tick.get_text() for tick in colorbar.ax.get_yticklabels()]
+        except Exception:
+            ticklabels = []
+        try:
+            inverted = bool(colorbar.ax.yaxis_inverted())
+        except Exception:
+            inverted = False
+        try:
+            source = colorbar.mappable
+            norm = source.norm
+            if type(norm) is Normalize:
+                norm = Normalize(vmin=norm.vmin, vmax=norm.vmax)
+            mappable = ScalarMappable(norm=norm, cmap=source.cmap)
+            mappable.set_array([])
+            figure = Figure(figsize=(1.45, 4.6), dpi=130)
+            FigureCanvasAgg(figure)
+            axes = figure.add_axes([0.08, 0.03, 0.28, 0.94])
+            drawn = figure.colorbar(mappable, cax=axes)
+            if label:
+                drawn.set_label(label, fontsize=9)
+            if (
+                ticks
+                and ticklabels
+                and len(ticks) == len(ticklabels)
+                and any(str(text).strip() for text in ticklabels)
+            ):
+                drawn.set_ticks(ticks)
+                drawn.set_ticklabels(ticklabels)
+            if inverted:
+                drawn.ax.invert_yaxis()
+            drawn.ax.tick_params(labelsize=8)
+            buffer = io.BytesIO()
+            figure.savefig(buffer, format="png", facecolor="white", bbox_inches="tight", pad_inches=0.06)
+            return buffer.getvalue()
+        except Exception:
+            traceback.print_exc()
+            return None
+
+    def _sync_map_colorbar_overlay(self):
+        """Put the colorbar on the visible map when the Map Options toggle is on."""
+        import base64
+
+        view = getattr(self, "map_view", None)
+        if view is None or not hasattr(view, "set_colorbar"):
+            return
+        png = self._render_colorbar_png()
+        self._map_colorbar_png_bytes = png
+        if not png:
+            view.set_colorbar("", False)
+            return
+        url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
+        view.set_colorbar(url, bool(getattr(self, "show_map_colorbar_var", False)))
+
+    def _axes_frame_grid(self):
+        """True when the axes window is a close view of the loaded grid."""
+        extent = getattr(self, "geotiff_extent", None)
+        ax = getattr(self, "ax", None)
+        if extent is None or ax is None:
+            return False
+        try:
+            west, east = sorted((float(extent[0]), float(extent[1])))
+            south, north = sorted((float(extent[2]), float(extent[3])))
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            view_west, view_east = sorted((float(xlim[0]), float(xlim[1])))
+            view_south, view_north = sorted((float(ylim[0]), float(ylim[1])))
+        except (TypeError, ValueError):
+            return False
+        grid_w = east - west
+        grid_h = north - south
+        if grid_w <= 0 or grid_h <= 0:
+            return False
+        covers = view_west <= east and view_east >= west and view_south <= north and view_north >= south
+        close = (view_east - view_west) <= grid_w * 4 and (view_north - view_south) <= grid_h * 4
+        return covers and close
+
+    def _fit_maplibre_to_extent(self, extent):
+        """Frame the visible map on a grid extent, in longitude and latitude."""
+        view = getattr(self, "map_view", None)
+        if view is None or extent is None or not hasattr(view, "fit_bounds"):
+            self._fit_maplibre_to_axes()
+            return
+        try:
+            west, east = sorted((float(extent[0]), float(extent[1])))
+            south, north = sorted((float(extent[2]), float(extent[3])))
+        except (TypeError, ValueError):
+            self._fit_maplibre_to_axes()
+            return
+        if not self._is_geographic_box(west, south, east, north):
+            self._fit_maplibre_to_axes()
+            return
+        pad_lon = max((east - west) * 0.06, 0.002)
+        pad_lat = max((north - south) * 0.06, 0.002)
+        view.fit_bounds(west - pad_lon, south - pad_lat, east + pad_lon, north + pad_lat)
+        self._programmatic_zoom = True
+        self._hold_programmatic_zoom()
+
+    @staticmethod
+    def _is_geographic_box(west, south, east, north):
+        return (
+            np.isfinite([west, south, east, north]).all()
+            and east > west
+            and north > south
+            and -360.0 <= west <= 360.0
+            and -360.0 <= east <= 360.0
+            and -90.5 <= south <= 90.5
+            and -90.5 <= north <= 90.5
+        )
+
+    def _grid_raster_data_url(self):
+        """Color the loaded elevation grid itself into one PNG at its own extent."""
+        import base64
+        import io
+
+        from PIL import Image
+
+        names = (
+            "topography_hillshade_plot",
+            "topography_image_plot",
+            "geotiff_hillshade_plot",
+            "geotiff_image_plot",
+            "depth_mode_image_plot",
+            "slope_overlay_image_plot",
+            "depth_overlay_image_plot",
+            "backscatter_slope_areas_overlay_plot",
+            "backscatter_raster_plot",
+        )
+        layers = []
+        for name in names:
+            image = getattr(self, name, None)
+            if image is None:
+                continue
+            rgba = self._axes_image_rgba(image)
+            if rgba is None:
+                continue
+            try:
+                left, right, bottom, top = (float(v) for v in image.get_extent())
+            except (TypeError, ValueError):
+                continue
+            layers.append((rgba, (left, right, bottom, top)))
+        if not layers:
+            return "", None
+        target = layers[0][1]
+        bathy = getattr(self, "geotiff_extent", None)
+        if bathy is not None:
+            try:
+                target = (float(bathy[0]), float(bathy[1]), float(bathy[2]), float(bathy[3]))
+            except (TypeError, ValueError):
+                target = layers[0][1]
+        base = None
+        for rgba, extent in layers:
+            if not self._extents_match(extent, target):
+                continue
+            if base is None:
+                base = rgba
+                continue
+            if rgba.shape[:2] != base.shape[:2]:
+                continue
+            base = self._composite_rgba(base, rgba)
+        if base is None:
+            return "", None
+        step = max(1, int(np.ceil(max(base.shape[:2]) / 900.0)))
+        if step > 1:
+            base = base[::step, ::step]
+        if not np.any(base[..., 3] > 0):
+            return "", None
+        picture = Image.fromarray((np.clip(base, 0.0, 1.0) * 255).astype(np.uint8), mode="RGBA")
+        buffer = io.BytesIO()
+        picture.save(buffer, format="PNG")
+        west, east = sorted((target[0], target[1]))
+        south, north = sorted((target[2], target[3]))
+        if not self._is_geographic_box(west, south, east, north):
+            return "", None
+        url = "data:image/png;base64," + base64.b64encode(buffer.getvalue()).decode("ascii")
+        return url, (west, south, east, north)
+
+    @staticmethod
+    def _extents_match(extent, target):
+        if len(extent) != 4 or len(target) != 4:
+            return False
+        span = max(abs(target[1] - target[0]), abs(target[3] - target[2]), 1e-9)
+        return max(abs(float(a) - float(b)) for a, b in zip(extent, target)) <= span * 0.05
+
+    @staticmethod
+    def _axes_image_rgba(image):
+        """RGBA copy of one matplotlib image, with empty cells transparent."""
+        data = image.get_array()
+        if data is None:
+            return None
+        arr = np.ma.asarray(data)
+        if arr.size == 0:
+            return None
+        if arr.ndim == 3 and arr.shape[-1] in (3, 4):
+            rgba = np.array(arr, dtype=float)
+            if rgba.shape[-1] == 3:
+                rgba = np.dstack([rgba, np.ones(rgba.shape[:2], dtype=float)])
+            if np.nanmax(rgba) > 1.5:
+                rgba = rgba / 255.0
+            if np.ma.is_masked(arr):
+                mask = np.ma.getmaskarray(arr)
+                rgba[mask[..., 0], 3] = 0.0
+        else:
+            sample = np.array(np.ma.filled(arr.astype(float), np.nan), dtype=float)
+            rgba = np.asarray(image.cmap(image.norm(sample)), dtype=float)
+            missing = ~np.isfinite(sample)
+            if np.ma.is_masked(arr):
+                missing = missing | np.ma.getmaskarray(arr)
+            rgba[missing, 3] = 0.0
+        alpha = image.get_alpha()
+        if isinstance(alpha, (int, float)):
+            rgba[..., 3] *= float(alpha)
+        return np.clip(rgba, 0.0, 1.0)
+
+    @staticmethod
+    def _composite_rgba(base, src):
+        src_a = src[..., 3:4]
+        dst_a = base[..., 3:4]
+        out_a = src_a + dst_a * (1.0 - src_a)
+        out_rgb = src[..., :3] * src_a + base[..., :3] * dst_a * (1.0 - src_a)
+        safe = np.where(out_a > 1e-6, out_a, 1.0)
+        out = np.dstack([out_rgb / safe, out_a[..., 0]])
+        return np.clip(out, 0.0, 1.0)
+
+    def _terrain_artists_present(self):
+        """True when the axes hold a raster the map should show under the plan lines."""
+        for name in (
+            "geotiff_image_plot",
+            "geotiff_hillshade_plot",
+            "depth_mode_image_plot",
+            "topography_hillshade_plot",
+            "topography_image_plot",
+            "slope_overlay_image_plot",
+            "depth_overlay_image_plot",
+            "backscatter_slope_areas_overlay_plot",
+            "backscatter_raster_plot",
+            "contour_plot",
+            "eez_image_plot",
+        ):
+            if getattr(self, name, None) is not None:
+                return True
+        return any(artist is not None for artist in (getattr(self, "eez_image_plots", None) or []))
+
+    def _web_basemap_images(self):
+        """Imagery and NOAA drawings that the map now renders as tile layers."""
+        images = []
+        images.extend(getattr(self, "basemap_image_plots", None) or [])
+        for name in ("basemap_image_plot", "noaa_charts_image_plot"):
+            artist = getattr(self, name, None)
+            if artist is not None:
+                images.append(artist)
+        return images
+
+    def _terrain_png_data_url(self):
+        """Rasterize the current axes window, leaving lines and labels out of the image."""
+        import base64
+        import io
+
+        from matplotlib.transforms import Bbox
+
+        ax = getattr(self, "ax", None)
+        fig = getattr(self, "figure", None)
+        if ax is None or fig is None or not self._terrain_artists_present():
+            return "", None
+        hidden = []
+
+        def hide(artist):
+            if artist is None:
+                return
+            try:
+                if artist.get_visible():
+                    artist.set_visible(False)
+                    hidden.append(artist)
+            except Exception:
+                pass
+
+        for artist in list(ax.lines) + list(ax.texts) + list(ax.patches) + list(getattr(ax, "artists", ())):
+            hide(artist)
+        hide(ax.get_legend())
+        for artist in self._web_basemap_images():
+            hide(artist)
+        axis_was_on = ax.axison
+        face = ax.get_facecolor()
+        fig_face = fig.get_facecolor()
+        ax.set_axis_off()
+        ax.set_facecolor((0, 0, 0, 0))
+        fig.patch.set_alpha(0)
+        try:
+            position = ax.get_position()
+            width_in, height_in = fig.get_size_inches()
+            if width_in < 0.5 or height_in < 0.5:
+                width_in, height_in = 12.0, 10.0
+            bbox = Bbox.from_extents(
+                position.x0 * width_in,
+                position.y0 * height_in,
+                position.x1 * width_in,
+                position.y1 * height_in,
+            )
+            if bbox.width < 0.05 or bbox.height < 0.05:
+                return "", None
+            dpi = max(48, min(100, int(900 / max(bbox.width, bbox.height))))
+            buffer = io.BytesIO()
+            fig.savefig(
+                buffer,
+                format="png",
+                dpi=dpi,
+                bbox_inches=bbox,
+                pad_inches=0,
+                transparent=True,
+                facecolor="none",
+            )
+            payload = buffer.getvalue()
+        except Exception:
+            traceback.print_exc()
+            return "", None
+        finally:
+            ax.set_facecolor(face)
+            fig.patch.set_facecolor(fig_face)
+            if axis_was_on:
+                ax.set_axis_on()
+            for artist in hidden:
+                try:
+                    artist.set_visible(True)
+                except Exception:
+                    pass
+        if not payload.startswith(b"\x89PNG"):
+            return "", None
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        west, east = sorted((float(xlim[0]), float(xlim[1])))
+        south, north = sorted((float(ylim[0]), float(ylim[1])))
+        if not np.isfinite([west, south, east, north]).all() or east <= west or north <= south:
+            return "", None
+        url = "data:image/png;base64," + base64.b64encode(payload).decode("ascii")
+        return url, (west, south, east, north)
+
+    def _travel_arrow_features(self):
+        """Direction-of-travel arrows as a shaft and a map-aligned arrowhead."""
+        features = []
+        for arrow in getattr(self, "_travel_direction_arrow_artists", None) or []:
+            if not arrow.get_visible():
+                continue
+            ends = getattr(arrow, "_travel_ends", None)
+            if not ends:
+                continue
+            (lon0, lat0), (lon1, lat1) = ends
+            lon0, lat0, lon1, lat1 = float(lon0), float(lat0), float(lon1), float(lat1)
+            cos_lat = max(0.2, float(np.cos(np.radians((lat0 + lat1) / 2.0))))
+            east = (lon1 - lon0) * cos_lat
+            north = lat1 - lat0
+            length = float(np.hypot(east, north))
+            if length < 1e-14:
+                continue
+            ux, uy = east / length, north / length
+            head = length * 0.55
+            wing = head * 0.5
+            base_e, base_n = -ux * head, -uy * head
+            left_e, left_n = base_e - uy * wing, base_n + ux * wing
+            right_e, right_n = base_e + uy * wing, base_n - ux * wing
+
+            def _ll(east_off, north_off):
+                return [lon1 + east_off / cos_lat, lat1 + north_off]
+
+            features.append({
+                "type": "Feature",
+                "properties": {"color": "#d00000", "width": 2, "dash": False},
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [[lon0, lat0], [lon1, lat1]],
+                },
+            })
+            tip = [lon1, lat1]
+            features.append({
+                "type": "Feature",
+                "properties": {"color": "#d00000"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[tip, _ll(left_e, left_n), _ll(right_e, right_n), tip]],
+                },
+            })
+        return features
 
     def _should_show_travel_direction_arrows(self):
         """ADCP circle direction arrows when the ADCP tab checkbox is checked."""
@@ -206,6 +1002,7 @@ class PlottingMixin:
             shrinkB=0,
             zorder=25,
         )
+        arrow._travel_ends = ((x0, y0), (x1, y1))
         self.ax.add_patch(arrow)
         self._travel_direction_arrow_artists.append(arrow)
 
@@ -224,6 +1021,8 @@ class PlottingMixin:
         self._draw_all_travel_direction_arrows()
         if hasattr(self, "canvas"):
             self.canvas.draw_idle()
+        if hasattr(self, "_sync_maplibre_plan"):
+            self._sync_maplibre_plan(fit=False, terrain=False)
 
     def _generate_and_plot(self, show_success_dialog=True, auto_zoom=True):
         if hasattr(self, "_commit_all_deferred_line_edits"):
@@ -524,6 +1323,8 @@ class PlottingMixin:
         extent = getattr(self, "topography_extent", None)
         self.topography_hillshade_plot = None
         self.topography_image_plot = None
+        if not getattr(self, "show_topography_var", True):
+            return
         if data is None or extent is None or not np.any(np.isfinite(data)):
             return
         finite = np.isfinite(data)
@@ -896,6 +1697,21 @@ class PlottingMixin:
         finally:
             self._plotting_survey_plan = False
 
+    def _forget_cleared_map_artists(self):
+        """Drop preview artists that figure.clear() already detached."""
+        for name in (
+            "pick_center_crosshair",
+            "line_planning_temp_line",
+            "pitch_line_temp_line",
+            "roll_line_temp_line",
+            "_temp_line",
+            "mouse_hover_info_text",
+            "pitch_line_info_text",
+            "measurement_line_artist",
+        ):
+            if getattr(self, name, None) is not None:
+                setattr(self, name, None)
+
     def _plot_survey_plan_impl(self, preserve_view_limits=True):
         try:
             if not self._has_map_planning_content():
@@ -910,6 +1726,7 @@ class PlottingMixin:
             # Extra: fully clear the figure and recreate the main axes to guarantee no extra axes remain
             self.figure.clear()
             self.ax = self.figure.add_subplot(111)
+            self._forget_cleared_map_artists()
             # Always ensure axes fill the figure area
             self.figure.subplots_adjust(left=0.085, right=0.99, top=0.95, bottom=0.08)
             self.slope_colorbar = None
@@ -2024,15 +2841,15 @@ class PlottingMixin:
                         self.ax.set_ylim(ylim)
                     # If equal, no adjustment needed
 
-                # Now set the aspect ratio with 'datalim' so the axes box stays fixed
-                # This matches the original Tkinter version - let matplotlib handle positioning automatically
-                self.ax.set_aspect(aspect_ratio, adjustable='datalim')
-
-                # If preserving view limits, restore them after setting aspect
+                # datalim aspect changes the data window to fit the axes, and a later
+                # set_xlim is ignored. While the user is keeping their zoom, leave the
+                # limits alone so the visible map does not jump.
                 if preserve_view_limits and 'preserved_xlim' in locals() and preserved_xlim is not None:
-                    # Restore the exact limits
+                    self.ax.set_aspect('auto')
                     self.ax.set_xlim(preserved_xlim)
                     self.ax.set_ylim(preserved_ylim)
+                else:
+                    self.ax.set_aspect(aspect_ratio, adjustable='datalim')
 
             except Exception:
                 # Fallback to auto if calculation fails
@@ -2156,6 +2973,7 @@ class PlottingMixin:
                 self._update_shared_survey_io_ui()
 
             self.canvas.draw_idle()
+            self._sync_maplibre_plan(fit=not preserve_view_limits, terrain=True)
 
         except Exception as e:
             print(f"Error in _plot_survey_plan: {str(e)}")
@@ -2166,6 +2984,7 @@ class PlottingMixin:
             self.ax = self.figure.add_subplot(111)
             self.figure.subplots_adjust(left=0.085, right=0.99, top=0.95, bottom=0.08)
             self.canvas.draw_idle()
+            self._sync_maplibre_plan(fit=not preserve_view_limits, terrain=True)
 
     def _clear_plot(self, full_clear=True):
         """Clear the plot and optionally reset all data."""

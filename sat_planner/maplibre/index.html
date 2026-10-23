@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SAT Planner map</title>
+  <link rel="stylesheet" href="maplibre-gl.css">
+  <style>
+    html, body, #map {
+      margin: 0;
+      height: 100%;
+      width: 100%;
+      background: #f7f5f2;
+    }
+    #startup {
+      position: absolute;
+      left: 50%;
+      top: 46%;
+      transform: translate(-50%, -50%);
+      width: min(640px, 88%);
+      text-align: center;
+      font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+      pointer-events: none;
+      z-index: 2;
+    }
+    #startup-title {
+      font-size: 16px;
+      font-weight: 650;
+      color: #333333;
+      margin-bottom: 14px;
+    }
+    #startup-message {
+      font-size: 18px;
+      font-weight: 650;
+      color: #666666;
+      white-space: pre-line;
+    }
+    .maplibregl-ctrl-attrib {
+      font-size: 11px;
+      background: rgba(255, 255, 255, 0.75);
+    }
+    #legend {
+      display: none;
+      position: absolute;
+      left: 10px;
+      bottom: 56px;
+      z-index: 3;
+      max-width: 46%;
+      max-height: 42%;
+      pointer-events: none;
+      background: transparent;
+    }
+    #colorbar {
+      display: none;
+      position: absolute;
+      right: 10px;
+      top: 72px;
+      z-index: 3;
+      max-height: calc(100% - 110px);
+      width: auto;
+      pointer-events: none;
+      background: rgba(255, 255, 255, 0.94);
+      border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+    }
+    #hover {
+      display: none;
+      position: absolute;
+      left: 10px;
+      top: 10px;
+      z-index: 3;
+      max-width: 280px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.9);
+      color: #222;
+      font: 12px/1.35 "Segoe UI", Helvetica, Arial, sans-serif;
+      white-space: pre-line;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="startup">
+    <div id="startup-title"></div>
+    <div id="startup-message"></div>
+  </div>
+  <div id="hover"></div>
+  <img id="colorbar" alt="" />
+  <img id="legend" alt="" />
+  <script src="qwebchannel.js"></script>
+  <script src="maplibre-gl.js"></script>
+  <script>
+    window.setStartup = function (title, message) {
+      document.getElementById("startup-title").textContent = title || "";
+      document.getElementById("startup-message").textContent = message || "";
+    };
+
+    function graticule() {
+      var features = [];
+      var lon;
+      var lat;
+      for (lon = -180; lon <= 180; lon += 30) {
+        features.push({
+          type: "Feature",
+          properties: {},
+          geometry: { type: "LineString", coordinates: [[lon, -85], [lon, 85]] }
+        });
+      }
+      for (lat = -60; lat <= 60; lat += 30) {
+        features.push({
+          type: "Feature",
+          properties: {},
+          geometry: { type: "LineString", coordinates: [[-180, lat], [180, lat]] }
+        });
+      }
+      return { type: "FeatureCollection", features: features };
+    }
+
+    var map = new maplibregl.Map({
+      container: "map",
+      center: [0, 0],
+      zoom: 1.15,
+      minZoom: 0.5,
+      maxZoom: 18,
+      attributionControl: false,
+      preserveDrawingBuffer: true,
+      pitchWithRotate: false,
+      dragRotate: false,
+      style: {
+        version: 8,
+        sources: {
+          graticule: { type: "geojson", data: graticule() }
+        },
+        layers: [
+          { id: "background", type: "background", paint: { "background-color": "#f7f5f2" } },
+          {
+            id: "graticule",
+            type: "line",
+            source: "graticule",
+            paint: { "line-color": "#d5d8dc", "line-width": 1 }
+          }
+        ]
+      }
+    });
+    map.touchZoomRotate.disableRotation();
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    map.addControl(new maplibregl.AttributionControl({
+      compact: false,
+      customAttribution: "MapLibre GL"
+    }), "bottom-right");
+    map.on("load", function () {
+      map.addSource("plan", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      });
+      map.addLayer({
+        id: "plan-lines",
+        type: "line",
+        source: "plan",
+        filter: ["all", ["==", ["geometry-type"], "LineString"], ["!=", ["get", "dash"], true]],
+        paint: {
+          "line-color": ["coalesce", ["get", "color"], "#1f4e79"],
+          "line-width": ["coalesce", ["get", "width"], 2]
+        }
+      });
+      map.addLayer({
+        id: "plan-lines-dashed",
+        type: "line",
+        source: "plan",
+        filter: ["all", ["==", ["geometry-type"], "LineString"], ["==", ["get", "dash"], true]],
+        paint: {
+          "line-color": ["coalesce", ["get", "color"], "#1f4e79"],
+          "line-width": ["coalesce", ["get", "width"], 2],
+          "line-dasharray": [2, 1.4]
+        }
+      });
+      map.addLayer({
+        id: "plan-fills",
+        type: "fill",
+        source: "plan",
+        filter: ["==", ["geometry-type"], "Polygon"],
+        paint: {
+          "fill-color": ["coalesce", ["get", "color"], "#d00000"],
+          "fill-opacity": 1
+        }
+      });
+      map.addLayer({
+        id: "plan-points",
+        type: "circle",
+        source: "plan",
+        filter: ["all", ["==", ["geometry-type"], "Point"], ["==", ["get", "marker"], true]],
+        paint: {
+          "circle-radius": ["case", ["==", ["get", "pick"], true], 8, 4],
+          "circle-color": ["coalesce", ["get", "color"], "#1f4e79"],
+          "circle-stroke-width": 1,
+          "circle-stroke-color": "#ffffff"
+        }
+      });
+    });
+
+    var planLabels = [];
+    var suppressView = 0;
+    var fitSerial = 0;
+
+    function scheduleFit(west, south, east, north) {
+      fitSerial += 1;
+      var serial = fitSerial;
+      function apply() {
+        if (serial !== fitSerial) {
+          return;
+        }
+        if (!map.isStyleLoaded()) {
+          map.once("idle", apply);
+          return;
+        }
+        if (![west, south, east, north].every(function (value) { return isFinite(value); })) {
+          return;
+        }
+        if (!(east > west) || !(north > south)) {
+          return;
+        }
+        suppressView += 1;
+        map.fitBounds([[west, south], [east, north]], {
+          padding: 28,
+          maxZoom: 14,
+          duration: 0
+        });
+        setTimeout(function () {
+          suppressView = Math.max(0, suppressView - 1);
+        }, 600);
+        hideStartup();
+      }
+      apply();
+    }
+
+    var planSerial = 0;
+
+    function applyPlan(collection, bounds) {
+      planSerial += 1;
+      var serial = planSerial;
+      var source = map.getSource("plan");
+      if (!source) {
+        map.once("idle", function () {
+          if (serial === planSerial) {
+            planSerial -= 1;
+            applyPlan(collection, bounds);
+          }
+        });
+        return;
+      }
+      var features = (collection && collection.features) ? collection.features : [];
+      source.setData(collection && collection.type ? collection : { type: "FeatureCollection", features: [] });
+      window._lastPlan = collection;
+      planLabels.forEach(function (marker) { marker.remove(); });
+      planLabels = [];
+      features.forEach(function (feature) {
+        var props = feature.properties || {};
+        if (!props.label || !feature.geometry || feature.geometry.type !== "Point") {
+          return;
+        }
+        var el = document.createElement("div");
+        el.textContent = props.label;
+        el.style.cssText = "font: 600 11px Segoe UI, Helvetica, Arial, sans-serif; color: #222; background: rgba(255,255,255,0.88); padding: 0 3px; border-radius: 2px; white-space: nowrap; pointer-events: none;";
+        planLabels.push(new maplibregl.Marker({ element: el, anchor: "left", offset: [6, -8] })
+          .setLngLat(feature.geometry.coordinates)
+          .addTo(map));
+      });
+      var startup = document.getElementById("startup");
+      if (startup) {
+        var hasBathymetry = !!map.getSource("bathy");
+        startup.style.display = (features.length || hasBathymetry) ? "none" : "";
+      }
+      if (bounds && bounds.length === 4) {
+        scheduleFit(bounds[0], bounds[1], bounds[2], bounds[3]);
+      }
+    }
+
+    window.setCursor = function (cssCursor) {
+      var canvas = map.getCanvas();
+      if (canvas) {
+        canvas.style.cursor = cssCursor || "";
+      }
+    };
+
+    window.setLegend = function (dataUrl, visible) {
+      var el = document.getElementById("legend");
+      if (!el) {
+        return;
+      }
+      if (dataUrl) {
+        el.src = dataUrl;
+      }
+      el.style.display = (visible && el.src) ? "block" : "none";
+    };
+
+    window.setColorbar = function (dataUrl, visible) {
+      var el = document.getElementById("colorbar");
+      if (!el) {
+        return;
+      }
+      if (dataUrl) {
+        el.src = dataUrl;
+      }
+      el.style.display = (visible && el.src) ? "block" : "none";
+    };
+
+    window.setHover = function (text) {
+      var hover = document.getElementById("hover");
+      if (!hover) {
+        return;
+      }
+      if (!text) {
+        hover.style.display = "none";
+        hover.textContent = "";
+        return;
+      }
+      hover.textContent = text;
+      hover.style.display = "block";
+    };
+
+    function bathymetryCoordinates(west, south, east, north) {
+      return [[west, north], [east, north], [east, south], [west, south]];
+    }
+
+    function layerBefore(ids) {
+      var i;
+      for (i = 0; i < ids.length; i += 1) {
+        if (map.getLayer(ids[i])) {
+          return ids[i];
+        }
+      }
+      return undefined;
+    }
+
+    function hideStartup() {
+      var startup = document.getElementById("startup");
+      if (startup) {
+        startup.style.display = "none";
+      }
+    }
+
+    function ensureWebLayers(imageryTiles) {
+      if (!map.getSource("imagery") && imageryTiles && imageryTiles.length) {
+        map.addSource("imagery", {
+          type: "raster",
+          tiles: imageryTiles,
+          tileSize: 256,
+          attribution: "Esri World Imagery"
+        });
+      }
+      if (map.getSource("imagery") && !map.getLayer("imagery")) {
+        var imageryLayer = {
+          id: "imagery",
+          type: "raster",
+          source: "imagery",
+          layout: { visibility: "none" }
+        };
+        var imageryBefore = layerBefore(["bathy", "noaa", "plan-lines"]);
+        if (imageryBefore) {
+          map.addLayer(imageryLayer, imageryBefore);
+        } else {
+          map.addLayer(imageryLayer);
+        }
+      }
+      if (!map.getSource("noaa")) {
+        map.addSource("noaa", {
+          type: "raster",
+          tiles: [window.location.origin + "/noaa/{z}/{x}/{y}.png"],
+          tileSize: 256,
+          maxzoom: 14,
+          attribution: "NOAA ENC"
+        });
+      }
+      if (!map.getLayer("noaa")) {
+        var noaaLayer = {
+          id: "noaa",
+          type: "raster",
+          source: "noaa",
+          layout: { visibility: "none" },
+          paint: { "raster-opacity": 0.5 }
+        };
+        var noaaBefore = layerBefore(["plan-lines"]);
+        if (noaaBefore) {
+          map.addLayer(noaaLayer, noaaBefore);
+        } else {
+          map.addLayer(noaaLayer);
+        }
+      }
+    }
+
+    window.setWebLayers = function (imageryOn, noaaOn, noaaOpacity, imageryTiles) {
+      function apply() {
+        ensureWebLayers(imageryTiles);
+        if (map.getLayer("imagery")) {
+          map.setLayoutProperty("imagery", "visibility", imageryOn ? "visible" : "none");
+        }
+        if (map.getLayer("noaa")) {
+          map.setLayoutProperty("noaa", "visibility", noaaOn ? "visible" : "none");
+          map.setPaintProperty("noaa", "raster-opacity", isFinite(noaaOpacity) ? noaaOpacity : 0.5);
+        }
+        if (imageryOn || noaaOn) {
+          hideStartup();
+        }
+        window._webLayers = { imagery: !!imageryOn, noaa: !!noaaOn, opacity: noaaOpacity };
+      }
+      if (!map.isStyleLoaded()) {
+        map.once("load", apply);
+        return;
+      }
+      apply();
+    };
+
+    window.setBathymetry = function (url, west, south, east, north) {
+      function apply() {
+        if (!url) {
+          if (map.getLayer("bathy")) {
+            map.removeLayer("bathy");
+          }
+          if (map.getSource("bathy")) {
+            map.removeSource("bathy");
+          }
+          var plan = window._lastPlan;
+          var planFeatures = plan && plan.features ? plan.features.length : 0;
+          if (!planFeatures) {
+            var startup = document.getElementById("startup");
+            if (startup) {
+              startup.style.display = "";
+            }
+          }
+          return;
+        }
+        var coordinates = bathymetryCoordinates(west, south, east, north);
+        var source = map.getSource("bathy");
+        if (source) {
+          source.updateImage({ url: url, coordinates: coordinates });
+          hideStartup();
+          return;
+        }
+        map.addSource("bathy", { type: "image", url: url, coordinates: coordinates });
+        var bathyLayer = { id: "bathy", type: "raster", source: "bathy" };
+        var bathyBefore = layerBefore(["noaa", "plan-lines"]);
+        if (bathyBefore) {
+          map.addLayer(bathyLayer, bathyBefore);
+        } else {
+          map.addLayer(bathyLayer);
+        }
+        hideStartup();
+      }
+      if (!map.isStyleLoaded()) {
+        map.once("load", apply);
+        return;
+      }
+      apply();
+    };
+
+    function pickHandleAt(point) {
+      if (!point || !map.getLayer("plan-points")) {
+        return false;
+      }
+      var pad = 12;
+      var hits = map.queryRenderedFeatures(
+        [[point.x - pad, point.y - pad], [point.x + pad, point.y + pad]],
+        {layers: ["plan-points"]}
+      );
+      var i;
+      for (i = 0; i < hits.length; i += 1) {
+        var props = hits[i].properties || {};
+        if (props.pick === true || props.pick === "true") {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function emitPointer(name, lngLat, button) {
+      if (!window.bridge || !lngLat) {
+        return;
+      }
+      if (name === "down") {
+        window.bridge.mapPress(lngLat.lng, lngLat.lat, button || 1);
+        return;
+      }
+      if (name === "up") {
+        window.bridge.mapRelease(lngLat.lng, lngLat.lat, button || 1);
+        return;
+      }
+      if (name === "click") {
+        window.bridge.mapClick(lngLat.lng, lngLat.lat, button || 1);
+        return;
+      }
+      window.bridge.mapMove(lngLat.lng, lngLat.lat);
+    }
+
+    var moveFrame = 0;
+    var lastLngLat = null;
+    map.on("mousemove", function (event) {
+      lastLngLat = event.lngLat;
+      if (moveFrame) {
+        return;
+      }
+      var lngLat = event.lngLat;
+      moveFrame = requestAnimationFrame(function () {
+        moveFrame = 0;
+        emitPointer("move", lngLat);
+      });
+    });
+    window.addEventListener("mouseup", function () {
+      if (!window._draggingHandle) {
+        return;
+      }
+      window._draggingHandle = false;
+      if (map.dragPan) {
+        map.dragPan.enable();
+      }
+      if (lastLngLat) {
+        emitPointer("up", lastLngLat, 1);
+      }
+    });
+    map.on("mouseout", function () {
+      if (window.bridge) {
+        window.setHover("");
+      }
+    });
+    map.on("mousedown", function (event) {
+      if (!event.originalEvent || event.originalEvent.button !== 0) {
+        return;
+      }
+      if (!pickHandleAt(event.point)) {
+        return;
+      }
+      event.preventDefault();
+      if (map.dragPan) {
+        map.dragPan.disable();
+      }
+      window._draggingHandle = true;
+      window._suppressClick = true;
+      emitPointer("down", event.lngLat, 1);
+    });
+    map.on("mouseup", function (event) {
+      if (!window._draggingHandle) {
+        return;
+      }
+      window._draggingHandle = false;
+      if (map.dragPan) {
+        map.dragPan.enable();
+      }
+      emitPointer("up", event.lngLat, 1);
+    });
+    map.on("click", function (event) {
+      if (window._suppressClick) {
+        window._suppressClick = false;
+        return;
+      }
+      emitPointer("click", event.lngLat, 1);
+    });
+    map.on("contextmenu", function (event) {
+      if (event.originalEvent) {
+        event.originalEvent.preventDefault();
+      }
+      emitPointer("click", event.lngLat, 3);
+    });
+    map.on("moveend", function () {
+      if (suppressView > 0 || !window.bridge) {
+        return;
+      }
+      var bounds = map.getBounds();
+      window.bridge.viewChanged(bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth());
+    });
+
+    if (typeof QWebChannel !== "undefined" && typeof qt !== "undefined") {
+      new QWebChannel(qt.webChannelTransport, function (channel) {
+        window.bridge = channel.objects.bridge;
+      });
+    }
+
+    function drawLabeledMap() {
+      var src = map.getCanvas();
+      var out = document.createElement("canvas");
+      out.width = src.width;
+      out.height = src.height;
+      var ctx = out.getContext("2d");
+      ctx.drawImage(src, 0, 0);
+      var ratio = src.width / Math.max(1, src.clientWidth || src.width);
+      ctx.textBaseline = "middle";
+      ctx.font = "600 " + (11 * ratio) + "px Segoe UI, Helvetica, Arial, sans-serif";
+      planLabels.forEach(function (marker) {
+        var el = marker.getElement();
+        var text = el ? el.textContent : "";
+        if (!text) {
+          return;
+        }
+        var pt = map.project(marker.getLngLat());
+        var x = (pt.x + 6) * ratio;
+        var y = (pt.y - 8) * ratio;
+        var padX = 3 * ratio;
+        var height = 14 * ratio;
+        var width = ctx.measureText(text).width + padX * 2;
+        ctx.fillStyle = "rgba(255,255,255,0.88)";
+        ctx.fillRect(x, y - height / 2, width, height);
+        ctx.fillStyle = "#222222";
+        ctx.fillText(text, x + padX, y);
+      });
+      return out.toDataURL("image/png");
+    }
+
+    window.captureMapPng = function () {
+      return new Promise(function (resolve) {
+        var done = false;
+        function finish() {
+          if (done) {
+            return;
+          }
+          done = true;
+          try {
+            resolve(drawLabeledMap());
+          } catch (err) {
+            resolve("");
+          }
+        }
+        setTimeout(finish, 1200);
+        function arm() {
+          map.once("idle", finish);
+          map.triggerRepaint();
+        }
+        if (map.loaded()) {
+          arm();
+        } else {
+          map.once("load", arm);
+        }
+      });
+    };
+
+    window.setPlan = function (collection, bounds) {
+      applyPlan(collection, bounds);
+    };
+
+    window.fitView = function (west, south, east, north) {
+      scheduleFit(west, south, east, north);
+    };
+
+    map.on("error", function (event) {
+      console.error(event && event.error ? event.error : event);
+    });
+  </script>
+</body>
+</html>

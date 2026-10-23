@@ -407,9 +407,10 @@ class AdcpMixin:
             self.adcp_circle1_segments = []
             self._adcp_set_pick_mode(None)
             self.set_adcp_activity_text(
-                "Circle 1 center set. Pick Circle 1 start point on the circle (clockwise path).",
+                "Circle 1 center set. Click the start point on the circle (clockwise path).",
                 append=False,
             )
+            next_pick = "c1_start"
         elif mode == "c1_start":
             snapped = self._adcp_snap_point_to_circle(self.adcp_circle1_center, clicked_lat, clicked_lon)
             if snapped is None:
@@ -424,15 +425,17 @@ class AdcpMixin:
                 "Circle 1 planned (clockwise). Pick Circle 2 center on the GeoTIFF.",
                 append=False,
             )
+            next_pick = None
         elif mode == "c2_center":
             self.adcp_circle2_center = (clicked_lat, clicked_lon)
             self.adcp_circle2_start = None
             self.adcp_circle2_segments = []
             self._adcp_set_pick_mode(None)
             self.set_adcp_activity_text(
-                "Circle 2 center set. Pick Circle 2 start point on the circle (counter-clockwise path).",
+                "Circle 2 center set. Click the start point on the circle (counter-clockwise path).",
                 append=False,
             )
+            next_pick = "c2_start"
         elif mode == "c2_start":
             snapped = self._adcp_snap_point_to_circle(self.adcp_circle2_center, clicked_lat, clicked_lon)
             if snapped is None:
@@ -444,11 +447,14 @@ class AdcpMixin:
             self.adcp_circle2_segments = segments
             self._adcp_set_pick_mode(None)
             self.set_adcp_activity_text("ADCP calibration plan complete (both circles).", append=False)
+            next_pick = None
         else:
             return False
 
         self._update_adcp_button_states()
         self._plot_survey_plan(preserve_view_limits=True)
+        if next_pick:
+            self._adcp_set_pick_mode(next_pick)
         if hasattr(self, "_draw_adcp_profile"):
             self._draw_adcp_profile()
         return True

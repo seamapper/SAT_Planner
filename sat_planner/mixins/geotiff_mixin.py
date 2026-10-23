@@ -56,6 +56,22 @@ class GeoTIFFMixin:
             return self.geotiff_original_extent
         return getattr(self, "geotiff_extent", None)
 
+    def _set_geotiff_zoom_level_for_window(self, xlim, ylim):
+        """Match dynamic-resolution downsampling to a settled longitude/latitude window."""
+        if not getattr(self, "dynamic_resolution_enabled", True):
+            self.geotiff_zoom_level = 1.0
+            return
+        ref_extent = self._dynamic_resolution_reference_extent()
+        if ref_extent is None:
+            return
+        full_width = ref_extent[1] - ref_extent[0]
+        full_height = ref_extent[3] - ref_extent[2]
+        current_width = abs(float(xlim[1]) - float(xlim[0]))
+        current_height = abs(float(ylim[1]) - float(ylim[0]))
+        width_ratio = current_width / full_width if full_width > 0 else 1.0
+        height_ratio = current_height / full_height if full_height > 0 else 1.0
+        self.geotiff_zoom_level = max(0.01, min(10.0, max(width_ratio, height_ratio)))
+
     def _transform_bounds_to_wgs84(self, left, bottom, right, top, src_crs):
         """Transform bounds to WGS84 using densified edges for better large-area alignment."""
         if src_crs is None or str(src_crs) == "EPSG:4326":
@@ -1392,8 +1408,15 @@ class GeoTIFFMixin:
 
             success = self._load_geotiff_at_resolution()
             if success:
-                # Re-plot with new resolution (preserve_view_limits=True will use _last_user_xlim/_last_user_ylim)
-                self._plot_survey_plan(preserve_view_limits=True)
+                # The visible lines stay. Only the depth image is replaced.
+                terrain_only = getattr(self, "map_view", None) is not None
+                if terrain_only:
+                    self._maplibre_terrain_only = True
+                try:
+                    self._plot_survey_plan(preserve_view_limits=True)
+                finally:
+                    if terrain_only:
+                        self._maplibre_terrain_only = False
                 if hasattr(self, "_on_geotiff_loaded_line_info_depth"):
                     self._on_geotiff_loaded_line_info_depth()
                 if hasattr(self, "_update_roll_line_info_labels"):
@@ -1438,10 +1461,7 @@ class GeoTIFFMixin:
 
         self.current_xlim = xlim
         self.current_ylim = ylim
-        self._last_user_xlim = xlim
-        self._last_user_ylim = ylim
-        self.ax.set_xlim(xlim)
-        self.ax.set_ylim(ylim)
+        self._commit_map_limits(xlim, ylim)
 
         ref_extent = self._dynamic_resolution_reference_extent()
         if ref_extent is not None and self.geotiff_dataset_original is not None:
@@ -1456,12 +1476,6 @@ class GeoTIFFMixin:
                 new_zoom_level = max(0.01, min(10.0, new_zoom_level))
                 self.geotiff_zoom_level = new_zoom_level
 
-            self.canvas.draw()
-            self.current_xlim = self.ax.get_xlim()
-            self.current_ylim = self.ax.get_ylim()
-            self._last_user_xlim = self.current_xlim
-            self._last_user_ylim = self.current_ylim
-
             success = self._load_geotiff_at_resolution()
             if success:
                 self._plot_survey_plan(preserve_view_limits=True)
@@ -1473,6 +1487,26 @@ class GeoTIFFMixin:
                 self.canvas.draw_idle()
         else:
             self.canvas.draw_idle()
+        if hasattr(self, "_fit_maplibre_to_limits"):
+            self._fit_maplibre_to_limits(xlim, ylim)
+        elif hasattr(self, "_fit_maplibre_to_axes"):
+            self._fit_maplibre_to_axes()
+
+    def _commit_map_limits(self, xlim, ylim):
+        """Apply a lon/lat window. A fixed-aspect axes would otherwise ignore it."""
+        ax = getattr(self, "ax", None)
+        self._setting_limits_programmatically = True
+        try:
+            if ax is not None:
+                ax.set_aspect("auto")
+                ax.set_xlim(xlim)
+                ax.set_ylim(ylim)
+        finally:
+            self._setting_limits_programmatically = False
+        self.current_xlim = xlim
+        self.current_ylim = ylim
+        self._last_user_xlim = xlim
+        self._last_user_ylim = ylim
 
     def _clear_rapid_zoom_mode(self):
         """Clear the rapid zoom mode flag."""
@@ -1528,21 +1562,29 @@ class GeoTIFFMixin:
             self.canvas.draw_idle()
 
     def _update_shaded_relief_cmap_button(self):
-        if hasattr(self, "shaded_relief_cmap_btn"):
-            label = self._shaded_relief_cmap_label()
-            self.shaded_relief_cmap_btn.setText(f"Color Map: {label}")
+        combo = getattr(self, "shaded_relief_cmap_combo", None)
+        if combo is None:
+            return
+        cmap_name = self._normalize_shaded_relief_cmap(
+            getattr(self, "shaded_relief_cmap", DEFAULT_SHADED_RELIEF_CMAP)
+        )
+        index = combo.findData(cmap_name)
+        if index < 0:
+            return
+        combo.blockSignals(True)
+        combo.setCurrentIndex(index)
+        combo.blockSignals(False)
 
-    def _cycle_shaded_relief_cmap(self):
-        """Cycle Shaded Relief elevation overlay colormap."""
-        cmap_names = self._valid_shaded_relief_cmap_names()
-        current = self._normalize_shaded_relief_cmap(getattr(self, "shaded_relief_cmap", DEFAULT_SHADED_RELIEF_CMAP))
-        try:
-            idx = cmap_names.index(current)
-        except ValueError:
-            idx = -1
-        self.shaded_relief_cmap = cmap_names[(idx + 1) % len(cmap_names)]
+    def _on_shaded_relief_cmap_changed(self, _index=None):
+        """Apply the Shaded Relief colormap chosen in Map Options."""
+        combo = getattr(self, "shaded_relief_cmap_combo", None)
+        if combo is None:
+            return
+        cmap_name = self._normalize_shaded_relief_cmap(combo.currentData())
+        if cmap_name == getattr(self, "shaded_relief_cmap", None):
+            return
+        self.shaded_relief_cmap = cmap_name
         self._save_shaded_relief_cmap()
-        self._update_shaded_relief_cmap_button()
 
         cmap_label = self._shaded_relief_cmap_label()
         msg = f"Shaded Relief colormap: {cmap_label}"
@@ -3660,6 +3702,7 @@ class GeoTIFFMixin:
             zorder=45, picker=5,
         )
         self.canvas.draw_idle()
+        self._publish_drag_handles()
 
     def _on_backscatter_move_waypoints_toggled(self, checked):
         """Enable dragging centerline endpoints; preserve area width on release."""
@@ -4747,30 +4790,22 @@ class GeoTIFFMixin:
             self._show_message("warning", "Disabled Feature", "Geospatial libraries not loaded. Cannot zoom to GeoTIFF.")
             return
 
-        if self.geotiff_extent is None:
+        if self.geotiff_extent is None and getattr(self, "geotiff_original_extent", None) is None:
             self._show_message("warning", "No GeoTIFF", "No GeoTIFF underlay is loaded to zoom to.")
             return
 
-        # Use stored initial limits if available, otherwise calculate them
-        if hasattr(self, 'initial_geotiff_xlim') and self.initial_geotiff_xlim is not None and \
-           hasattr(self, 'initial_geotiff_ylim') and self.initial_geotiff_ylim is not None:
-            # Restore to the exact initial limits when GeoTIFF was first loaded
-            self.current_xlim = self.initial_geotiff_xlim
-            self.current_ylim = self.initial_geotiff_ylim
-        else:
-            # Fallback: calculate consistent plot limits (same method used when GeoTIFF is first loaded)
-            self.current_xlim, self.current_ylim = self._calculate_consistent_plot_limits()
-            # Store them for future use
-            self.initial_geotiff_xlim = self.current_xlim
-            self.initial_geotiff_ylim = self.current_ylim
+        extent = getattr(self, "geotiff_original_extent", None) or self.geotiff_extent
+        west, east = sorted((float(extent[0]), float(extent[1])))
+        south, north = sorted((float(extent[2]), float(extent[3])))
+        pad_lon = max((east - west) * 0.04, 0.001)
+        pad_lat = max((north - south) * 0.04, 0.001)
+        self.current_xlim = (west - pad_lon, east + pad_lon)
+        self.current_ylim = (south - pad_lat, north + pad_lat)
+        self.initial_geotiff_xlim = self.current_xlim
+        self.initial_geotiff_ylim = self.current_ylim
 
         # Store these as the user's intended view limits BEFORE setting axes
-        self._last_user_xlim = self.current_xlim
-        self._last_user_ylim = self.current_ylim
-
-        # Set axis limits FIRST so _load_geotiff_at_resolution can see them
-        self.ax.set_xlim(self.current_xlim)
-        self.ax.set_ylim(self.current_ylim)
+        self._commit_map_limits(self.current_xlim, self.current_ylim)
 
         # Calculate zoom level based on the view extent vs original full GeoTIFF extent
         if self.dynamic_resolution_enabled:
@@ -4808,9 +4843,14 @@ class GeoTIFFMixin:
             if not success:
                 self._show_message("warning", "GeoTIFF Reload", "Could not reload GeoTIFF data for the new view.")
 
-        # Replot everything with preserve_view_limits=True to keep our limits
-        # This will properly display the GeoTIFF and preserve all existing lines
+        # Replot everything with preserve_view_limits=True to keep our limits.
+        # Fit the file window computed above. The plot replaces current limits
+        # with its own calculation, so those must not be read back here.
+        fit_xlim = self.current_xlim
+        fit_ylim = self.current_ylim
         self._plot_survey_plan(preserve_view_limits=True)
+        if hasattr(self, "_fit_maplibre_to_limits"):
+            self._fit_maplibre_to_limits(fit_xlim, fit_ylim)
         if hasattr(self, "_on_geotiff_loaded_line_info_depth"):
             self._on_geotiff_loaded_line_info_depth()
         if hasattr(self, "_update_roll_line_info_labels"):
@@ -4927,7 +4967,7 @@ class GeoTIFFMixin:
             vmax_elev = np.nanmax(visible_region)
         else:
             vmin_elev = np.nanmin(display_data) if not np.all(np.isnan(display_data)) else None
-            vmax_elev = np.nanmax(display_data) if not np.all(np.nan(display_data)) else None
+            vmax_elev = np.nanmax(display_data) if not np.all(np.isnan(display_data)) else None
         if vmin_elev is not None and vmax_elev is not None and vmin_elev != vmax_elev:
             self.geotiff_image_plot.set_clim(vmin=vmin_elev, vmax=vmax_elev)
 

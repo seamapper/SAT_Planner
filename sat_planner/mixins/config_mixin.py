@@ -13,6 +13,8 @@ _load_gmrt_import_options, _save_gmrt_import_options,
 _load_vert_exag_table, _save_vert_exag_table, _default_vert_exag_table,
 _vert_exag_table_for_params, _add_vert_exag_table_to_params, _apply_vert_exag_table_from_params,
 _load_shaded_relief_cmap, _save_shaded_relief_cmap, _normalize_shaded_relief_cmap,
+_load_show_map_colorbar, _save_show_map_colorbar,
+_load_show_map_legend, _save_show_map_legend,
 _shaded_relief_cmap_label, _load_slope_overlay_bands, _save_slope_overlay_bands,
 _load_depth_overlay_bands, _save_depth_overlay_bands,
 _add_geotiff_viz_params_to_params, _apply_geotiff_viz_params_from_params.
@@ -533,6 +535,64 @@ class ConfigMixin:
                     self.shaded_relief_cmap = self._normalize_shaded_relief_cmap(saved)
         except Exception:
             self.shaded_relief_cmap = DEFAULT_SHADED_RELIEF_CMAP
+
+    def _load_show_map_colorbar(self):
+        """On-screen colorbar preference. Missing config means off."""
+        self.show_map_colorbar_var = False
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+                if "show_map_colorbar" in config:
+                    self.show_map_colorbar_var = bool(config.get("show_map_colorbar"))
+        except Exception:
+            self.show_map_colorbar_var = False
+        checkbox = getattr(self, "show_map_colorbar_checkbox", None)
+        if checkbox is not None:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(self.show_map_colorbar_var)
+            checkbox.blockSignals(False)
+
+    def _save_show_map_colorbar(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            config["show_map_colorbar"] = bool(getattr(self, "show_map_colorbar_var", False))
+            with open(self.CONFIG_FILENAME, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+
+    def _load_show_map_legend(self):
+        """On-screen legend preference. Missing config means off."""
+        self.show_map_legend_var = False
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+                if "show_map_legend" in config:
+                    self.show_map_legend_var = bool(config.get("show_map_legend"))
+        except Exception:
+            self.show_map_legend_var = False
+        checkbox = getattr(self, "show_map_legend_checkbox", None)
+        if checkbox is not None:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(self.show_map_legend_var)
+            checkbox.blockSignals(False)
+
+    def _save_show_map_legend(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            config["show_map_legend"] = bool(getattr(self, "show_map_legend_var", False))
+            with open(self.CONFIG_FILENAME, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
 
     def _save_shaded_relief_cmap(self):
         try:

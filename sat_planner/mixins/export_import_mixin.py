@@ -799,19 +799,91 @@ class ExportImportMixin:
     def _export_profiles_png_enabled(self):
         return self._export_type_enabled("profiles_png_high") or self._export_type_enabled("profiles_png_low")
 
+    def _geographic_export_aspect(self):
+        """Y-to-X scale that keeps ground distance even at the center of the view."""
+        ax = getattr(self, "ax", None)
+        if ax is None:
+            return 1.0
+        ylim = ax.get_ylim()
+        center_lat = (float(ylim[0]) + float(ylim[1])) / 2.0
+        center_lat = max(-85.0, min(85.0, center_lat))
+        aspect = 1.0 / math.cos(math.radians(center_lat))
+        if not math.isfinite(aspect):
+            return 1.0
+        return float(max(0.1, min(10.0, aspect)))
+
+    def _apply_export_map_aspect(self):
+        """Shape the hidden axes for export without changing the lon/lat window."""
+        ax = getattr(self, "ax", None)
+        if ax is None:
+            return None
+        previous = (ax.get_aspect(), ax.get_adjustable(), ax.get_xlim(), ax.get_ylim())
+        self._setting_limits_programmatically = True
+        try:
+            ax.set_aspect(self._geographic_export_aspect(), adjustable="box")
+            ax.set_xlim(previous[2])
+            ax.set_ylim(previous[3])
+        finally:
+            self._setting_limits_programmatically = False
+        return previous
+
+    def _restore_export_map_aspect(self, previous):
+        ax = getattr(self, "ax", None)
+        if ax is None or not previous:
+            return
+        aspect, adjustable, xlim, ylim = previous
+        self._setting_limits_programmatically = True
+        try:
+            if aspect == "auto":
+                ax.set_aspect("auto")
+            else:
+                ax.set_aspect(aspect, adjustable=adjustable)
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+        finally:
+            self._setting_limits_programmatically = False
+
     def _save_export_map_png(self, path, **kwargs):
         had_arrows = False
         if hasattr(self, "_set_travel_direction_arrows_visible"):
             had_arrows = self._set_travel_direction_arrows_visible(False)
+        previous_aspect = None
+        self._maplibre_hold_view = True
         try:
-            return export_utils.save_export_png(
+            save_high = self._export_type_enabled("map_png_high")
+            save_low = self._export_type_enabled("map_png_low")
+            # The email-size file is the map on screen, including imagery and charts.
+            # The high-resolution file stays a matplotlib render so it keeps the color bar.
+            view = getattr(self, "map_view", None)
+            captured = None
+            if save_low and view is not None and hasattr(view, "capture_png"):
+                captured = view.capture_png()
+            low_from_view = bool(captured)
+            if save_high or (save_low and not low_from_view):
+                previous_aspect = self._apply_export_map_aspect()
+            result = export_utils.save_export_png(
                 self.figure,
                 path,
-                save_high=self._export_type_enabled("map_png_high"),
-                save_low=self._export_type_enabled("map_png_low"),
+                save_high=save_high,
+                save_low=save_low and not low_from_view,
                 **kwargs,
             )
+            if low_from_view:
+                if hasattr(self, "_render_colorbar_png"):
+                    colorbar_png = self._render_colorbar_png()
+                else:
+                    colorbar_png = getattr(self, "_map_colorbar_png_bytes", None)
+                captured = export_utils.composite_colorbar_png(captured, colorbar_png)
+                if hasattr(self, "_render_legend_png"):
+                    legend_png = self._render_legend_png()
+                else:
+                    legend_png = getattr(self, "_map_legend_png_bytes", None)
+                captured = export_utils.composite_legend_png(captured, legend_png)
+                export_utils.write_low_resolution_png_bytes(path, captured)
+            return result
         finally:
+            self._restore_export_map_aspect(previous_aspect)
+            self._maplibre_hold_view = False
             if had_arrows and hasattr(self, "_set_travel_direction_arrows_visible"):
                 self._set_travel_direction_arrows_visible(True)
 

@@ -36,7 +36,10 @@ class MapOptionsDialog(QDialog):
         depth_overlay_opacity_label,
         depth_overlay_opacity_slider,
         elevation_slope_combo,
-        shaded_relief_cmap_btn,
+        shaded_relief_cmap_combo,
+        show_map_colorbar_checkbox,
+        show_topography_checkbox,
+        show_map_legend_checkbox,
         dyn_vert_exag_btn,
         dynamic_resolution_btn,
     ):
@@ -83,8 +86,17 @@ class MapOptionsDialog(QDialog):
         map_display_row.addWidget(elevation_slope_combo, 1)
         geotiff_layout.addLayout(map_display_row)
 
-        shaded_relief_cmap_btn.setSizePolicy(half_width)
-        geotiff_layout.addWidget(shaded_relief_cmap_btn)
+        cmap_row = QHBoxLayout()
+        cmap_row.addWidget(QLabel("Color Map:"))
+        shaded_relief_cmap_combo.setSizePolicy(half_width)
+        cmap_row.addWidget(shaded_relief_cmap_combo, 1)
+        geotiff_layout.addLayout(cmap_row)
+        colorbar_row = QHBoxLayout()
+        colorbar_row.addWidget(show_map_colorbar_checkbox)
+        colorbar_row.addWidget(show_topography_checkbox)
+        colorbar_row.addWidget(show_map_legend_checkbox)
+        colorbar_row.addStretch()
+        geotiff_layout.addLayout(colorbar_row)
 
         display_row = QHBoxLayout()
         dyn_vert_exag_btn.setSizePolicy(half_width)

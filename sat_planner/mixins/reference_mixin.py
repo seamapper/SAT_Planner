@@ -805,7 +805,10 @@ class ReferenceMixin:
             print(f"Warning: Error populating parameter fields: {e}")
         if imported_params_geotiff_path and hasattr(self, '_load_geotiff_from_path'):
             if os.path.exists(imported_params_geotiff_path):
-                self._load_geotiff_from_path(imported_params_geotiff_path)
+                self._load_geotiff_from_path(
+                    imported_params_geotiff_path,
+                    auto_zoom_to_geotiff=not (self.survey_lines_data or self.cross_line_data),
+                )
             else:
                 self.set_ref_info_text(f"Saved GeoTIFF not found: {imported_params_geotiff_path}. Continuing without GeoTIFF.", append=True)
         if hasattr(self, "_maybe_load_topography_geotiff"):
@@ -846,11 +849,6 @@ class ReferenceMixin:
         self._plot_survey_plan(preserve_view_limits=True)
         if (self.survey_lines_data or self.cross_line_data) and hasattr(self, "_zoom_to_plan"):
             self._zoom_to_plan()
-            try:
-                self._last_user_xlim = self.ax.get_xlim()
-                self._last_user_ylim = self.ax.get_ylim()
-            except Exception:
-                pass
         imported_items = []
         if self.survey_lines_data:
             imported_items.append(f"{len(self.survey_lines_data)} survey line(s)")
@@ -1314,7 +1312,10 @@ class ReferenceMixin:
                 geotiff_path_to_load = self._resolve_import_sidecar_path(geotiff_path_to_load, dir_name)
             if geotiff_path_to_load and hasattr(self, '_load_geotiff_from_path'):
                 if os.path.exists(geotiff_path_to_load):
-                    self._load_geotiff_from_path(geotiff_path_to_load)
+                    self._load_geotiff_from_path(
+                        geotiff_path_to_load,
+                        auto_zoom_to_geotiff=not (self.survey_lines_data or self.cross_line_data),
+                    )
                 else:
                     self.set_ref_info_text(f"Saved GeoTIFF not found: {geotiff_path_to_load}. Continuing without GeoTIFF.", append=True)
             if hasattr(self, "_maybe_load_topography_geotiff"):
@@ -1361,11 +1362,6 @@ class ReferenceMixin:
             self._plot_survey_plan(preserve_view_limits=True)
             if (self.survey_lines_data or self.cross_line_data) and hasattr(self, "_zoom_to_plan"):
                 self._zoom_to_plan()
-            try:
-                self._last_user_xlim = self.ax.get_xlim()
-                self._last_user_ylim = self.ax.get_ylim()
-            except Exception:
-                pass
 
             # Show success message
             imported_items = []

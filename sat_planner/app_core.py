@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QScrollArea, QTabWidget, QFileDialog, QMessageBox, QDialog,
                              QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar, QGroupBox,
                              QDoubleSpinBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QEvent, QSize
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QEvent, QSize, QPoint
 from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat, QPixmap, QIcon
 import matplotlib
 matplotlib.use('QtAgg')
@@ -32,6 +32,7 @@ import time
 from .constants import (
     DEFAULT_DEPTH_OVERLAY_BANDS,
     DEFAULT_SHADED_RELIEF_CMAP,
+    SHADED_RELIEF_CMAP_OPTIONS,
     DEFAULT_SLOPE_OVERLAY_BANDS,
     DEPTH_MODE_NONE_LABEL,
     KONGSBERG_DEPTH_MODE_DISPLAY_LABELS,
@@ -62,6 +63,7 @@ from .mixins.config_mixin import ConfigMixin
 from .mixins.deferred_params_mixin import DeferredParamsMixin
 from .bathymetry_download import DownloadBathymetryDialog
 from .map_options_dialog import MapOptionsDialog
+from .maplibre import MapLibreView
 
 
 class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, PerformanceMixin, AdcpMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, DeferredParamsMixin, QMainWindow):
@@ -137,6 +139,13 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.hillshade_vs_slope_viz_mode = "hillshade"  # "hillshade" or "slope_viz" (for main underlay)
         self.show_depth_modes_var = False
         self.depth_mode_system_var = DEPTH_MODE_NONE_LABEL
+
+        # On-screen colorbar. Off until the user turns it on; the choice is saved.
+        self.show_map_colorbar_var = False
+        # Loaded topography is drawn until the user hides it.
+        self.show_topography_var = True
+        # On-screen legend. Off until the user turns it on; the choice is saved.
+        self.show_map_legend_var = False
 
         # Contour display variables
         self.show_contours_var = False  # Default to off
@@ -462,6 +471,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         # Connect axis limit change events for dynamic resolution (toolbar zoom/pan support)
         self.cid_xlim_changed = self.ax.callbacks.connect('xlim_changed', self._on_axis_limits_changed)
         self.cid_ylim_changed = self.ax.callbacks.connect('ylim_changed', self._on_axis_limits_changed)
+        if hasattr(self, "_connect_maplibre_bridge"):
+            self._connect_maplibre_bridge()
 
         # Initialize buttons states based on library availability
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -473,8 +484,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             # Restored: Enable/disable for elevation_slope_combo
             if hasattr(self, 'elevation_slope_combo'):
                 self.elevation_slope_combo.setEnabled(False)
-            if hasattr(self, 'shaded_relief_cmap_btn'):
-                self.shaded_relief_cmap_btn.setEnabled(False)
+            if hasattr(self, 'shaded_relief_cmap_combo'):
+                self.shaded_relief_cmap_combo.setEnabled(False)
             if hasattr(self, 'pick_center_btn'):
                 self.pick_center_btn.setEnabled(False)
             if hasattr(self, 'performance_pick_center_btn'):
@@ -577,6 +588,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_gmrt_import_options()
         self._load_vert_exag_table()
         self._load_shaded_relief_cmap()
+        self._load_show_map_colorbar()
+        self._load_show_map_legend()
         if hasattr(self, "_update_shaded_relief_cmap_button"):
             self._update_shaded_relief_cmap_button()
         self._load_slope_overlay_bands()
@@ -796,10 +809,26 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         map_options_off = self._media_path("layers_t_off.png")
         map_options_on = self._media_path("layers_t_on.png")
-        self._map_options_icon_off = QIcon(map_options_off) if os.path.exists(map_options_on) else QIcon()
-        self._map_options_icon_on = QIcon(map_options_on) if os.path.exists(map_options_off) else QIcon()
+        self._map_options_icon_off = QIcon(map_options_off) if os.path.exists(map_options_off) else QIcon()
+        self._map_options_icon_on = QIcon(map_options_on) if os.path.exists(map_options_on) else QIcon()
 
-        self.map_options_btn = QPushButton(self.plot_frame)
+        # The map is a native WebEngine window and covers ordinary child widgets.
+        # A tool window is a separate window, so these buttons stay above the map and receive clicks.
+        self._map_button_bar = QWidget(
+            self,
+            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowDoesNotAcceptFocus,
+        )
+        self._map_button_bar.setObjectName("mapButtonBar")
+        self._map_button_bar.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self._map_button_bar.setStyleSheet(
+            "QWidget#mapButtonBar { background: rgba(247, 245, 242, 230); border: 1px solid rgba(0, 0, 0, 40); border-radius: 6px; }"
+            "QPushButton { border: none; background: transparent; padding: 0px; }"
+        )
+        bar_layout = QHBoxLayout(self._map_button_bar)
+        bar_layout.setContentsMargins(4, 4, 4, 4)
+        bar_layout.setSpacing(4)
+
+        self.map_options_btn = QPushButton(self._map_button_bar)
         self.map_options_btn.setFlat(True)
         self.map_options_btn.setFixedSize(icon_size, icon_size)
         self.map_options_btn.setIconSize(QSize(icon_size, icon_size))
@@ -807,13 +836,14 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.map_options_btn.setStyleSheet(btn_style)
         self.map_options_btn.clicked.connect(self._toggle_map_options_dialog)
         self._set_map_options_icon_active(False)
+        bar_layout.addWidget(self.map_options_btn)
 
         measure_off = self._media_path("dht_t_grey_off.png")
         measure_on = self._media_path("dht_t_grey_on.png")
         self._measurement_icon_off = QIcon(measure_off) if os.path.exists(measure_off) else QIcon()
         self._measurement_icon_on = QIcon(measure_on) if os.path.exists(measure_on) else QIcon()
 
-        self.measurement_tool_btn = QPushButton(self.plot_frame)
+        self.measurement_tool_btn = QPushButton(self._map_button_bar)
         self.measurement_tool_btn.setFlat(True)
         self.measurement_tool_btn.setFixedSize(icon_size, icon_size)
         self.measurement_tool_btn.setIconSize(QSize(icon_size, icon_size))
@@ -822,9 +852,15 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.measurement_tool_btn.clicked.connect(self._toggle_measurement_tool_mode)
         if hasattr(self, "_update_measurement_button_state"):
             self._update_measurement_button_state()
+        bar_layout.addWidget(self.measurement_tool_btn)
+        self._map_button_bar.adjustSize()
+        self._map_button_bar.show()
 
         self.plot_frame.installEventFilter(self)
+        self.installEventFilter(self)
         self._position_map_overlay_buttons()
+        if hasattr(self, "map_view"):
+            self.map_view.loadFinished.connect(lambda _ok: self._position_map_overlay_buttons())
 
     def _set_map_options_icon_active(self, active):
         """Switch Map Options icon between off and on states."""
@@ -839,6 +875,19 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         if not hasattr(self, "plot_frame"):
             return
         margin = 8
+        bar = getattr(self, "_map_button_bar", None)
+        if bar is not None:
+            if not self.isVisible() or self.isMinimized() or not self.plot_frame.isVisible():
+                bar.hide()
+                return
+            bar.adjustSize()
+            y = max(margin, self.plot_frame.height() - bar.height() - margin)
+            bar.move(self.plot_frame.mapToGlobal(QPoint(margin, y)))
+            if not bar.isVisible():
+                bar.show()
+            bar.raise_()
+            return
+
         gap = 4
         size = getattr(self, "_map_overlay_icon_size", 36)
         y = max(margin, self.plot_frame.height() - size - margin)
@@ -888,7 +937,10 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.depth_overlay_opacity_label,
                 self.depth_overlay_opacity_slider,
                 self.elevation_slope_combo,
-                self.shaded_relief_cmap_btn,
+                self.shaded_relief_cmap_combo,
+                self.show_map_colorbar_checkbox,
+                self.show_topography_checkbox,
+                self.show_map_legend_checkbox,
                 self.dyn_vert_exag_btn,
                 self.dynamic_resolution_btn,
             )
@@ -913,9 +965,14 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._set_map_options_icon_active(False)
 
     def eventFilter(self, obj, event):
-        if hasattr(self, "plot_frame") and obj is self.plot_frame:
-            if event.type() == QEvent.Type.Resize:
-                self._position_map_overlay_buttons()
+        watched = obj is getattr(self, "plot_frame", None) or obj is self
+        if watched and event.type() in (
+            QEvent.Type.Resize,
+            QEvent.Type.Move,
+            QEvent.Type.Show,
+            QEvent.Type.WindowStateChange,
+        ):
+            self._position_map_overlay_buttons()
         return super().eventFilter(obj, event)
 
     def _setup_layout(self):
@@ -1216,10 +1273,21 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.dynamic_resolution_btn.clicked.connect(self._toggle_dynamic_resolution)
         self.dynamic_resolution_btn.setMinimumWidth(0)
         self.dynamic_resolution_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.shaded_relief_cmap_btn = QPushButton("Color Map")
-        self.shaded_relief_cmap_btn.clicked.connect(self._cycle_shaded_relief_cmap)
-        self.shaded_relief_cmap_btn.setMinimumWidth(0)
-        self.shaded_relief_cmap_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.shaded_relief_cmap_combo = QComboBox()
+        for label, cmap_name in SHADED_RELIEF_CMAP_OPTIONS:
+            self.shaded_relief_cmap_combo.addItem(label, cmap_name)
+        self.shaded_relief_cmap_combo.currentIndexChanged.connect(self._on_shaded_relief_cmap_changed)
+        self.show_map_colorbar_checkbox = QCheckBox("Colorbar")
+        self.show_map_colorbar_checkbox.setChecked(self.show_map_colorbar_var)
+        self.show_map_colorbar_checkbox.stateChanged.connect(self._on_map_colorbar_checkbox_changed)
+        self.show_topography_checkbox = QCheckBox("Topography")
+        self.show_topography_checkbox.setChecked(self.show_topography_var)
+        self.show_topography_checkbox.stateChanged.connect(self._on_show_topography_checkbox_changed)
+        self.show_map_legend_checkbox = QCheckBox("Legend")
+        self.show_map_legend_checkbox.setChecked(self.show_map_legend_var)
+        self.show_map_legend_checkbox.stateChanged.connect(self._on_map_legend_checkbox_changed)
+        self.shaded_relief_cmap_combo.setMinimumWidth(0)
+        self.shaded_relief_cmap_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         if hasattr(self, "_update_shaded_relief_cmap_button"):
             self._update_shaded_relief_cmap_button()
 
@@ -2476,10 +2544,19 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.plot_frame.setMinimumSize(400, 300)  # Ensure minimum size
         plot_layout = QVBoxLayout(self.plot_frame)
         plot_layout.setContentsMargins(0, 0, 0, 0)
+        # Matplotlib stays alive for plotting, export, and the profile chart.
+        # It is not shown: the visible map is MapLibre.
         self.canvas = FigureCanvas(self.figure)
-        plot_layout.addWidget(self.canvas)
-        self.canvas_widget = self.canvas  # For compatibility
+        self.canvas_widget = self.canvas
+        self._mpl_canvas_host = QWidget(self)
+        self._mpl_canvas_host.hide()
+        mpl_host_layout = QVBoxLayout(self._mpl_canvas_host)
+        mpl_host_layout.setContentsMargins(0, 0, 0, 0)
+        mpl_host_layout.addWidget(self.canvas)
         self._show_map_planning_placeholder()
+        self.map_view = MapLibreView(self.plot_frame)
+        self.map_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        plot_layout.addWidget(self.map_view)
 
         print(f"Widgets created - param_scroll: {self.param_scroll is not None}, plot_frame: {self.plot_frame is not None}, canvas: {self.canvas is not None}")
 

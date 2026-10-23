@@ -591,6 +591,7 @@ class CalibrationMixin:
                 self.pick_roll_line_btn.setStyleSheet("")
             self.canvas_widget.setCursor(Qt.CursorShape.SizeAllCursor)
             self.set_cal_info_text("You can drag the red (start) and blue (end) points to edit the pitch line. Heading lines have been cleared.")
+            self._publish_drag_handles()
         else:
             if self.pitch_line_start_handle or self.pitch_line_end_handle:
                 self._plot_survey_plan()
@@ -725,6 +726,7 @@ class CalibrationMixin:
                 self.pick_roll_line_btn.setStyleSheet("")
             self.canvas_widget.setCursor(Qt.CursorShape.SizeAllCursor)
             self.set_cal_info_text("You can drag the red (start) and blue (end) points to edit the roll line.")
+            self._publish_drag_handles()
         else:
             if self.roll_line_start_handle or self.roll_line_end_handle:
                 self._plot_survey_plan()
@@ -861,6 +863,7 @@ class CalibrationMixin:
                 self.set_cal_info_text(f"Error calculating updated pitch line summary: {e}")
 
             self.dragging_pitch_line_handle = None
+            self._publish_drag_handles()
 
     def _on_roll_line_handle_pick(self, event):
         if not self.edit_roll_line_mode:
@@ -947,6 +950,7 @@ class CalibrationMixin:
                 self._draw_current_profile()
             if hasattr(self, "_update_roll_line_info_labels"):
                 self._update_roll_line_info_labels()
+            self._publish_drag_handles()
 
     def _load_last_cal_import_dir(self):
         try:

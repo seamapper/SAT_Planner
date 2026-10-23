@@ -34,6 +34,8 @@ except ImportError:
     pass
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtGui import QIcon
+# Qt WebEngine must be imported before the QApplication object is created.
+import PyQt6.QtWebEngineWidgets  # noqa: F401
 from sat_planner import SurveyPlanApp
 from sat_planner.utils_ui import apply_dark_theme, media_path
 

@@ -318,6 +318,104 @@ def low_resolution_png_path(path):
     return f"{root}_low{ext}"
 
 
+def composite_colorbar_png(map_png, colorbar_png):
+    """Place a colorbar on the right side of a map image. Returns PNG bytes."""
+    import io
+
+    if not map_png or not colorbar_png:
+        return map_png
+    try:
+        from PIL import Image
+    except ImportError:
+        return map_png
+    try:
+        with Image.open(io.BytesIO(map_png)) as base_image, Image.open(io.BytesIO(colorbar_png)) as bar_image:
+            base = base_image.convert("RGBA")
+            bar = bar_image.convert("RGBA")
+            max_height = max(1, int(base.height * 0.72))
+            max_width = max(1, int(base.width * 0.18))
+            scale = min(max_height / float(bar.height), max_width / float(bar.width))
+            if scale < 1.0:
+                bar = bar.resize(
+                    (max(1, int(bar.width * scale)), max(1, int(bar.height * scale))),
+                    Image.Resampling.LANCZOS,
+                )
+            margin = max(8, int(base.width * 0.015))
+            x = max(0, base.width - bar.width - margin)
+            y = max(0, (base.height - bar.height) // 2)
+            base.alpha_composite(bar, (x, y))
+            buffer = io.BytesIO()
+            base.convert("RGB").save(buffer, format="PNG")
+            return buffer.getvalue()
+    except Exception:
+        return map_png
+
+
+def composite_legend_png(map_png, legend_png):
+    """Place a legend at the lower left of a map image. Returns PNG bytes."""
+    import io
+
+    if not map_png or not legend_png:
+        return map_png
+    try:
+        from PIL import Image
+    except ImportError:
+        return map_png
+    try:
+        with Image.open(io.BytesIO(map_png)) as base_image, Image.open(io.BytesIO(legend_png)) as legend_image:
+            base = base_image.convert("RGBA")
+            legend = legend_image.convert("RGBA")
+            max_height = max(1, int(base.height * 0.36))
+            max_width = max(1, int(base.width * 0.42))
+            scale = min(max_height / float(legend.height), max_width / float(legend.width), 1.0)
+            if scale < 1.0:
+                legend = legend.resize(
+                    (max(1, int(legend.width * scale)), max(1, int(legend.height * scale))),
+                    Image.Resampling.LANCZOS,
+                )
+            margin = max(8, int(base.width * 0.015))
+            x = margin
+            y = max(0, base.height - legend.height - margin)
+            base.alpha_composite(legend, (x, y))
+            buffer = io.BytesIO()
+            base.convert("RGB").save(buffer, format="PNG")
+            return buffer.getvalue()
+    except Exception:
+        return map_png
+
+
+def write_low_resolution_png_bytes(path, data, *, low_max_dimension_px=EMAIL_LOW_PNG_MAX_DIMENSION_PX):
+    """Write map-capture bytes to the email-sized ``*_low.png`` beside ``path``."""
+    import io
+
+    low_path = low_resolution_png_path(path)
+    remove_export_file(low_path)
+    if not data:
+        return None
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as im:
+            im = im.convert("RGB")
+            width, height = im.size
+            longest = max(width, height)
+            if longest > low_max_dimension_px:
+                scale = low_max_dimension_px / float(longest)
+                im = im.resize(
+                    (max(1, int(width * scale)), max(1, int(height * scale))),
+                    Image.Resampling.LANCZOS,
+                )
+            im.save(low_path, format="PNG", optimize=True)
+        return low_path
+    except Exception:
+        try:
+            with open(low_path, "wb") as handle:
+                handle.write(data)
+            return low_path
+        except OSError:
+            return None
+
+
 def _write_low_resolution_png_from_file(path, *, low_max_dimension_px=EMAIL_LOW_PNG_MAX_DIMENSION_PX):
     """Resize an existing PNG to ``*_low.png``; returns low path or None on failure."""
     low_path = low_resolution_png_path(path)

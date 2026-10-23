@@ -96,6 +96,8 @@ class BasemapMixin:
                         pass
                     self.noaa_charts_image_plot = None
                 self.canvas.draw_idle()
+                if hasattr(self, "_sync_maplibre_web_layers"):
+                    self._sync_maplibre_web_layers()
             else:
                 self._load_and_plot_noaa_charts()
 
@@ -110,6 +112,8 @@ class BasemapMixin:
                 self.canvas.draw_idle()
             except Exception as e:
                 print(f"Error updating NOAA charts opacity: {e}")
+        if hasattr(self, "_sync_maplibre_web_layers"):
+            self._sync_maplibre_web_layers()
 
     def _toggle_eez_layer(self):
         """Toggle World EEZ overlay on/off."""
@@ -350,8 +354,16 @@ class BasemapMixin:
                 extracted.extend(self._extract_visualization_geometries(sub_geom))
         return extracted
 
+    def _maplibre_owns_web_basemap(self):
+        """World imagery and NOAA charts are MapLibre tile layers when the map view is up."""
+        return getattr(self, "map_view", None) is not None
+
     def _load_and_plot_basemap(self, force_reload=False):
         """Load and display ArcGIS World Imagery basemap tiles."""
+        if self._maplibre_owns_web_basemap():
+            if hasattr(self, "_sync_maplibre_web_layers"):
+                self._sync_maplibre_web_layers()
+            return
         try:
             xlim = self.ax.get_xlim()
             ylim = self.ax.get_ylim()
@@ -533,6 +545,10 @@ class BasemapMixin:
 
     def _load_and_plot_noaa_charts(self, force_reload=False):
         """Load and display NOAA ENC Charts using ESRI REST MapServer export endpoint."""
+        if self._maplibre_owns_web_basemap():
+            if hasattr(self, "_sync_maplibre_web_layers"):
+                self._sync_maplibre_web_layers()
+            return
         try:
             xlim = self.ax.get_xlim()
             ylim = self.ax.get_ylim()

@@ -38,6 +38,9 @@ for pkg in ('pyproj', 'fiona', 'shapely', 'rasterio', 'matplotlib', 'colormaps')
     except Exception:
         pass
 datas += [(os.path.join(_spec_dir, 'media'), 'media')]
+_maplibre_dir = os.path.join(_spec_dir, 'sat_planner', 'maplibre')
+for _map_asset in ('index.html', 'maplibre-gl.js', 'maplibre-gl.css'):
+    datas.append((os.path.join(_maplibre_dir, _map_asset), os.path.join('sat_planner', 'maplibre')))
 
 binaries = []
 _conda_bin, _conda_share = conda_library_dirs()
@@ -105,6 +108,10 @@ a = Analysis(
         'sat_planner.import_survey_dialog',
         'sat_planner.map_options_dialog',
         'sat_planner.dyn_vert_exag_dialog',
+        'sat_planner.maplibre',
+        'sat_planner.maplibre.map_view',
+        'PyQt6.QtWebEngineWidgets',
+        'PyQt6.QtWebEngineCore',
         # Geospatial: from working old.spec (do not add osgeo)
         'fiona', 'shapely', 'pyproj', 'rasterio',
         'rasterio.sample', 'rasterio.io', 'rasterio.warp', 'rasterio.transform',

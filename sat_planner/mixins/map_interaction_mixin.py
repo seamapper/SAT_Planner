@@ -12,6 +12,30 @@ from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj, rowcol
 from sat_planner.utils_geo import decimal_degrees_to_ddm
 
 
+class _MapLibreEvent:
+    """Pointer event from the MapLibre page, shaped like a matplotlib mouse event."""
+
+    def __init__(self, ax, lon, lat, button=1):
+        self.from_maplibre = True
+        self.inaxes = ax
+        self.xdata = lon
+        self.ydata = lat
+        self.x = 0
+        self.y = 0
+        self.button = button
+        self.dblclick = False
+        self.step = 0
+        self.key = None
+
+
+class _MapPickEvent:
+    """Pick event aimed at a waypoint handle, shaped like matplotlib's pick event."""
+
+    def __init__(self, artist, mouseevent):
+        self.artist = artist
+        self.mouseevent = mouseevent
+
+
 class MapInteractionMixin:
     """Mixin for map interaction: click, scroll, pan, zoom-to, pick center."""
 
@@ -23,6 +47,12 @@ class MapInteractionMixin:
         ``None``) while ``motion_notify_event`` tracks the new axes — so relying on ``inaxes`` /
         ``xdata`` alone drops clicks even though the cyan preview (motion on ``self.ax``) works.
         """
+        if getattr(event, "from_maplibre", False):
+            lon = getattr(event, "xdata", None)
+            lat = getattr(event, "ydata", None)
+            if lon is None or lat is None:
+                return None, None
+            return float(lon), float(lat)
         ax = getattr(self, "ax", None)
         if ax is None or event.x is None or event.y is None:
             return None, None
@@ -1425,8 +1455,13 @@ class MapInteractionMixin:
 
         if hasattr(self, 'pick_center_mode') and self.pick_center_mode:
             self._cancel_eez_hover_lookup()
-            if hasattr(self, 'pick_center_crosshair') and self.pick_center_crosshair is not None:
-                self.pick_center_crosshair.remove()
+            crosshair = getattr(self, "pick_center_crosshair", None)
+            if crosshair is not None:
+                try:
+                    crosshair.remove()
+                except (NotImplementedError, ValueError, AttributeError):
+                    pass
+                self.pick_center_crosshair = None
             self.pick_center_crosshair, = self.ax.plot(mouse_lon, mouse_lat, '+', color='red', markersize=15, markeredgewidth=2)
             self.canvas.draw_idle()
             return
@@ -1624,3 +1659,254 @@ class MapInteractionMixin:
             self.pitch_line_tooltip_text.set_visible(False)
         if hasattr(self, "_set_travel_direction_arrows_visible"):
             self._set_travel_direction_arrows_visible(False)
+
+    def _connect_maplibre_bridge(self):
+        """Send map clicks, moves, and settled view bounds into the existing handlers."""
+        view = getattr(self, "map_view", None)
+        if view is None or getattr(self, "_maplibre_bridge_connected", False):
+            return
+        view.mapClicked.connect(self._on_maplibre_click)
+        view.mapPressed.connect(self._on_maplibre_press)
+        view.mapReleased.connect(self._on_maplibre_release)
+        view.mapMoved.connect(self._on_maplibre_move)
+        view.viewChanged.connect(self._on_maplibre_view_changed)
+        canvas = getattr(self, "canvas", None)
+        if canvas is not None and not getattr(canvas, "_maplibre_cursor_wrapped", False):
+            original_set_cursor = canvas.setCursor
+
+            def set_cursor(cursor, _original=original_set_cursor):
+                _original(cursor)
+                self._push_maplibre_cursor(cursor)
+
+            canvas.setCursor = set_cursor
+            canvas._maplibre_cursor_wrapped = True
+        self._maplibre_bridge_connected = True
+        if hasattr(self, "_sync_maplibre_web_layers"):
+            self._sync_maplibre_web_layers()
+
+    def _on_maplibre_click(self, lon, lat, button):
+        try:
+            self._on_plot_click(_MapLibreEvent(getattr(self, "ax", None), lon, lat, button))
+            if hasattr(self, "_sync_maplibre_plan"):
+                self._sync_maplibre_plan(fit=False)
+            self._push_maplibre_hover()
+        except Exception:
+            traceback.print_exc()
+
+    def _pick_handle_artists(self):
+        """Waypoint handles the user can drag in the active edit mode."""
+        artists = []
+        if getattr(self, "edit_line_planning_mode", False):
+            artists.extend(getattr(self, "line_planning_handles", None) or [])
+        if getattr(self, "edit_pitch_line_mode", False):
+            artists.append(getattr(self, "pitch_line_start_handle", None))
+            artists.append(getattr(self, "pitch_line_end_handle", None))
+        if getattr(self, "edit_roll_line_mode", False):
+            artists.append(getattr(self, "roll_line_start_handle", None))
+            artists.append(getattr(self, "roll_line_end_handle", None))
+        if getattr(self, "backscatter_box_move_waypoints_mode", False):
+            artists.append(getattr(self, "backscatter_move_start_handle", None))
+            artists.append(getattr(self, "backscatter_move_end_handle", None))
+        return [artist for artist in artists if artist is not None]
+
+    def _nearest_pick_handle(self, lon, lat):
+        """Return the handle nearest the click, within a small fraction of the view."""
+        ax = getattr(self, "ax", None)
+        if ax is None:
+            return None
+        x_span = abs(float(ax.get_xlim()[1]) - float(ax.get_xlim()[0])) or 1.0
+        y_span = abs(float(ax.get_ylim()[1]) - float(ax.get_ylim()[0])) or 1.0
+        best = None
+        best_dist = 0.02 ** 2
+        for artist in self._pick_handle_artists():
+            try:
+                offsets = np.asarray(artist.get_offsets(), dtype=float)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            if offsets.ndim != 2 or offsets.shape[1] < 2:
+                continue
+            for x_value, y_value in offsets[:, :2]:
+                if not (np.isfinite(x_value) and np.isfinite(y_value)):
+                    continue
+                dist = ((lon - x_value) / x_span) ** 2 + ((lat - y_value) / y_span) ** 2
+                if dist < best_dist:
+                    best_dist = dist
+                    best = artist
+        return best
+
+    def _on_maplibre_press(self, lon, lat, button):
+        """Start a waypoint drag when the press lands on a handle."""
+        if int(button) != 1:
+            return
+        artist = self._nearest_pick_handle(float(lon), float(lat))
+        if artist is None:
+            return
+        pick = _MapPickEvent(artist, _MapLibreEvent(getattr(self, "ax", None), lon, lat, 1))
+        for name in (
+            "_on_line_planning_handle_pick",
+            "_on_pitch_line_handle_pick",
+            "_on_roll_line_handle_pick",
+            "_on_backscatter_move_handle_pick",
+        ):
+            handler = getattr(self, name, None)
+            if handler is not None:
+                handler(pick)
+
+    def _dispatch_handle_drag(self, event, release):
+        """Move or drop the handle that a press selected."""
+        if getattr(self, "edit_line_planning_mode", False) and getattr(self, "dragging_line_planning_handle", None) is not None:
+            if release:
+                self._on_line_planning_handle_release(event)
+            else:
+                self._on_line_planning_handle_motion(event)
+            return True
+        if getattr(self, "edit_pitch_line_mode", False) and getattr(self, "dragging_pitch_line_handle", None):
+            if release:
+                self._on_pitch_line_handle_release(event)
+            else:
+                self._on_pitch_line_handle_motion(event)
+            return True
+        if getattr(self, "edit_roll_line_mode", False) and getattr(self, "dragging_roll_line_handle", None):
+            if release:
+                self._on_roll_line_handle_release(event)
+            else:
+                self._on_roll_line_handle_motion(event)
+            return True
+        if getattr(self, "backscatter_box_move_waypoints_mode", False) and getattr(self, "dragging_backscatter_move_handle", None):
+            if release:
+                self._on_backscatter_move_handle_release(event)
+            else:
+                self._on_backscatter_move_handle_motion(event)
+            return True
+        return False
+
+    def _on_maplibre_release(self, lon, lat, button):
+        event = _MapLibreEvent(getattr(self, "ax", None), lon, lat, button)
+        if self._dispatch_handle_drag(event, release=True) and hasattr(self, "_publish_drag_handles"):
+            self._publish_drag_handles()
+
+    def _on_maplibre_move(self, lon, lat):
+        try:
+            event = _MapLibreEvent(getattr(self, "ax", None), lon, lat)
+            if self._dispatch_handle_drag(event, release=False):
+                if hasattr(self, "_publish_drag_handles"):
+                    self._publish_drag_handles()
+                return
+            self._on_mouse_motion(event)
+            if self._maplibre_motion_needs_redraw() and hasattr(self, "_sync_maplibre_plan"):
+                self._sync_maplibre_plan(fit=False)
+            self._push_maplibre_hover()
+        except Exception:
+            traceback.print_exc()
+
+    def _maplibre_motion_needs_redraw(self):
+        return any(getattr(self, name, False) for name in (
+            "measurement_tool_mode",
+            "backscatter_box_draw_mode",
+            "backscatter_box_edit_width_mode",
+            "line_planning_mode",
+            "pick_pitch_line_mode",
+            "pick_roll_line_mode",
+            "pick_center_mode",
+        ))
+
+    def _on_maplibre_view_changed(self, west, south, east, north):
+        """Keep the hidden axes on the view the user just panned or zoomed to."""
+        ax = getattr(self, "ax", None)
+        if ax is None or getattr(self, "_maplibre_refreshing_view", False):
+            return
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+        current = (min(xlim), min(ylim), max(xlim), max(ylim))
+        incoming = (float(west), float(south), float(east), float(north))
+        if max(abs(a - b) for a, b in zip(current, incoming)) < 1e-7:
+            return
+        if getattr(self, "_programmatic_zoom", False):
+            return
+        self._maplibre_refreshing_view = True
+        self._maplibre_hold_view = True
+        self._setting_limits_programmatically = True
+        try:
+            ax.set_xlim(west, east)
+            ax.set_ylim(south, north)
+            # The map reports its startup world view before any grid is loaded.
+            # Keeping that as the user's zoom makes a later GeoTIFF draw into the
+            # whole world, where the grid is too small to see.
+            span_lon = abs(float(east) - float(west))
+            span_lat = abs(float(north) - float(south))
+            local_view = span_lon < 300 and span_lat < 150
+            if local_view or getattr(self, "geotiff_data_array", None) is not None:
+                self._last_user_xlim = (west, east)
+                self._last_user_ylim = (south, north)
+            has_grid = getattr(self, "geotiff_dataset_original", None) is not None
+            if has_grid and hasattr(self, "_set_geotiff_zoom_level_for_window"):
+                self._set_geotiff_zoom_level_for_window((west, east), (south, north))
+            if has_grid and hasattr(self, "_load_geotiff_at_resolution"):
+                try:
+                    self._load_geotiff_at_resolution()
+                except Exception:
+                    traceback.print_exc()
+            # EEZ is still drawn in Python and baked into the terrain image, so a pan has to redraw it.
+            # The survey lines already on the map are left in place.
+            needs_redraw = has_grid or bool(getattr(self, "show_eez_var", False))
+            self._maplibre_terrain_only = True
+            try:
+                if needs_redraw and hasattr(self, "_plot_survey_plan"):
+                    self._plot_survey_plan(preserve_view_limits=True)
+                elif hasattr(self, "_sync_maplibre_bathymetry"):
+                    self._sync_maplibre_bathymetry()
+            finally:
+                self._maplibre_terrain_only = False
+        finally:
+            self._setting_limits_programmatically = False
+            self._maplibre_hold_view = False
+            self._maplibre_refreshing_view = False
+
+    def _push_maplibre_hover(self):
+        view = getattr(self, "map_view", None)
+        if view is None or not hasattr(view, "set_hover"):
+            return
+        info = getattr(self, "mouse_hover_info_text", None)
+        text = ""
+        if info is not None:
+            try:
+                if info.get_visible():
+                    text = info.get_text() or ""
+            except Exception:
+                text = ""
+        view.set_hover(text)
+
+    def _push_maplibre_cursor(self, cursor):
+        view = getattr(self, "map_view", None)
+        if view is None or not hasattr(view, "set_cursor"):
+            return
+        import base64
+
+        from PyQt6.QtCore import QBuffer, QIODevice
+
+        shape = cursor.shape() if isinstance(cursor, QCursor) else cursor
+        css = ""
+        if shape == Qt.CursorShape.CrossCursor:
+            css = "crosshair"
+        elif shape == Qt.CursorShape.OpenHandCursor:
+            css = "grab"
+        elif shape == Qt.CursorShape.ClosedHandCursor:
+            css = "grabbing"
+        elif shape == Qt.CursorShape.PointingHandCursor:
+            css = "pointer"
+        elif shape == Qt.CursorShape.BlankCursor:
+            css = "none"
+        elif isinstance(cursor, QCursor) and shape == Qt.CursorShape.BitmapCursor:
+            pixmap = cursor.pixmap()
+            if pixmap is not None and not pixmap.isNull():
+                buffer = QBuffer()
+                buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+                pixmap.save(buffer, "PNG")
+                encoded = base64.b64encode(bytes(buffer.data())).decode("ascii")
+                hot = cursor.hotSpot()
+                css = "url(data:image/png;base64,{encoded}) {x} {y}, crosshair".format(
+                    encoded=encoded, x=hot.x(), y=hot.y()
+                )
+            else:
+                css = "crosshair"
+        view.set_cursor(css)
