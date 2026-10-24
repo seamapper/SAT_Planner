@@ -27,6 +27,7 @@ class MapOptionsDialog(QDialog):
         add_shapefile_btn,
         show_contours_checkbox,
         contour_interval_entry,
+        high_res_screenshot_checkbox,
         show_slope_overlay_checkbox,
         slope_overlay_band_widgets,
         slope_overlay_opacity_label,
@@ -40,6 +41,8 @@ class MapOptionsDialog(QDialog):
         show_map_colorbar_checkbox,
         show_topography_checkbox,
         show_map_legend_checkbox,
+        show_point_labels_checkbox,
+        show_line_labels_checkbox,
         dyn_vert_exag_btn,
         dynamic_resolution_btn,
     ):
@@ -94,9 +97,15 @@ class MapOptionsDialog(QDialog):
         colorbar_row = QHBoxLayout()
         colorbar_row.addWidget(show_map_colorbar_checkbox)
         colorbar_row.addWidget(show_topography_checkbox)
-        colorbar_row.addWidget(show_map_legend_checkbox)
         colorbar_row.addStretch()
         geotiff_layout.addLayout(colorbar_row)
+
+        legend_row = QHBoxLayout()
+        legend_row.addWidget(show_map_legend_checkbox)
+        legend_row.addWidget(show_point_labels_checkbox)
+        legend_row.addWidget(show_line_labels_checkbox)
+        legend_row.addStretch()
+        geotiff_layout.addLayout(legend_row)
 
         display_row = QHBoxLayout()
         dyn_vert_exag_btn.setSizePolicy(half_width)
@@ -109,6 +118,7 @@ class MapOptionsDialog(QDialog):
         contours_row.addWidget(show_contours_checkbox)
         contour_interval_entry.setMaximumWidth(80)
         contours_row.addWidget(contour_interval_entry)
+        contours_row.addWidget(high_res_screenshot_checkbox)
         contours_row.addStretch()
         geotiff_layout.addLayout(contours_row)
 

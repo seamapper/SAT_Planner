@@ -15,6 +15,9 @@ _vert_exag_table_for_params, _add_vert_exag_table_to_params, _apply_vert_exag_ta
 _load_shaded_relief_cmap, _save_shaded_relief_cmap, _normalize_shaded_relief_cmap,
 _load_show_map_colorbar, _save_show_map_colorbar,
 _load_show_map_legend, _save_show_map_legend,
+_load_show_point_labels, _save_show_point_labels,
+_load_show_line_labels, _save_show_line_labels,
+_load_high_res_display, _save_high_res_display,
 _shaded_relief_cmap_label, _load_slope_overlay_bands, _save_slope_overlay_bands,
 _load_depth_overlay_bands, _save_depth_overlay_bands,
 _add_geotiff_viz_params_to_params, _apply_geotiff_viz_params_from_params.
@@ -589,6 +592,93 @@ class ConfigMixin:
                 with open(self.CONFIG_FILENAME, "r") as f:
                     config = json.load(f)
             config["show_map_legend"] = bool(getattr(self, "show_map_legend_var", False))
+            with open(self.CONFIG_FILENAME, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+
+    def _load_show_point_labels(self):
+        """On-screen waypoint labels. Missing config means on."""
+        self.show_point_labels_var = True
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+                if "show_point_labels" in config:
+                    self.show_point_labels_var = bool(config.get("show_point_labels"))
+        except Exception:
+            self.show_point_labels_var = True
+        checkbox = getattr(self, "show_point_labels_checkbox", None)
+        if checkbox is not None:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(self.show_point_labels_var)
+            checkbox.blockSignals(False)
+
+    def _save_show_point_labels(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            config["show_point_labels"] = bool(getattr(self, "show_point_labels_var", True))
+            with open(self.CONFIG_FILENAME, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+
+    def _load_show_line_labels(self):
+        """Names drawn along survey lines. Missing config means off."""
+        self.show_line_labels_var = False
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+                if "show_line_labels" in config:
+                    self.show_line_labels_var = bool(config.get("show_line_labels"))
+        except Exception:
+            self.show_line_labels_var = False
+        checkbox = getattr(self, "show_line_labels_checkbox", None)
+        if checkbox is not None:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(self.show_line_labels_var)
+            checkbox.blockSignals(False)
+
+    def _save_show_line_labels(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            config["show_line_labels"] = bool(getattr(self, "show_line_labels_var", False))
+            with open(self.CONFIG_FILENAME, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+
+    def _load_high_res_display(self):
+        """Larger on-screen depth picture. Missing config means on."""
+        self.high_res_screenshot_var = True
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+                if "high_res_display" in config:
+                    self.high_res_screenshot_var = bool(config.get("high_res_display"))
+        except Exception:
+            self.high_res_screenshot_var = True
+        checkbox = getattr(self, "high_res_screenshot_checkbox", None)
+        if checkbox is not None:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(self.high_res_screenshot_var)
+            checkbox.blockSignals(False)
+
+    def _save_high_res_display(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            config["high_res_display"] = bool(getattr(self, "high_res_screenshot_var", True))
             with open(self.CONFIG_FILENAME, "w") as f:
                 json.dump(config, f, indent=2)
         except Exception:

@@ -2222,6 +2222,19 @@ class GeoTIFFMixin:
         self.elevation_slope_combo.setCurrentText(mode_text)
         self.elevation_slope_combo.blockSignals(False)
 
+    def _on_high_res_screenshot_changed(self, _state=None):
+        """Use a larger on-screen depth picture while contours are shown."""
+        checkbox = getattr(self, "high_res_screenshot_checkbox", None)
+        self.high_res_screenshot_var = bool(checkbox.isChecked()) if checkbox is not None else True
+        if hasattr(self, "_save_high_res_display"):
+            self._save_high_res_display()
+        if not getattr(self, "show_contours_var", False):
+            return
+        if getattr(self, "geotiff_data_array", None) is None:
+            return
+        if hasattr(self, "_sync_maplibre_bathymetry"):
+            self._sync_maplibre_bathymetry()
+
     def _on_contour_checkbox_changed(self):
         """Handle checkbox change for showing/hiding contours."""
         # Get the checkbox state
@@ -4936,40 +4949,97 @@ class GeoTIFFMixin:
         if vmin is not None and vmax is not None and vmin != vmax:
             image.set_clim(vmin=vmin, vmax=vmax)
 
-    def _on_draw_event_update_colormap(self, event=None):
-        """Update elevation colormap to visible region when view changes."""
+    def _apply_visible_depth_range(self, xlim=None, ylim=None):
+        """Stretch elevation colors across the depths in one map window."""
         self._update_topography_visible_clim()
-        if not hasattr(self, 'geotiff_data_array') or self.geotiff_data_array is None:
-            return
-        if not hasattr(self, 'geotiff_extent') or self.geotiff_extent is None:
+        image = getattr(self, "geotiff_image_plot", None)
+        data = getattr(self, "geotiff_data_array", None)
+        extent = getattr(self, "geotiff_extent", None)
+        if image is None or data is None or extent is None:
             return
         depth_modes_on = bool(self._active_kongsberg_depth_modes()) if hasattr(self, "_active_kongsberg_depth_modes") else False
-        if not depth_modes_on and (
-            not hasattr(self, 'geotiff_display_mode') or self.geotiff_display_mode not in ('elevation', 'elevation_dyn')
-        ):
+        if not depth_modes_on and getattr(self, "geotiff_display_mode", None) not in ("elevation", "elevation_dyn"):
             return
-        if not hasattr(self, 'geotiff_image_plot') or self.geotiff_image_plot is None:
+        if not hasattr(self, "_visible_elevation_limits"):
             return
-        display_data = self.geotiff_data_array
-        xlim = self.ax.get_xlim()
-        ylim = self.ax.get_ylim()
-        left, right, bottom, top = tuple(self.geotiff_extent)
-        nrows, ncols = display_data.shape
-        col_min = int(np.clip((min(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
-        col_max = int(np.clip((max(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
-        row_min = int(np.clip((top - max(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
-        row_max = int(np.clip((top - min(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
-        r0, r1 = sorted([row_min, row_max])
-        c0, c1 = sorted([col_min, col_max])
-        visible_region = display_data[r0:r1+1, c0:c1+1]
-        if visible_region.size > 0 and not np.all(np.isnan(visible_region)):
-            vmin_elev = np.nanmin(visible_region)
-            vmax_elev = np.nanmax(visible_region)
+        vmin, vmax = self._visible_elevation_limits(data, extent, xlim=xlim, ylim=ylim)
+        if vmin is None or vmax is None or vmin == vmax:
+            return
+        image.set_clim(vmin=vmin, vmax=vmax)
+        self._rescale_bathy_hillshade_to_range(abs(float(vmax) - float(vmin)))
+        colorbar = getattr(self, "elevation_colorbar", None)
+        if depth_modes_on or colorbar is None or not hasattr(self, "_label_colorbar_to_data_range"):
+            return
+        self._label_colorbar_to_data_range(colorbar, vmin, vmax)
+
+    def _recolor_bathy_for_shown_view(self, west, south, east, north):
+        """Color the shaded relief from the depths in the view the map is showing."""
+        if getattr(self, "_recoloring_shown_bathy", False):
+            return
+        if getattr(self, "geotiff_data_array", None) is None:
+            return
+        try:
+            west = float(west)
+            south = float(south)
+            east = float(east)
+            north = float(north)
+        except (TypeError, ValueError):
+            return
+        if abs(east - west) >= 300 or abs(north - south) >= 150:
+            return
+        xlim = (min(west, east), max(west, east))
+        ylim = (min(south, north), max(south, north))
+        self._recoloring_shown_bathy = True
+        self._setting_limits_programmatically = True
+        try:
+            ax = getattr(self, "ax", None)
+            if ax is not None:
+                ax.set_aspect("auto")
+                ax.set_xlim(xlim)
+                ax.set_ylim(ylim)
+            self.current_xlim = xlim
+            self.current_ylim = ylim
+            self._last_user_xlim = xlim
+            self._last_user_ylim = ylim
+            self._apply_visible_depth_range(xlim, ylim)
+            if hasattr(self, "_sync_maplibre_bathymetry"):
+                self._sync_maplibre_bathymetry()
+        finally:
+            self._setting_limits_programmatically = False
+            self._recoloring_shown_bathy = False
+
+    def _rescale_bathy_hillshade_to_range(self, elevation_range):
+        """Light the shaded relief from the depth range on screen, not the whole grid."""
+        plot = getattr(self, "geotiff_hillshade_plot", None)
+        data = getattr(self, "geotiff_data_array", None)
+        if plot is None or data is None or not np.isfinite(elevation_range):
+            return
+        previous = getattr(self, "_bathy_hillshade_range", None)
+        if previous is not None and abs(previous - elevation_range) <= max(1e-3, abs(elevation_range) * 1e-4):
+            return
+        self._bathy_hillshade_range = float(elevation_range)
+        if getattr(self, "hillshade_vs_slope_viz_mode", "hillshade") != "hillshade":
+            return
+        depth_modes_on = bool(self._active_kongsberg_depth_modes()) if hasattr(self, "_active_kongsberg_depth_modes") else False
+        use_inverted = bool(depth_modes_on) or getattr(self, "geotiff_display_mode", None) in (
+            "elevation_dyn", "hillshade_only", "slope",
+        )
+        if use_inverted and hasattr(self, "_interp_shaded_relief_dyn_vert_exag"):
+            vert_exag = self._interp_shaded_relief_dyn_vert_exag(elevation_range)
+        elif hasattr(self, "_interp_shaded_relief_vert_exag"):
+            vert_exag = self._interp_shaded_relief_vert_exag(elevation_range)
         else:
-            vmin_elev = np.nanmin(display_data) if not np.all(np.isnan(display_data)) else None
-            vmax_elev = np.nanmax(display_data) if not np.all(np.isnan(display_data)) else None
-        if vmin_elev is not None and vmax_elev is not None and vmin_elev != vmax_elev:
-            self.geotiff_image_plot.set_clim(vmin=vmin_elev, vmax=vmax_elev)
+            return
+        finite = np.isfinite(data)
+        if not np.any(finite):
+            return
+        filled = np.nan_to_num(data, nan=float(np.nanmin(data[finite])))
+        hillshade = self._multidirectional_hillshade(filled, vert_exag)
+        plot.set_data(np.ma.masked_where(~finite, hillshade))
+
+    def _on_draw_event_update_colormap(self, event=None):
+        """Update elevation colormap to visible region when view changes."""
+        self._apply_visible_depth_range()
 
     def _on_temp_line_motion(self, event):
         """Draw temporary line from start point to current mouse; show length, azimuth, time."""

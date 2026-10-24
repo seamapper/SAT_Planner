@@ -1820,8 +1820,11 @@ class MapInteractionMixin:
         current = (min(xlim), min(ylim), max(xlim), max(ylim))
         incoming = (float(west), float(south), float(east), float(north))
         if max(abs(a - b) for a, b in zip(current, incoming)) < 1e-7:
+            if getattr(self, "_programmatic_zoom", False):
+                self._recolor_bathy_for_shown_view(west, south, east, north)
             return
         if getattr(self, "_programmatic_zoom", False):
+            self._recolor_bathy_for_shown_view(west, south, east, north)
             return
         self._maplibre_refreshing_view = True
         self._maplibre_hold_view = True

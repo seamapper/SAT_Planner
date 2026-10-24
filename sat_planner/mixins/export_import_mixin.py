@@ -617,6 +617,47 @@ class ExportImportMixin:
         font.setBold(bool(emphasized))
         button.setFont(font)
 
+    def _workspace_has_survey_plan(self):
+        """True when any survey type already has a plan on the map."""
+        if self._survey_line_defined(getattr(self, "pitch_line_points", None)):
+            return True
+        if self._survey_line_defined(getattr(self, "roll_line_points", None)):
+            return True
+        headings = getattr(self, "heading_lines", None) or []
+        if any(self._survey_line_defined(line) for line in headings):
+            return True
+        if getattr(self, "survey_lines_data", None) or getattr(self, "cross_line_data", None):
+            return True
+        if len(getattr(self, "line_planning_points", None) or []) >= 2:
+            return True
+        centerline = getattr(self, "backscatter_box_centerline", None)
+        if (
+            centerline is not None
+            and len(centerline) == 2
+            and centerline[0] is not None
+            and centerline[1] is not None
+        ):
+            return True
+        if getattr(self, "performance_test_lines_data", None):
+            return True
+        if hasattr(self, "_adcp_plan_has_any_geometry") and self._adcp_plan_has_any_geometry():
+            return True
+        return False
+
+    def _sync_startup_import_button(self):
+        """Keep Import and Download orange and bold until a grid or survey is loaded."""
+        has_grid = (
+            self._session_has_loaded_geotiff()
+            if hasattr(self, "_session_has_loaded_geotiff")
+            else False
+        )
+        prompt = not has_grid and not self._workspace_has_survey_plan()
+        style = "QPushButton { color: rgb(255, 165, 0); font-weight: bold; }" if prompt else ""
+        for name in ("shared_import_btn", "download_bathymetry_btn"):
+            button = getattr(self, name, None)
+            if button is not None:
+                button.setStyleSheet(style)
+
     def _update_shared_survey_io_ui(self):
         if not hasattr(self, "param_notebook") or not hasattr(self, "shared_import_btn"):
             return
@@ -627,6 +668,7 @@ class ExportImportMixin:
         self.shared_export_btn.setText(spec["export_label"])
         self.shared_import_btn.setEnabled(self._shared_survey_io_import_enabled(tab_index))
         self.shared_export_btn.setEnabled(self._shared_survey_io_export_enabled(tab_index))
+        self._sync_startup_import_button()
         plan_ready = self._survey_plan_ready_for_export(tab_index)
         self._set_button_text_emphasis(self.shared_export_btn, plan_ready)
         info_attr = self._SHOW_TEST_INFO_BUTTONS[tab_index]
@@ -848,8 +890,18 @@ class ExportImportMixin:
         if hasattr(self, "_set_travel_direction_arrows_visible"):
             had_arrows = self._set_travel_direction_arrows_visible(False)
         previous_aspect = None
+        moved_colorbar = False
+        previous_size = None
+        previous_subplot = None
         self._maplibre_hold_view = True
         try:
+            if getattr(self, "figure", None) is not None:
+                previous_size = tuple(self.figure.get_size_inches())
+                self.figure.set_size_inches(
+                    export_utils.MAP_EXPORT_WIDTH_IN,
+                    export_utils.MAP_EXPORT_HEIGHT_IN,
+                    forward=False,
+                )
             save_high = self._export_type_enabled("map_png_high")
             save_low = self._export_type_enabled("map_png_low")
             # The email-size file is the map on screen, including imagery and charts.
@@ -859,30 +911,67 @@ class ExportImportMixin:
             if save_low and view is not None and hasattr(view, "capture_png"):
                 captured = view.capture_png()
             low_from_view = bool(captured)
+            colorbar_png = None
+            horizontal_colorbar_png = None
+            legend_png = None
+            if low_from_view:
+                if hasattr(self, "_render_colorbar_png"):
+                    colorbar_png = self._render_colorbar_png("vertical", half_thickness=True)
+                    horizontal_colorbar_png = self._render_colorbar_png("horizontal", half_thickness=True)
+                else:
+                    colorbar_png = getattr(self, "_map_colorbar_png_bytes", None)
+                if hasattr(self, "_render_legend_png"):
+                    legend_png = self._render_legend_png()
+                else:
+                    legend_png = getattr(self, "_map_legend_png_bytes", None)
             if save_high or (save_low and not low_from_view):
+                # A small inset so the latitude labels and colorbar stay on the page.
+                params = self.figure.subplotpars
+                previous_subplot = (params.left, params.bottom, params.right, params.top)
+                self.figure.subplots_adjust(left=0.12, right=0.955, bottom=0.085, top=0.95)
+                orientation = "vertical"
+                if hasattr(self, "_preferred_export_colorbar_orientation"):
+                    orientation = self._preferred_export_colorbar_orientation()
+                if hasattr(self, "_relocate_export_colorbar") and self._relocate_export_colorbar(orientation):
+                    moved_colorbar = True
                 previous_aspect = self._apply_export_map_aspect()
+                if hasattr(self, "_keep_export_colorbar_clear_of_xlabels"):
+                    self._keep_export_colorbar_clear_of_xlabels()
             result = export_utils.save_export_png(
                 self.figure,
                 path,
                 save_high=save_high,
                 save_low=save_low and not low_from_view,
-                **kwargs,
+                dpi=export_utils.MAP_EXPORT_HIGH_DPI,
+                bbox_inches=None,
+                facecolor=kwargs.get("facecolor", "white"),
+                low_dpi=export_utils.MAP_EXPORT_LOW_DPI,
+                low_match_figure=True,
             )
             if low_from_view:
-                if hasattr(self, "_render_colorbar_png"):
-                    colorbar_png = self._render_colorbar_png()
-                else:
-                    colorbar_png = getattr(self, "_map_colorbar_png_bytes", None)
-                captured = export_utils.composite_colorbar_png(captured, colorbar_png)
-                if hasattr(self, "_render_legend_png"):
-                    legend_png = self._render_legend_png()
-                else:
-                    legend_png = getattr(self, "_map_legend_png_bytes", None)
                 captured = export_utils.composite_legend_png(captured, legend_png)
-                export_utils.write_low_resolution_png_bytes(path, captured)
+                page_w, page_h = export_utils.map_export_page_px(export_utils.MAP_EXPORT_LOW_DPI)
+                captured = export_utils.composite_colorbar_png(
+                    captured,
+                    colorbar_png,
+                    horizontal_colorbar_png,
+                    max_dimension=max(page_w, page_h),
+                )
+                export_utils.write_png_fitted_to_page(path, captured)
             return result
         finally:
             self._restore_export_map_aspect(previous_aspect)
+            if previous_size is not None and getattr(self, "figure", None) is not None:
+                self.figure.set_size_inches(previous_size[0], previous_size[1], forward=False)
+            if previous_subplot is not None and getattr(self, "figure", None) is not None:
+                self.figure.subplots_adjust(
+                    left=previous_subplot[0],
+                    bottom=previous_subplot[1],
+                    right=previous_subplot[2],
+                    top=previous_subplot[3],
+                )
+            if moved_colorbar and hasattr(self, "_relocate_export_colorbar"):
+                self._relocate_export_colorbar("vertical")
             self._maplibre_hold_view = False
             if had_arrows and hasattr(self, "_set_travel_direction_arrows_visible"):
                 self._set_travel_direction_arrows_visible(True)

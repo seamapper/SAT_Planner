@@ -25,7 +25,7 @@ from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 
 from sat_planner.constants import PLANNING_PLACEHOLDER_TEXT
-from sat_planner.utils_ui import get_about_program_info
+from sat_planner.utils_ui import get_about_program_info, media_path
 
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
@@ -164,6 +164,40 @@ class _AssetServer(threading.Thread):
         self.httpd.serve_forever()
 
 
+def _startup_logo_data_url():
+    """CCOM mark used on the empty-map screen, as a data URL."""
+    path = media_path("CCOM.png")
+    if not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, "rb") as handle:
+            encoded = base64.b64encode(handle.read()).decode("ascii")
+    except OSError:
+        return ""
+    return "data:image/png;base64," + encoded
+
+
+def _startup_overlay_info():
+    """About text and logo shown until a plan or bathymetry grid is on the map."""
+    try:
+        import sat_planner.app_core as app_core
+
+        about = get_about_program_info(source_path=app_core.__file__)
+    except Exception:
+        about = get_about_program_info()
+    return {
+        "title": about.get("title", ""),
+        "frozen": about.get("compile_date", ""),
+        "logo": _startup_logo_data_url(),
+        "author": about.get("author", ""),
+        "email": about.get("email", ""),
+        "institution": about.get("institution", ""),
+        "grant": about.get("grant", ""),
+        "license": about.get("license", ""),
+        "message": PLANNING_PLACEHOLDER_TEXT,
+    }
+
+
 def map_page_url():
     """Start the asset server if needed and return the map page URL."""
     global _server
@@ -253,11 +287,9 @@ class MapLibreView(QWebEngineView):
         if not ok or self._startup_applied:
             return
         self._startup_applied = True
-        about = get_about_program_info()
         self._run(
-            "window.setStartup({title}, {message});".format(
-                title=json.dumps(about.get("title", "")),
-                message=json.dumps(PLANNING_PLACEHOLDER_TEXT),
+            "if (window.setStartup) window.setStartup({info});".format(
+                info=json.dumps(_startup_overlay_info()),
             )
         )
         if self._pending_web_layers is not None:

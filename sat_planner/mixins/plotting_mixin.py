@@ -1,6 +1,7 @@
 """
 Survey plan plotting: generate plan, plot survey lines/GeoTIFF/contours, clear plot, colorbars.
 """
+import math
 import os
 import textwrap
 import traceback
@@ -260,9 +261,19 @@ class PlottingMixin:
                 continue
             if not (np.isfinite(lon) and np.isfinite(lat)):
                 continue
+            is_line_label = bool(getattr(text, "_sat_line_label_artist", False))
+            if is_line_label:
+                if not getattr(self, "show_line_labels_var", False):
+                    continue
+            elif not getattr(self, "show_point_labels_var", True):
+                continue
+            properties = {"label": label, "marker": False}
+            rotation = getattr(text, "_label_rotation", None)
+            if rotation is not None:
+                properties["labelRotation"] = float(rotation)
             features.append({
                 "type": "Feature",
-                "properties": {"label": label, "marker": False},
+                "properties": properties,
                 "geometry": {"type": "Point", "coordinates": [lon, lat]},
             })
         features.extend(self._travel_arrow_features())
@@ -466,6 +477,125 @@ class PlottingMixin:
             self._save_show_map_legend()
         self._sync_map_legend_overlay()
 
+    def _on_point_labels_checkbox_changed(self, _state=None):
+        """Show or hide waypoint and endpoint names on the map."""
+        checkbox = getattr(self, "show_point_labels_checkbox", None)
+        self.show_point_labels_var = bool(checkbox.isChecked()) if checkbox is not None else True
+        if hasattr(self, "_save_show_point_labels"):
+            self._save_show_point_labels()
+        self._apply_point_label_visibility()
+        self._sync_maplibre_plan(fit=False, terrain=False)
+        canvas = getattr(self, "canvas", None)
+        if canvas is not None:
+            canvas.draw_idle()
+
+    def _on_line_labels_checkbox_changed(self, _state=None):
+        """Show or hide names drawn along each survey line."""
+        checkbox = getattr(self, "show_line_labels_checkbox", None)
+        self.show_line_labels_var = bool(checkbox.isChecked()) if checkbox is not None else False
+        if hasattr(self, "_save_show_line_labels"):
+            self._save_show_line_labels()
+        self._refresh_line_label_artists()
+        self._sync_maplibre_plan(fit=False, terrain=False)
+        canvas = getattr(self, "canvas", None)
+        if canvas is not None:
+            canvas.draw_idle()
+
+    def _tag_line_label(self, plotted, label):
+        """Remember the name to draw along a survey line."""
+        artist = plotted[0] if isinstance(plotted, (list, tuple)) else plotted
+        if artist is not None and label:
+            artist._sat_line_label = label
+        return artist
+
+    def _line_label_placement(self, coords):
+        """Midpoint of a line and the screen angle of the segment that contains it."""
+        from sat_planner.maplibre.assignment_preview import _label_rotation_deg, _mercator_y
+
+        if len(coords) < 2:
+            return None
+        lengths = []
+        total = 0.0
+        for (lon1, lat1), (lon2, lat2) in zip(coords, coords[1:]):
+            dx = float(lon2) - float(lon1)
+            dy = _mercator_y(lat2) - _mercator_y(lat1)
+            length = math.hypot(dx, dy)
+            lengths.append(length)
+            total += length
+        if total < 1e-12:
+            return None
+        target = total / 2.0
+        walked = 0.0
+        for index, length in enumerate(lengths):
+            lon1, lat1 = coords[index]
+            lon2, lat2 = coords[index + 1]
+            if walked + length < target and index < len(lengths) - 1:
+                walked += length
+                continue
+            span = length if length > 1e-12 else 1.0
+            fraction = min(max((target - walked) / span, 0.0), 1.0)
+            lon = float(lon1) + (float(lon2) - float(lon1)) * fraction
+            lat = float(lat1) + (float(lat2) - float(lat1)) * fraction
+            return lon, lat, _label_rotation_deg(lon1, lat1, lon2, lat2)
+        return None
+
+    def _apply_point_label_visibility(self):
+        """Match waypoint text on the hidden map to the Point Label checkbox."""
+        ax = getattr(self, "ax", None)
+        if ax is None:
+            return
+        visible = bool(getattr(self, "show_point_labels_var", True))
+        for text in ax.texts:
+            if getattr(text, "_sat_line_label_artist", False):
+                continue
+            text.set_visible(visible)
+
+    def _refresh_line_label_artists(self):
+        """Draw or remove the names that follow each survey line."""
+        ax = getattr(self, "ax", None)
+        if ax is None:
+            return
+        for text in list(ax.texts):
+            if not getattr(text, "_sat_line_label_artist", False):
+                continue
+            try:
+                text.remove()
+            except Exception:
+                pass
+        if not getattr(self, "show_line_labels_var", False):
+            return
+        for line in ax.get_lines():
+            label = getattr(line, "_sat_line_label", None)
+            if not label or not line.get_visible():
+                continue
+            xs = np.asarray(line.get_xdata(), dtype=float).ravel()
+            ys = np.asarray(line.get_ydata(), dtype=float).ravel()
+            count = min(xs.size, ys.size)
+            coords = []
+            for lon, lat in zip(xs[:count], ys[:count]):
+                if np.isfinite(lon) and np.isfinite(lat):
+                    coords.append([float(lon), float(lat)])
+            placement = self._line_label_placement(coords)
+            if placement is None:
+                continue
+            lon, lat, angle = placement
+            text = ax.text(
+                lon,
+                lat,
+                label,
+                fontsize=8,
+                ha="center",
+                va="center",
+                rotation=-angle,
+                color=self._css_color(line.get_color()),
+                weight="bold",
+                bbox=dict(boxstyle="round,pad=0.15", facecolor="white", alpha=0.8, edgecolor="none"),
+                zorder=60,
+                clip_on=True,
+            )
+            text._sat_line_label_artist = True
+            text._label_rotation = angle
+
     def _legend_entries(self):
         ax = getattr(self, "ax", None)
         if ax is None:
@@ -546,7 +676,30 @@ class PlottingMixin:
                 return colorbar
         return None
 
-    def _render_colorbar_png(self):
+    def _colorbar_export_style(self, colorbar):
+        """Label, ticks, and direction copied from the scale on the map."""
+        try:
+            label = colorbar.ax.get_ylabel() or colorbar.ax.get_xlabel() or ""
+        except Exception:
+            label = ""
+        try:
+            ticks = [float(tick) for tick in colorbar.get_ticks()]
+        except Exception:
+            ticks = []
+        ticklabels = []
+        try:
+            ticklabels = [tick.get_text() for tick in colorbar.ax.get_yticklabels()]
+            if not any(str(text).strip() for text in ticklabels):
+                ticklabels = [tick.get_text() for tick in colorbar.ax.get_xticklabels()]
+        except Exception:
+            ticklabels = []
+        try:
+            inverted = bool(colorbar.ax.yaxis_inverted())
+        except Exception:
+            inverted = False
+        return label, ticks, ticklabels, inverted
+
+    def _render_colorbar_png(self, orientation="vertical", *, half_thickness=False):
         """Draw the current depth or slope scale to PNG bytes."""
         import io
 
@@ -556,22 +709,8 @@ class PlottingMixin:
         colorbar = self._active_map_colorbar()
         if colorbar is None:
             return None
-        try:
-            label = colorbar.ax.get_ylabel() or ""
-        except Exception:
-            label = ""
-        try:
-            ticks = [float(tick) for tick in colorbar.get_ticks()]
-        except Exception:
-            ticks = []
-        try:
-            ticklabels = [tick.get_text() for tick in colorbar.ax.get_yticklabels()]
-        except Exception:
-            ticklabels = []
-        try:
-            inverted = bool(colorbar.ax.yaxis_inverted())
-        except Exception:
-            inverted = False
+        label, ticks, ticklabels, inverted = self._colorbar_export_style(colorbar)
+        horizontal = orientation == "horizontal"
         try:
             source = colorbar.mappable
             norm = source.norm
@@ -579,10 +718,18 @@ class PlottingMixin:
                 norm = Normalize(vmin=norm.vmin, vmax=norm.vmax)
             mappable = ScalarMappable(norm=norm, cmap=source.cmap)
             mappable.set_array([])
-            figure = Figure(figsize=(1.45, 4.6), dpi=130)
-            FigureCanvasAgg(figure)
-            axes = figure.add_axes([0.08, 0.03, 0.28, 0.94])
-            drawn = figure.colorbar(mappable, cax=axes)
+            if horizontal:
+                figure = Figure(figsize=(6.6, 1.45), dpi=130)
+                FigureCanvasAgg(figure)
+                bar_height = 0.11 if half_thickness else 0.22
+                axes = figure.add_axes([0.05, 0.42, 0.90, bar_height])
+                drawn = figure.colorbar(mappable, cax=axes, orientation="horizontal")
+            else:
+                figure = Figure(figsize=(1.45, 4.6), dpi=130)
+                FigureCanvasAgg(figure)
+                bar_width = 0.14 if half_thickness else 0.28
+                axes = figure.add_axes([0.08, 0.03, bar_width, 0.94])
+                drawn = figure.colorbar(mappable, cax=axes)
             if label:
                 drawn.set_label(label, fontsize=9)
             if (
@@ -591,17 +738,215 @@ class PlottingMixin:
                 and len(ticks) == len(ticklabels)
                 and any(str(text).strip() for text in ticklabels)
             ):
-                drawn.set_ticks(ticks)
-                drawn.set_ticklabels(ticklabels)
-            if inverted:
+                low = float(min(norm.vmin, norm.vmax))
+                high = float(max(norm.vmin, norm.vmax))
+                kept = [
+                    (tick, text)
+                    for tick, text in zip(ticks, ticklabels)
+                    if low - 1e-6 <= float(tick) <= high + 1e-6
+                ]
+                if kept:
+                    drawn.set_ticks([tick for tick, _text in kept])
+                    drawn.set_ticklabels([text for _tick, text in kept])
+            self._lock_colorbar_to_range(drawn, norm.vmin, norm.vmax)
+            if inverted and not horizontal:
                 drawn.ax.invert_yaxis()
             drawn.ax.tick_params(labelsize=8)
             buffer = io.BytesIO()
-            figure.savefig(buffer, format="png", facecolor="white", bbox_inches="tight", pad_inches=0.06)
+            figure.savefig(buffer, format="png", facecolor="white", bbox_inches="tight", pad_inches=0.02)
             return buffer.getvalue()
         except Exception:
             traceback.print_exc()
             return None
+
+    def _preferred_export_colorbar_orientation(self):
+        """Right or underneath, whichever leaves the larger map on the page."""
+        ax = getattr(self, "ax", None)
+        if ax is None or self._active_map_colorbar() is None:
+            return "vertical"
+        try:
+            x0, x1 = ax.get_xlim()
+            y0, y1 = ax.get_ylim()
+            lon_span = abs(float(x1) - float(x0))
+            lat_span = abs(float(y1) - float(y0))
+        except (TypeError, ValueError):
+            return "vertical"
+        if lon_span < 1e-9 or lat_span < 1e-9:
+            return "vertical"
+        ratio = lon_span / (lat_span * self._geographic_export_aspect())
+        fig_w, fig_h = self.figure.get_size_inches()
+        params = self.figure.subplotpars
+        inner_w = max(1.0, (params.right - params.left) * float(fig_w))
+        inner_h = max(1.0, (params.top - params.bottom) * float(fig_h))
+        # fraction plus the pad that keeps the scale off the longitude labels.
+        vertical_strip = min(0.18 * inner_w, inner_w * 0.38)
+        horizontal_strip = min(0.20 * inner_h, inner_h * 0.32)
+        area_right = self._fitted_export_map_area(inner_w - vertical_strip, inner_h, ratio)
+        area_bottom = self._fitted_export_map_area(inner_w, inner_h - horizontal_strip, ratio)
+        if area_bottom > area_right:
+            return "horizontal"
+        return "vertical"
+
+    @staticmethod
+    def _fitted_export_map_area(avail_w, avail_h, ratio):
+        """Area of a map with width/height ``ratio`` fitted into a rectangle."""
+        if avail_w <= 0.4 or avail_h <= 0.4 or ratio <= 0:
+            return 0.0
+        if avail_w / avail_h > ratio:
+            height = avail_h
+            width = height * ratio
+        else:
+            width = avail_w
+            height = width / ratio
+        return width * height
+
+    def _keep_export_colorbar_clear_of_xlabels(self):
+        """Move the export scale off the longitude labels without changing its thickness."""
+        ax = getattr(self, "ax", None)
+        colorbar = self._active_map_colorbar()
+        figure = getattr(self, "figure", None)
+        if ax is None or colorbar is None or getattr(colorbar, "ax", None) is None or figure is None:
+            return
+        canvas = getattr(figure, "canvas", None)
+        if canvas is None:
+            return
+        try:
+            canvas.draw()
+            renderer = canvas.get_renderer()
+        except Exception:
+            return
+
+        def _figure_bbox(artist):
+            try:
+                if not artist.get_visible():
+                    return None
+                bbox = artist.get_window_extent(renderer).transformed(figure.transFigure.inverted())
+            except Exception:
+                return None
+            if bbox.width <= 0 or bbox.height <= 0:
+                return None
+            return bbox
+
+        map_box = ax.get_position()
+        color_axes = colorbar.ax
+        color_box = color_axes.get_position()
+        gap = 0.012
+        page_edge = 0.985
+        labels = list(ax.get_xticklabels()) + [ax.xaxis.label]
+        decorations = (
+            list(color_axes.get_xticklabels())
+            + list(color_axes.get_yticklabels())
+            + [color_axes.xaxis.label, color_axes.yaxis.label]
+        )
+        overhang = 0.02
+        for artist in decorations:
+            bbox = _figure_bbox(artist)
+            if bbox is not None:
+                overhang = max(overhang, bbox.x1 - color_box.x1)
+        if getattr(colorbar, "orientation", "vertical") == "horizontal":
+            label_bottom = map_box.y0
+            for artist in labels:
+                bbox = _figure_bbox(artist)
+                if bbox is not None:
+                    label_bottom = min(label_bottom, bbox.y0)
+            top = min(color_box.y1, label_bottom - gap)
+            bottom = top - color_box.height
+            if bottom < 0.02:
+                bottom = 0.02
+                top = bottom + color_box.height
+            width = color_box.width
+            if color_box.x1 + overhang > page_edge:
+                width = max(0.05, page_edge - overhang - color_box.x0)
+            color_axes.set_box_aspect(None)
+            color_axes.set_position([color_box.x0, bottom, width, color_box.height])
+            return
+        bottom = max(color_box.y0, map_box.y0)
+        top = min(color_box.y1, map_box.y1)
+        height = top - bottom
+        if height < 0.05:
+            return
+        label_right = map_box.x1
+        for artist in labels:
+            bbox = _figure_bbox(artist)
+            if bbox is not None:
+                label_right = max(label_right, bbox.x1)
+        left = max(color_box.x0, label_right + gap)
+        if left + color_box.width + overhang > page_edge:
+            left = page_edge - color_box.width - overhang
+        left = max(left, map_box.x1 + 0.004)
+        color_axes.set_box_aspect(None)
+        color_axes.set_position([left, bottom, color_box.width, height])
+
+    def _relocate_export_colorbar(self, orientation):
+        """Move the map scale to the right or the bottom for one export."""
+        colorbar = self._active_map_colorbar()
+        parent = getattr(self, "ax", None)
+        if colorbar is None or parent is None:
+            return False
+        attr = "elevation_colorbar" if getattr(self, "elevation_colorbar", None) is colorbar else "slope_colorbar"
+        label, ticks, ticklabels, inverted = self._colorbar_export_style(colorbar)
+        mappable = colorbar.mappable
+        try:
+            original = parent.get_position(original=True)
+        except Exception:
+            original = parent.get_position()
+        try:
+            colorbar.remove()
+        except Exception:
+            traceback.print_exc()
+            return False
+        try:
+            parent._set_position(original)
+        except Exception:
+            pass
+        setattr(self, attr, None)
+        horizontal = orientation == "horizontal"
+        # Wide enough for the degree-minute labels. The bar thickness stays aspect=40.
+        pad = 0.10 if horizontal else 0.08
+        try:
+            new = self.figure.colorbar(
+                mappable,
+                ax=parent,
+                orientation="horizontal" if horizontal else "vertical",
+                location="bottom" if horizontal else "right",
+                label=label,
+                pad=pad,
+                fraction=0.1,
+                shrink=1.0,
+                aspect=40,
+            )
+            if (
+                ticks
+                and ticklabels
+                and len(ticks) == len(ticklabels)
+                and any(str(text).strip() for text in ticklabels)
+            ):
+                new.set_ticks(ticks)
+                new.set_ticklabels(ticklabels)
+            if inverted and not horizontal:
+                new.ax.invert_yaxis()
+            self._lock_colorbar_to_range(new, mappable.norm.vmin, mappable.norm.vmax)
+            new.ax.tick_params(labelsize=8)
+            setattr(self, attr, new)
+            return True
+        except Exception:
+            traceback.print_exc()
+            try:
+                restored = self.figure.colorbar(
+                    mappable,
+                    ax=parent,
+                    orientation="vertical",
+                    location="right",
+                    label=label,
+                    pad=0.02,
+                    fraction=0.1,
+                    shrink=1.0,
+                    aspect=40,
+                )
+                setattr(self, attr, restored)
+            except Exception:
+                traceback.print_exc()
+            return False
 
     def _sync_map_colorbar_overlay(self):
         """Put the colorbar on the visible map when the Map Options toggle is on."""
@@ -864,7 +1209,11 @@ class PlottingMixin:
             )
             if bbox.width < 0.05 or bbox.height < 0.05:
                 return "", None
-            dpi = max(48, min(100, int(900 / max(bbox.width, bbox.height))))
+            if getattr(self, "high_res_screenshot_var", True):
+                target_px, dpi_cap = 2700, 250
+            else:
+                target_px, dpi_cap = 900, 100
+            dpi = max(48, min(dpi_cap, int(target_px / max(bbox.width, bbox.height))))
             buffer = io.BytesIO()
             fig.savefig(
                 buffer,
@@ -1605,10 +1954,80 @@ class PlottingMixin:
             return f"{band['name']}\n≥{min_m:,} m"
         return f"{band['name']}\n{min_m:,}–{int(max_m):,} m"
 
-    def _visible_elevation_limits(self, data, extent=None):
-        """Min/max elevation in the current axes window, ignoring NaNs."""
-        xlim = self.ax.get_xlim()
-        ylim = self.ax.get_ylim()
+    def _ticks_for_data_range(self, vmin, vmax):
+        """Tick values that stay inside the depths the colors actually cover."""
+        low = float(min(vmin, vmax))
+        high = float(max(vmin, vmax))
+        span = high - low
+        if not np.isfinite(span) or span <= 0:
+            return [low], [f"{low:.0f}"]
+        raw = span / 5.0
+        magnitude = 10 ** np.floor(np.log10(raw))
+        step = magnitude
+        for factor in (1, 2, 2.5, 5, 10):
+            step = factor * magnitude
+            if span / step <= 6:
+                break
+        decimals = 0 if step >= 1 else 1
+
+        def _label(value):
+            return f"{value:.{decimals}f}"
+
+        start = np.ceil((low - 1e-9) / step) * step
+        stop = np.floor((high + 1e-9) / step) * step
+        interior = []
+        if start <= stop:
+            interior = np.arange(start, stop + step * 0.5, step).tolist()
+        interior = [value for value in interior if (value - low) > 0.4 * step and (high - value) > 0.4 * step]
+        values = [low]
+        for value in interior:
+            if abs(value - values[-1]) > span * 1e-6:
+                values.append(float(value))
+        if abs(high - values[-1]) > span * 1e-6:
+            values.append(high)
+        return values, [_label(value) for value in values]
+
+    def _lock_colorbar_to_range(self, colorbar, vmin, vmax):
+        """Keep the scale on vmin–vmax so ticks cannot add empty space at the ends."""
+        try:
+            low = float(vmin)
+            high = float(vmax)
+        except (TypeError, ValueError):
+            return
+        if not np.isfinite(low) or not np.isfinite(high) or low == high:
+            return
+        try:
+            if getattr(colorbar, "orientation", "vertical") == "horizontal":
+                colorbar.ax.set_xlim(low, high)
+            else:
+                colorbar.ax.set_ylim(low, high)
+            colorbar.ax.margins(0)
+        except Exception:
+            pass
+
+    def _label_colorbar_to_data_range(self, colorbar, vmin, vmax):
+        """Label a scale from the depths that are colored, not a wider round range."""
+        try:
+            low = float(vmin)
+            high = float(vmax)
+        except (TypeError, ValueError):
+            return
+        if not np.isfinite(low) or not np.isfinite(high) or low == high:
+            return
+        ticks, labels = self._ticks_for_data_range(low, high)
+        try:
+            colorbar.set_ticks(ticks)
+            colorbar.set_ticklabels(labels)
+        except Exception:
+            return
+        self._lock_colorbar_to_range(colorbar, low, high)
+
+    def _visible_elevation_limits(self, data, extent=None, xlim=None, ylim=None):
+        """Min/max elevation in a map window, ignoring NaNs."""
+        if xlim is None:
+            xlim = self.ax.get_xlim()
+        if ylim is None:
+            ylim = self.ax.get_ylim()
         left, right, bottom, top = tuple(self.geotiff_extent if extent is None else extent)
         nrows, ncols = data.shape
         width = right - left
@@ -1683,7 +2102,7 @@ class PlottingMixin:
             pad=0.02,
             fraction=0.1,
             shrink=1.0,
-            aspect=20,
+            aspect=40,
         )
         self.elevation_colorbar.set_ticks([i + 0.5 for i in range(len(bands))])
         self.elevation_colorbar.set_ticklabels([self._depth_mode_range_label(band) for band in bands])
@@ -1753,10 +2172,12 @@ class PlottingMixin:
             prev_ylim = getattr(self, '_last_user_ylim', None)
             if preserve_view_limits and prev_xlim is not None and prev_ylim is not None:
                 # Store the preserved limits - they will be set after aspect ratio calculation
-                # to ensure they're not overridden by the aspect ratio adjustment
+                # to ensure they're not overridden by the aspect ratio adjustment.
+                # A datalim aspect ignores set_xlim, which left the depth colors on the
+                # previous window until the next zoom.
                 preserved_xlim = prev_xlim
                 preserved_ylim = prev_ylim
-                # Set initial limits for aspect ratio calculation
+                self.ax.set_aspect("auto")
                 self.ax.set_xlim(prev_xlim)
                 self.ax.set_ylim(prev_ylim)
             else:
@@ -1850,7 +2271,11 @@ class PlottingMixin:
                         # Let matplotlib automatically adjust the axes position (like original Tkinter version)
                         self.elevation_colorbar = self.figure.colorbar(self.geotiff_image_plot, ax=self.ax,
                                                                         orientation='vertical', label='Elevation (m)',
-                                                                        pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
+                                                                        pad=0.02, fraction=0.1, shrink=1.0, aspect=40)
+                        elev_norm = self.geotiff_image_plot.norm
+                        self._label_colorbar_to_data_range(
+                            self.elevation_colorbar, elev_norm.vmin, elev_norm.vmax
+                        )
 
                     elif self.geotiff_display_mode == "hillshade_only":
                         # Hillshade only mode - no overlay, just the hillshade
@@ -1910,7 +2335,7 @@ class PlottingMixin:
 
                         self.slope_colorbar = self.figure.colorbar(self.geotiff_image_plot, ax=self.ax,
                                                                    orientation='vertical', label='Slope (degrees)',
-                                                                   pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
+                                                                   pad=0.02, fraction=0.1, shrink=1.0, aspect=40)
 
                         num_ticks = 7
                         tick_values = np.linspace(0, max_slope_for_cmap, num_ticks)
@@ -1949,7 +2374,7 @@ class PlottingMixin:
 
                     self.slope_colorbar = self.figure.colorbar(self.geotiff_image_plot, ax=self.ax,
                                                               orientation='vertical', label='Slope (degrees)',
-                                                              pad=0.02, fraction=0.1, shrink=1.0, aspect=20)
+                                                              pad=0.02, fraction=0.1, shrink=1.0, aspect=40)
 
                     num_ticks = 7
                     tick_values = np.linspace(0, max_slope_for_cmap, num_ticks)
@@ -2386,7 +2811,10 @@ class PlottingMixin:
                 latitudes = [p[0] for p in line]
                 longitudes = [p[1] for p in line]
                 label = "Accuracy Line" if i == 0 else "_nolegend_"
-                self.ax.plot(longitudes, latitudes, color='blue', linewidth=1.5, linestyle='--', label=label)
+                self._tag_line_label(
+                    self.ax.plot(longitudes, latitudes, color='blue', linewidth=1.5, linestyle='--', label=label),
+                    "L{0}".format(i + 1),
+                )
 
                 # For alternating lines, flip the start/end points to show survey order
                 # Even lines (0, 2, 4...) use normal order, odd lines (1, 3, 5...) use flipped order
@@ -2415,8 +2843,11 @@ class PlottingMixin:
             if self.cross_line_data:
                 latitudes = [p[0] for p in self.cross_line_data]
                 longitudes = [p[1] for p in self.cross_line_data]
-                self.ax.plot(longitudes, latitudes, color='navy', linestyle='-', linewidth=1.5,
-                             label='Crossline')
+                self._tag_line_label(
+                    self.ax.plot(longitudes, latitudes, color='navy', linestyle='-', linewidth=1.5,
+                                 label='Crossline'),
+                    "Crossline",
+                )
 
                 # Add labels for crossline points
                 self.ax.annotate('CLS', (longitudes[0], latitudes[0]),
@@ -2458,7 +2889,10 @@ class PlottingMixin:
             if hasattr(self, 'pitch_line_points') and len(self.pitch_line_points) == 2:
                 latitudes = [p[0] for p in self.pitch_line_points]
                 longitudes = [p[1] for p in self.pitch_line_points]
-                self.ax.plot(longitudes, latitudes, color='red', linewidth=2.5, linestyle='-', marker='o', label='Pitch Line')
+                self._tag_line_label(
+                    self.ax.plot(longitudes, latitudes, color='red', linewidth=2.5, linestyle='-', marker='o', label='Pitch Line'),
+                    "Pitch Line",
+                )
                 if callable(build_cal_points) and cal_lead_in_m > 0:
                     pitch_ext = build_cal_points('pitch', self.pitch_line_points, cal_geod, cal_lead_in_m)
                     if len(pitch_ext) >= 4:
@@ -2515,7 +2949,10 @@ class PlottingMixin:
             if hasattr(self, 'roll_line_points') and len(self.roll_line_points) == 2:
                 latitudes = [p[0] for p in self.roll_line_points]
                 longitudes = [p[1] for p in self.roll_line_points]
-                self.ax.plot(longitudes, latitudes, color='purple', linewidth=2.5, linestyle='-', marker='o', label='Roll')
+                self._tag_line_label(
+                    self.ax.plot(longitudes, latitudes, color='purple', linewidth=2.5, linestyle='-', marker='o', label='Roll'),
+                    "Roll",
+                )
                 if callable(build_cal_points) and cal_lead_in_m > 0:
                     roll_ext = build_cal_points('roll', self.roll_line_points, cal_geod, cal_lead_in_m)
                     if len(roll_ext) >= 4:
@@ -2575,7 +3012,10 @@ class PlottingMixin:
                     longitudes = [p[1] for p in line]
                     label = 'Heading1' if i == 0 else 'Heading2'
                     heading_color = 'darkgreen' if i == 0 else 'deeppink'
-                    self.ax.plot(longitudes, latitudes, color=heading_color, linewidth=2, linestyle='-', marker='x', label=label)
+                    self._tag_line_label(
+                        self.ax.plot(longitudes, latitudes, color=heading_color, linewidth=2, linestyle='-', marker='x', label=label),
+                        label,
+                    )
                     if callable(build_cal_points) and cal_lead_in_m > 0:
                         heading_key = 'heading1' if i == 0 else 'heading2'
                         heading_ext = build_cal_points(heading_key, line, cal_geod, cal_lead_in_m)
@@ -2619,15 +3059,18 @@ class PlottingMixin:
                     latitudes = [p[0] for p in line]
                     longitudes = [p[1] for p in line]
                     label = 'Perf Lines' if i == 0 else "_nolegend_"
-                    self.ax.plot(
-                        longitudes,
-                        latitudes,
-                        color=perf_colors[i],
-                        linewidth=2.0 if i == 0 else 1.6,
-                        linestyle='-',
-                        marker='o',
-                        markersize=3,
-                        label=label,
+                    self._tag_line_label(
+                        self.ax.plot(
+                            longitudes,
+                            latitudes,
+                            color=perf_colors[i],
+                            linewidth=2.0 if i == 0 else 1.6,
+                            linestyle='-',
+                            marker='o',
+                            markersize=3,
+                            label=label,
+                        ),
+                        "P{0}".format(i + 1),
                     )
                     self.ax.annotate(
                         f'P{i + 1}S',
@@ -2656,16 +3099,19 @@ class PlottingMixin:
                     latitudes = [p[0] for p in segment]
                     longitudes = [p[1] for p in segment]
                     label = 'BIST Collection' if i == 0 else "_nolegend_"
-                    self.ax.plot(
-                        longitudes,
-                        latitudes,
-                        color='gold',
-                        linewidth=2.0,
-                        linestyle='-',
-                        marker='o',
-                        markersize=3,
-                        label=label,
-                        zorder=14,
+                    self._tag_line_label(
+                        self.ax.plot(
+                            longitudes,
+                            latitudes,
+                            color='gold',
+                            linewidth=2.0,
+                            linestyle='-',
+                            marker='o',
+                            markersize=3,
+                            label=label,
+                            zorder=14,
+                        ),
+                        "B{0}".format(i + 1),
                     )
                     self.ax.annotate(
                         f'B{i + 1}S',
@@ -2696,13 +3142,16 @@ class PlottingMixin:
                     if callable(preview) and getattr(self, 'adcp_circle1_start', None) is None:
                         verts = preview(c1c, clockwise=True)
                         if len(verts) >= 2:
-                            self.ax.plot(
-                                [p[1] for p in verts] + [verts[0][1]],
-                                [p[0] for p in verts] + [verts[0][0]],
-                                color='dodgerblue',
-                                linewidth=1.2,
-                                linestyle=':',
-                                label='ADCP Circle 1 (preview)',
+                            self._tag_line_label(
+                                self.ax.plot(
+                                    [p[1] for p in verts] + [verts[0][1]],
+                                    [p[0] for p in verts] + [verts[0][0]],
+                                    color='dodgerblue',
+                                    linewidth=1.2,
+                                    linestyle=':',
+                                    label='ADCP Circle 1 (preview)',
+                                ),
+                                "ADCP Circle 1",
                             )
                 self.ax.plot(c1c[1], c1c[0], marker='+', color='dodgerblue', markersize=10, linestyle='None', label='_nolegend_')
                 if getattr(self, 'adcp_circle1_start', None) is not None:
@@ -2723,7 +3172,9 @@ class PlottingMixin:
                     lats = [p[0] for p in seg]
                     lons = [p[1] for p in seg]
                     label = 'ADCP Circle 1' if i == 0 else '_nolegend_'
-                    self.ax.plot(lons, lats, color='dodgerblue', linewidth=2.0, linestyle='-', label=label)
+                    plotted = self.ax.plot(lons, lats, color='dodgerblue', linewidth=2.0, linestyle='-', label=label)
+                    if i == 0:
+                        self._tag_line_label(plotted, "ADCP Circle 1")
 
             if hasattr(self, 'adcp_circle2_center') and self.adcp_circle2_center is not None:
                 c2c = self.adcp_circle2_center
@@ -2732,13 +3183,16 @@ class PlottingMixin:
                     if callable(preview) and getattr(self, 'adcp_circle2_start', None) is None:
                         verts = preview(c2c, clockwise=False)
                         if len(verts) >= 2:
-                            self.ax.plot(
-                                [p[1] for p in verts] + [verts[0][1]],
-                                [p[0] for p in verts] + [verts[0][0]],
-                                color='darkorange',
-                                linewidth=1.2,
-                                linestyle=':',
-                                label='ADCP Circle 2 (preview)',
+                            self._tag_line_label(
+                                self.ax.plot(
+                                    [p[1] for p in verts] + [verts[0][1]],
+                                    [p[0] for p in verts] + [verts[0][0]],
+                                    color='darkorange',
+                                    linewidth=1.2,
+                                    linestyle=':',
+                                    label='ADCP Circle 2 (preview)',
+                                ),
+                                "ADCP Circle 2",
                             )
                 self.ax.plot(c2c[1], c2c[0], marker='+', color='darkorange', markersize=10, linestyle='None', label='_nolegend_')
                 if getattr(self, 'adcp_circle2_start', None) is not None:
@@ -2759,13 +3213,29 @@ class PlottingMixin:
                     lats = [p[0] for p in seg]
                     lons = [p[1] for p in seg]
                     label = 'ADCP Circle 2' if i == 0 else '_nolegend_'
-                    self.ax.plot(lons, lats, color='darkorange', linewidth=2.0, linestyle='-', label=label)
+                    plotted = self.ax.plot(lons, lats, color='darkorange', linewidth=2.0, linestyle='-', label=label)
+                    if i == 0:
+                        self._tag_line_label(plotted, "ADCP Circle 2")
 
             # --- Plot the drawn line in Line Planning tab if it exists ---
             if hasattr(self, 'line_planning_points') and len(self.line_planning_points) >= 2:
-                lats = [p[0] for p in self.line_planning_points]
-                lons = [p[1] for p in self.line_planning_points]
-                self.ax.plot(lons, lats, color='orange', linewidth=2, marker='o', label='Line Planning')
+                points = self.line_planning_points
+                lats = [p[0] for p in points]
+                lons = [p[1] for p in points]
+                self.ax.plot(lons, lats, color='orange', linewidth=0, marker='o', label='_nolegend_')
+                for i in range(len(points) - 1):
+                    lat1, lon1 = points[i]
+                    lat2, lon2 = points[i + 1]
+                    self._tag_line_label(
+                        self.ax.plot(
+                            [lon1, lon2],
+                            [lat1, lat2],
+                            color='orange',
+                            linewidth=2,
+                            label='Line Planning' if i == 0 else '_nolegend_',
+                        ),
+                        "LS{0}".format(i + 1),
+                    )
 
                 # Add labels for line planning waypoints
                 for i, (lon, lat) in enumerate(zip(lons, lats)):
@@ -2915,14 +3385,17 @@ class PlottingMixin:
                 extended_centerline = self._get_backscatter_centerline_with_lead_in()
             if extended_centerline and len(extended_centerline) == 2:
                 (a_lat, a_lon), (b_lat, b_lon) = extended_centerline
-                self.backscatter_box_centerline_line = self.ax.plot(
-                    [a_lon, b_lon],
-                    [a_lat, b_lat],
-                    color="cyan",
-                    linewidth=2.0,
-                    linestyle="-",
-                    zorder=41,
-                )[0]
+                self.backscatter_box_centerline_line = self._tag_line_label(
+                    self.ax.plot(
+                        [a_lon, b_lon],
+                        [a_lat, b_lat],
+                        color="cyan",
+                        linewidth=2.0,
+                        linestyle="-",
+                        zorder=41,
+                    ),
+                    "Backscatter",
+                )
                 # Label backscatter waypoints on-map: Lead-in, Start, End, Lead-out.
                 try:
                     stats = self._calculate_backscatter_line_statistics() if hasattr(self, "_calculate_backscatter_line_statistics") else None
@@ -2972,6 +3445,10 @@ class PlottingMixin:
             if hasattr(self, "_update_shared_survey_io_ui"):
                 self._update_shared_survey_io_ui()
 
+            self._apply_point_label_visibility()
+            self._refresh_line_label_artists()
+            if hasattr(self, "_apply_visible_depth_range"):
+                self._apply_visible_depth_range()
             self.canvas.draw_idle()
             self._sync_maplibre_plan(fit=not preserve_view_limits, terrain=True)
 

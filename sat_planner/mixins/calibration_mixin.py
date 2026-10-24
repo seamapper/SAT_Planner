@@ -15,9 +15,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat
 
 import numpy as np
-from matplotlib.figure import Figure
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from sat_planner.constants import GEOSPATIAL_LIBS_AVAILABLE, pyproj
+from sat_planner.maplibre.assignment_preview import AssignmentMapPreview
 from sat_planner import decimal_degrees_to_ddm, export_utils
 from sat_planner.utils_geo import lat_lon_decimal_from_survey_csv_row
 from sat_planner.utils_ui import show_statistics_dialog
@@ -232,14 +231,14 @@ class LineAssignmentDialog(QDialog):
         instructions.setStyleSheet("font-weight: bold;")
         main_layout.addWidget(instructions)
         
-        # Create map figure and canvas
-        self.figure = Figure(figsize=(8, 6))
-        self.ax = self.figure.add_subplot(111)
-        self.canvas = FigureCanvas(self.figure)
-        main_layout.addWidget(self.canvas)
-        
-        # Plot all lines on the map
-        self._plot_lines()
+        line_colors = ['red', 'blue', 'green', 'purple', 'orange', 'cyan', 'magenta', 'yellow']
+        self.map_preview = AssignmentMapPreview(
+            imported_lines,
+            line_colors,
+            lambda index: "Line {0}".format(index + 1),
+            self,
+        )
+        main_layout.addWidget(self.map_preview, 1)
         
         # Assignment controls
         assignment_widget = QWidget()
@@ -303,47 +302,6 @@ class LineAssignmentDialog(QDialog):
         button_layout.addWidget(ok_btn)
         
         main_layout.addLayout(button_layout)
-    
-    def _plot_lines(self):
-        """Plot all imported lines on the map with different colors."""
-        self.ax.clear()
-        
-        line_colors = ['red', 'blue', 'green', 'purple', 'orange', 'cyan', 'magenta', 'yellow']
-        all_lats = []
-        all_lons = []
-        
-        for i, line in enumerate(self.imported_lines):
-            if len(line) == 2:
-                (lat1, lon1), (lat2, lon2) = line
-                self.ax.plot([lon1, lon2], [lat1, lat2], 
-                           color=line_colors[i], linewidth=2, 
-                           label=f'Line {i+1}', zorder=10)
-                # Add label at midpoint
-                mid_lat = (lat1 + lat2) / 2
-                mid_lon = (lon1 + lon2) / 2
-                self.ax.text(mid_lon, mid_lat, f'Line {i+1}', 
-                           fontsize=10, ha='center', va='center',
-                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.7),
-                           zorder=11)
-                all_lats.extend([lat1, lat2])
-                all_lons.extend([lon1, lon2])
-        
-        if all_lats and all_lons:
-            # Set axis limits with padding
-            lat_range = max(all_lats) - min(all_lats)
-            lon_range = max(all_lons) - min(all_lons)
-            padding_lat = max(lat_range * 0.1, 0.01)
-            padding_lon = max(lon_range * 0.1, 0.01)
-            
-            self.ax.set_xlim(min(all_lons) - padding_lon, max(all_lons) + padding_lon)
-            self.ax.set_ylim(min(all_lats) - padding_lat, max(all_lats) + padding_lat)
-        
-        self.ax.set_xlabel('Longitude')
-        self.ax.set_ylabel('Latitude')
-        self.ax.grid(True, alpha=0.3)
-        self.ax.legend(loc='upper right')
-        self.figure.tight_layout()
-        self.canvas.draw()
     
     def _on_assignment_changed(self, line_idx, combo_idx):
         """Handle assignment change (optional: could highlight line on map)."""

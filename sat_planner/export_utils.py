@@ -306,6 +306,10 @@ def write_lnw(path, lines, *, encoding='utf-8'):
 
 
 EMAIL_LOW_PNG_MAX_DIMENSION_PX = 1280
+MAP_EXPORT_WIDTH_IN = 11.0
+MAP_EXPORT_HEIGHT_IN = 8.5
+MAP_EXPORT_HIGH_DPI = 300
+MAP_EXPORT_LOW_DPI = 100
 
 
 def low_resolution_png_path(path):
@@ -318,8 +322,32 @@ def low_resolution_png_path(path):
     return f"{root}_low{ext}"
 
 
-def composite_colorbar_png(map_png, colorbar_png):
-    """Place a colorbar on the right side of a map image. Returns PNG bytes."""
+def _scaled_png(image, max_width, max_height):
+    """Resize an image so it fits inside a box. It may grow or shrink."""
+    from PIL import Image
+
+    max_width = max(1, int(max_width))
+    max_height = max(1, int(max_height))
+    scale = min(max_width / float(image.width), max_height / float(image.height))
+    size = (max(1, int(round(image.width * scale))), max(1, int(round(image.height * scale))))
+    if size == image.size:
+        return image
+    return image.resize(size, Image.Resampling.LANCZOS)
+
+
+def _map_pixels_within_limit(map_w, map_h, extra_w, extra_h, limit):
+    """Map area after the combined image is fit to ``limit`` on its long side."""
+    longest = max(map_w + extra_w, map_h + extra_h, 1)
+    scale = min(1.0, float(limit) / float(longest))
+    return (map_w * scale) * (map_h * scale)
+
+
+def composite_colorbar_png(map_png, colorbar_png, horizontal_png=None, *, max_dimension=EMAIL_LOW_PNG_MAX_DIMENSION_PX):
+    """Add a colorbar beside or under a map image, in the margin. Returns PNG bytes.
+
+    The side that leaves more of the map inside ``max_dimension`` is used.
+    A wide map gains the scale underneath. A tall map gains it on the right.
+    """
     import io
 
     if not map_png or not colorbar_png:
@@ -331,21 +359,37 @@ def composite_colorbar_png(map_png, colorbar_png):
     try:
         with Image.open(io.BytesIO(map_png)) as base_image, Image.open(io.BytesIO(colorbar_png)) as bar_image:
             base = base_image.convert("RGBA")
-            bar = bar_image.convert("RGBA")
-            max_height = max(1, int(base.height * 0.72))
-            max_width = max(1, int(base.width * 0.18))
-            scale = min(max_height / float(bar.height), max_width / float(bar.width))
-            if scale < 1.0:
-                bar = bar.resize(
-                    (max(1, int(bar.width * scale)), max(1, int(bar.height * scale))),
-                    Image.Resampling.LANCZOS,
-                )
-            margin = max(8, int(base.width * 0.015))
-            x = max(0, base.width - bar.width - margin)
-            y = max(0, (base.height - bar.height) // 2)
-            base.alpha_composite(bar, (x, y))
+            vertical = bar_image.convert("RGBA")
+            margin = max(8, int(max(base.width, base.height) * 0.012))
+            vertical = _scaled_png(vertical, base.width * 0.22, base.height * 0.78)
+            right_extra = margin + vertical.width
+            horizontal = None
+            bottom_extra = 0
+            if horizontal_png:
+                with Image.open(io.BytesIO(horizontal_png)) as horizontal_image:
+                    horizontal = _scaled_png(
+                        horizontal_image.convert("RGBA"),
+                        base.width * 0.88,
+                        base.height * 0.22,
+                    )
+                    bottom_extra = margin + horizontal.height
+            use_bottom = (
+                horizontal is not None
+                and _map_pixels_within_limit(base.width, base.height, 0, bottom_extra, max_dimension)
+                > _map_pixels_within_limit(base.width, base.height, right_extra, 0, max_dimension)
+            )
+            if use_bottom:
+                canvas = Image.new("RGBA", (base.width, base.height + bottom_extra), (255, 255, 255, 255))
+                canvas.paste(base, (0, 0))
+                x = max(0, (base.width - horizontal.width) // 2)
+                canvas.alpha_composite(horizontal, (x, base.height + margin))
+            else:
+                canvas = Image.new("RGBA", (base.width + right_extra, base.height), (255, 255, 255, 255))
+                canvas.paste(base, (0, 0))
+                y = max(0, (base.height - vertical.height) // 2)
+                canvas.alpha_composite(vertical, (base.width + margin, y))
             buffer = io.BytesIO()
-            base.convert("RGB").save(buffer, format="PNG")
+            canvas.convert("RGB").save(buffer, format="PNG")
             return buffer.getvalue()
     except Exception:
         return map_png
@@ -382,6 +426,44 @@ def composite_legend_png(map_png, legend_png):
             return buffer.getvalue()
     except Exception:
         return map_png
+
+
+def map_export_page_px(dpi):
+    """Pixel size of the letter-landscape map page at ``dpi``."""
+    return (
+        max(1, int(round(MAP_EXPORT_WIDTH_IN * float(dpi)))),
+        max(1, int(round(MAP_EXPORT_HEIGHT_IN * float(dpi)))),
+    )
+
+
+def write_png_fitted_to_page(
+    path,
+    data,
+    *,
+    width_in=MAP_EXPORT_WIDTH_IN,
+    height_in=MAP_EXPORT_HEIGHT_IN,
+    dpi=MAP_EXPORT_LOW_DPI,
+):
+    """Fit image bytes on a white page and write the email-sized ``*_low.png``."""
+    import io
+
+    low_path = low_resolution_png_path(path)
+    remove_export_file(low_path)
+    if not data:
+        return None
+    page_w = max(1, int(round(float(width_in) * float(dpi))))
+    page_h = max(1, int(round(float(height_in) * float(dpi))))
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(data)) as image:
+            fitted = _scaled_png(image.convert("RGB"), page_w, page_h)
+            page = Image.new("RGB", (page_w, page_h), (255, 255, 255))
+            page.paste(fitted, ((page_w - fitted.width) // 2, (page_h - fitted.height) // 2))
+            page.save(low_path, format="PNG", optimize=True, dpi=(float(dpi), float(dpi)))
+        return low_path
+    except Exception:
+        return None
 
 
 def write_low_resolution_png_bytes(path, data, *, low_max_dimension_px=EMAIL_LOW_PNG_MAX_DIMENSION_PX):
@@ -458,6 +540,7 @@ def save_export_png(
     facecolor="white",
     low_max_dimension_px=EMAIL_LOW_PNG_MAX_DIMENSION_PX,
     low_dpi=96,
+    low_match_figure=False,
 ):
     """Save figure PNG(s) per high/low toggles. Returns ``(high_path_or_none, low_path_or_none)``."""
     if not save_high and not save_low:
@@ -472,16 +555,16 @@ def save_export_png(
     if save_high:
         fig.savefig(path, **save_kwargs)
     if save_low:
-        if save_high and os.path.isfile(path):
+        if low_match_figure or not (save_high and os.path.isfile(path)):
+            low_kwargs = dict(save_kwargs)
+            low_kwargs["dpi"] = low_dpi
+            fig.savefig(low_path, **low_kwargs)
+        else:
             written = _write_low_resolution_png_from_file(path, low_max_dimension_px=low_max_dimension_px)
             if written is None:
                 low_kwargs = dict(save_kwargs)
                 low_kwargs["dpi"] = low_dpi
                 fig.savefig(low_path, **low_kwargs)
-        else:
-            low_kwargs = dict(save_kwargs)
-            low_kwargs["dpi"] = low_dpi
-            fig.savefig(low_path, **low_kwargs)
     return high_path, low_path
 
 

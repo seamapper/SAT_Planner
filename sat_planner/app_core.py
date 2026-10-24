@@ -146,10 +146,16 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.show_topography_var = True
         # On-screen legend. Off until the user turns it on; the choice is saved.
         self.show_map_legend_var = False
+        # Waypoint and endpoint names. On until the user hides them.
+        self.show_point_labels_var = True
+        # Names drawn along survey lines. Off until the user turns them on.
+        self.show_line_labels_var = False
 
         # Contour display variables
         self.show_contours_var = False  # Default to off
         self.contour_plot = None  # Store contour plot object for removal/update
+        # On-screen contour picture size. On until the user turns it off; the choice is saved.
+        self.high_res_screenshot_var = True
 
         # Slope overlay display variables
         self.show_slope_overlay_var = False  # Default to off
@@ -590,6 +596,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_shaded_relief_cmap()
         self._load_show_map_colorbar()
         self._load_show_map_legend()
+        self._load_show_point_labels()
+        self._load_show_line_labels()
+        self._load_high_res_display()
         if hasattr(self, "_update_shaded_relief_cmap_button"):
             self._update_shaded_relief_cmap_button()
         self._load_slope_overlay_bands()
@@ -807,8 +816,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         icon_size = self._map_overlay_icon_size
         btn_style = "QPushButton { border: none; background: transparent; padding: 0px; }"
 
-        map_options_off = self._media_path("layers_t_off.png")
-        map_options_on = self._media_path("layers_t_on.png")
+        # The orange glyph is in the "off" file and the white glyph is in the "on" file.
+        map_options_off = self._media_path("layers_t_on.png")
+        map_options_on = self._media_path("layers_t_off.png")
         self._map_options_icon_off = QIcon(map_options_off) if os.path.exists(map_options_off) else QIcon()
         self._map_options_icon_on = QIcon(map_options_on) if os.path.exists(map_options_on) else QIcon()
 
@@ -838,8 +848,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._set_map_options_icon_active(False)
         bar_layout.addWidget(self.map_options_btn)
 
-        measure_off = self._media_path("dht_t_grey_off.png")
-        measure_on = self._media_path("dht_t_grey_on.png")
+        measure_off = self._media_path("dht_t_grey_on.png")
+        measure_on = self._media_path("dht_t_grey_off.png")
         self._measurement_icon_off = QIcon(measure_off) if os.path.exists(measure_off) else QIcon()
         self._measurement_icon_on = QIcon(measure_on) if os.path.exists(measure_on) else QIcon()
 
@@ -920,6 +930,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.add_shapefile_btn,
                 self.show_contours_checkbox,
                 self.contour_interval_entry,
+                self.high_res_screenshot_checkbox,
                 self.show_slope_overlay_checkbox,
                 list(zip(
                     self.slope_overlay_min_entries,
@@ -941,6 +952,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.show_map_colorbar_checkbox,
                 self.show_topography_checkbox,
                 self.show_map_legend_checkbox,
+                self.show_point_labels_checkbox,
+                self.show_line_labels_checkbox,
                 self.dyn_vert_exag_btn,
                 self.dynamic_resolution_btn,
             )
@@ -1232,6 +1245,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         download_data_layout.setContentsMargins(0, 0, 0, 0)
         download_data_layout.setSpacing(6)
         self.download_bathymetry_btn = QPushButton("Download Online Bathymetry")
+        self.download_bathymetry_btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
         self.download_bathymetry_btn.setToolTip(
             "Open the interactive bathymetry download dialog (GEBCO, GMRT, NCEI, WGOM-LI-SNE)."
         )
@@ -1286,6 +1300,14 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.show_map_legend_checkbox = QCheckBox("Legend")
         self.show_map_legend_checkbox.setChecked(self.show_map_legend_var)
         self.show_map_legend_checkbox.stateChanged.connect(self._on_map_legend_checkbox_changed)
+        self.show_point_labels_checkbox = QCheckBox("Point Label")
+        self.show_point_labels_checkbox.setChecked(self.show_point_labels_var)
+        self.show_point_labels_checkbox.setToolTip("Show or hide names on waypoints and line endpoints")
+        self.show_point_labels_checkbox.stateChanged.connect(self._on_point_labels_checkbox_changed)
+        self.show_line_labels_checkbox = QCheckBox("Line Label")
+        self.show_line_labels_checkbox.setChecked(self.show_line_labels_var)
+        self.show_line_labels_checkbox.setToolTip("Show or hide a name drawn along each survey line")
+        self.show_line_labels_checkbox.stateChanged.connect(self._on_line_labels_checkbox_changed)
         self.shaded_relief_cmap_combo.setMinimumWidth(0)
         self.shaded_relief_cmap_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         if hasattr(self, "_update_shaded_relief_cmap_button"):
@@ -1296,6 +1318,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.show_contours_checkbox.setChecked(self.show_contours_var)
         self.show_contours_checkbox.stateChanged.connect(self._on_contour_checkbox_changed)
         self.contour_interval_entry = QLineEdit("200")
+        self.high_res_screenshot_checkbox = QCheckBox("High Res Display")
+        self.high_res_screenshot_checkbox.setChecked(self.high_res_screenshot_var)
+        self.high_res_screenshot_checkbox.setToolTip(
+            "Draw the on-screen depth picture at about 2700 pixels while contours are shown."
+        )
+        self.high_res_screenshot_checkbox.stateChanged.connect(self._on_high_res_screenshot_changed)
         self.show_slope_overlay_checkbox = QCheckBox("Slopes")
         self.show_slope_overlay_checkbox.setChecked(self.show_slope_overlay_var)
         self.show_slope_overlay_checkbox.stateChanged.connect(self._on_slope_overlay_checkbox_changed)

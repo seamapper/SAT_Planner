@@ -15,23 +15,58 @@
     #startup {
       position: absolute;
       left: 50%;
-      top: 46%;
+      top: 50%;
       transform: translate(-50%, -50%);
       width: min(640px, 88%);
+      max-height: 94%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
       text-align: center;
       font-family: "Segoe UI", Helvetica, Arial, sans-serif;
       pointer-events: none;
       z-index: 2;
+      overflow: hidden;
     }
     #startup-title {
-      font-size: 16px;
-      font-weight: 650;
+      font-size: 18px;
+      font-weight: 700;
       color: #333333;
-      margin-bottom: 14px;
+    }
+    #startup-frozen {
+      font-size: 12px;
+      color: #888888;
+    }
+    #startup-logo {
+      display: none;
+      max-width: 220px;
+      max-height: 16vh;
+      object-fit: contain;
+    }
+    #startup-author {
+      font-size: 15px;
+      font-weight: 700;
+      color: #333333;
+    }
+    #startup-email,
+    #startup-institution {
+      font-size: 12px;
+      color: #555555;
+    }
+    #startup-grant,
+    #startup-license {
+      font-size: 11px;
+      color: #666666;
+    }
+    #startup-institution,
+    #startup-grant,
+    #startup-license {
+      max-width: 62ch;
     }
     #startup-message {
-      font-size: 18px;
-      font-weight: 650;
+      font-size: 16px;
+      font-weight: 700;
       color: #666666;
       white-space: pre-line;
     }
@@ -84,6 +119,13 @@
   <div id="map"></div>
   <div id="startup">
     <div id="startup-title"></div>
+    <div id="startup-frozen"></div>
+    <img id="startup-logo" alt="" />
+    <div id="startup-author"></div>
+    <div id="startup-email"></div>
+    <div id="startup-institution"></div>
+    <div id="startup-grant"></div>
+    <div id="startup-license"></div>
     <div id="startup-message"></div>
   </div>
   <div id="hover"></div>
@@ -92,9 +134,32 @@
   <script src="qwebchannel.js"></script>
   <script src="maplibre-gl.js"></script>
   <script>
-    window.setStartup = function (title, message) {
-      document.getElementById("startup-title").textContent = title || "";
-      document.getElementById("startup-message").textContent = message || "";
+    window.setStartup = function (info) {
+      info = info || {};
+      function fill(id, text) {
+        var el = document.getElementById(id);
+        if (el) {
+          el.textContent = text || "";
+        }
+      }
+      fill("startup-title", info.title);
+      fill("startup-frozen", info.frozen ? ("Frozen On: " + info.frozen) : "");
+      fill("startup-author", info.author);
+      fill("startup-email", info.email);
+      fill("startup-institution", info.institution);
+      fill("startup-grant", info.grant);
+      fill("startup-license", info.license);
+      fill("startup-message", info.message);
+      var logo = document.getElementById("startup-logo");
+      if (logo) {
+        if (info.logo) {
+          logo.src = info.logo;
+          logo.style.display = "block";
+        } else {
+          logo.removeAttribute("src");
+          logo.style.display = "none";
+        }
+      }
     };
 
     function graticule() {
@@ -227,9 +292,20 @@
           maxZoom: 14,
           duration: 0
         });
-        setTimeout(function () {
-          suppressView = Math.max(0, suppressView - 1);
-        }, 600);
+        map.once("idle", function () {
+          if (window.bridge && map.getBounds) {
+            var shown = map.getBounds();
+            window.bridge.viewChanged(
+              shown.getWest(),
+              shown.getSouth(),
+              shown.getEast(),
+              shown.getNorth()
+            );
+          }
+          setTimeout(function () {
+            suppressView = Math.max(0, suppressView - 1);
+          }, 50);
+        });
         hideStartup();
       }
       apply();
@@ -263,9 +339,19 @@
         var el = document.createElement("div");
         el.textContent = props.label;
         el.style.cssText = "font: 600 11px Segoe UI, Helvetica, Arial, sans-serif; color: #222; background: rgba(255,255,255,0.88); padding: 0 3px; border-radius: 2px; white-space: nowrap; pointer-events: none;";
-        planLabels.push(new maplibregl.Marker({ element: el, anchor: "left", offset: [6, -8] })
-          .setLngLat(feature.geometry.coordinates)
-          .addTo(map));
+        var rotation = Number(props.labelRotation);
+        var rotated = props.labelRotation !== undefined && props.labelRotation !== null && props.labelRotation !== "" && !isNaN(rotation);
+        var marker = new maplibregl.Marker({
+          element: el,
+          anchor: rotated ? "center" : "left",
+          offset: rotated ? [0, 0] : [6, -8]
+        }).setLngLat(feature.geometry.coordinates);
+        if (rotated) {
+          marker.setRotationAlignment("viewport");
+          marker.setRotation(rotation);
+          el.dataset.rotation = String(rotation);
+        }
+        planLabels.push(marker.addTo(map));
       });
       var startup = document.getElementById("startup");
       if (startup) {
@@ -592,15 +678,26 @@
           return;
         }
         var pt = map.project(marker.getLngLat());
-        var x = (pt.x + 6) * ratio;
-        var y = (pt.y - 8) * ratio;
         var padX = 3 * ratio;
         var height = 14 * ratio;
         var width = ctx.measureText(text).width + padX * 2;
+        var rotation = el && el.dataset.rotation ? parseFloat(el.dataset.rotation) : 0;
         ctx.fillStyle = "rgba(255,255,255,0.88)";
-        ctx.fillRect(x, y - height / 2, width, height);
-        ctx.fillStyle = "#222222";
-        ctx.fillText(text, x + padX, y);
+        ctx.save();
+        if (rotation) {
+          ctx.translate(pt.x * ratio, pt.y * ratio);
+          ctx.rotate(rotation * Math.PI / 180);
+          ctx.fillRect(-width / 2, -height / 2, width, height);
+          ctx.fillStyle = "#222222";
+          ctx.fillText(text, -width / 2 + padX, 0);
+        } else {
+          var x = (pt.x + 6) * ratio;
+          var y = (pt.y - 8) * ratio;
+          ctx.fillRect(x, y - height / 2, width, height);
+          ctx.fillStyle = "#222222";
+          ctx.fillText(text, x + padX, y);
+        }
+        ctx.restore();
       });
       return out.toDataURL("image/png");
     }
