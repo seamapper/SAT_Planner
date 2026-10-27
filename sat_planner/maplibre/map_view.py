@@ -261,6 +261,7 @@ class MapLibreView(QWebEngineView):
         self._pending_plan = None
         self._pending_bathymetry = None
         self._pending_cursor = None
+        self._pending_profile_cursor = None
         self._pending_hover = None
         self._pending_colorbar = None
         self._pending_legend = None
@@ -303,6 +304,8 @@ class MapLibreView(QWebEngineView):
             self.fit_bounds(*self._pending_fit)
         if self._pending_cursor is not None:
             self.set_cursor(self._pending_cursor)
+        if self._pending_profile_cursor is not None:
+            self.set_profile_cursor(*self._pending_profile_cursor)
         if self._pending_hover is not None:
             self.set_hover(self._pending_hover)
         if self._pending_colorbar is not None:
@@ -362,6 +365,22 @@ class MapLibreView(QWebEngineView):
         """Set the map canvas cursor. An empty string restores the default."""
         self._pending_cursor = css_cursor or ""
         self._run("if (window.setCursor) window.setCursor({cursor});".format(cursor=json.dumps(self._pending_cursor)))
+
+    def set_profile_cursor(self, lon, lat):
+        """Show or clear the marker for the profile pointer's distance along the line."""
+        if lon is None or lat is None:
+            self._pending_profile_cursor = None
+            self._run("if (window.setProfileCursor) window.setProfileCursor(NaN, NaN);")
+            return
+        lon = float(lon)
+        lat = float(lat)
+        self._pending_profile_cursor = (lon, lat)
+        self._run(
+            "if (window.setProfileCursor) window.setProfileCursor({lon}, {lat});".format(
+                lon=json.dumps(lon),
+                lat=json.dumps(lat),
+            )
+        )
 
     def set_hover(self, text):
         """Show or clear the hover readout on the map."""

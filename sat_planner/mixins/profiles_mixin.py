@@ -32,8 +32,207 @@ class ProfilesMixin:
             color="#666666",
         )
         self.profile_fig.subplots_adjust(left=0.12, right=0.98, top=0.92, bottom=0.12)
+        self._clear_profile_track()
         if hasattr(self, "profile_canvas"):
             self.profile_canvas.draw_idle()
+
+    def _clear_profile_track(self):
+        """Drop the sampled line used to follow the profile pointer."""
+        self._profile_track = None
+        self._hide_profile_cursor()
+
+    def _remember_profile_track(self, dists, lats, lons, elevations, slopes):
+        """Keep the samples behind the current profile so a pointer distance can be placed."""
+        dists = np.asarray(dists, dtype=float)
+        lats = np.asarray(lats, dtype=float)
+        lons = np.asarray(lons, dtype=float)
+        elevations = np.asarray(elevations, dtype=float)
+        if slopes is None:
+            slopes = np.full(dists.shape, np.nan)
+        slopes = np.asarray(slopes, dtype=float)
+        if min(dists.size, lats.size, lons.size, elevations.size) < 2 or not (
+            dists.shape == lats.shape == lons.shape == elevations.shape
+        ):
+            self._clear_profile_track()
+            return
+        if slopes.shape != dists.shape:
+            slopes = np.full(dists.shape, np.nan)
+        self._profile_track = {
+            "dists": dists.copy(),
+            "lats": lats.copy(),
+            "lons": lons.copy(),
+            "elevations": elevations.copy(),
+            "slopes": slopes.copy(),
+        }
+        self._profile_elev_cursor = None
+        self._profile_slope_cursor = None
+        dist = getattr(self, "_profile_cursor_dist", None)
+        if dist is not None:
+            sample = self._profile_sample_at_distance(dist)
+            if sample is not None:
+                self._show_profile_cursor(sample)
+
+    def _profile_sample_at_distance(self, dist):
+        """Interpolate lat, lon, elevation, and slope at a distance along the profile."""
+        track = getattr(self, "_profile_track", None)
+        if not track:
+            return None
+        dists = track["dists"]
+        if dists.size < 2 or not np.isfinite(dist):
+            return None
+        dist = float(np.clip(dist, dists[0], dists[-1]))
+        idx = int(np.searchsorted(dists, dist, side="right") - 1)
+        idx = max(0, min(idx, dists.size - 2))
+        span = float(dists[idx + 1] - dists[idx])
+        blend = 0.0 if span <= 1e-9 else (dist - float(dists[idx])) / span
+
+        def mix(values):
+            left = float(values[idx])
+            right = float(values[idx + 1])
+            left_ok = np.isfinite(left)
+            right_ok = np.isfinite(right)
+            if left_ok and right_ok:
+                return left * (1.0 - blend) + right * blend
+            if left_ok:
+                return left
+            if right_ok:
+                return right
+            return None
+
+        lat = mix(track["lats"])
+        lon = mix(track["lons"])
+        if lat is None or lon is None:
+            return None
+        return {
+            "dist": dist,
+            "lat": lat,
+            "lon": lon,
+            "elevation": mix(track["elevations"]),
+            "slope": mix(track["slopes"]),
+        }
+
+    def _profile_slope_axis(self):
+        """Return the slope axis sharing the profile distance axis, when it is shown."""
+        fig = getattr(self, "profile_fig", None)
+        ax = getattr(self, "profile_ax", None)
+        if fig is None or ax is None:
+            return None
+        for other in fig.axes:
+            if other is not ax and other.get_visible():
+                return other
+        return None
+
+    def _profile_event_axis(self, ax):
+        """True when the pointer is over the elevation profile or its slope axis."""
+        profile_ax = getattr(self, "profile_ax", None)
+        if ax is None or profile_ax is None or getattr(self, "_profile_track", None) is None:
+            return False
+        return ax is profile_ax or ax is self._profile_slope_axis()
+
+    def _set_profile_curve_marker(self, attr, ax, x, y):
+        """Move one marker onto a profile curve, or hide it when that value is missing."""
+        artist = getattr(self, attr, None)
+        if ax is None or y is None or not np.isfinite(y) or not np.isfinite(x):
+            if artist is not None:
+                try:
+                    artist.set_visible(False)
+                except Exception:
+                    setattr(self, attr, None)
+            return
+        if artist is None or getattr(artist, "axes", None) is not ax:
+            artist, = ax.plot(
+                [x],
+                [y],
+                linestyle="None",
+                marker="o",
+                markersize=7,
+                markerfacecolor="#111111",
+                markeredgecolor="#ffffff",
+                markeredgewidth=1.2,
+                zorder=30,
+                label="_nolegend_",
+            )
+            setattr(self, attr, artist)
+            return
+        artist.set_data([x], [y])
+        artist.set_visible(True)
+
+    def _show_profile_cursor(self, sample):
+        """Place the map marker and the markers on the elevation and slope curves."""
+        self._profile_cursor_dist = sample["dist"]
+        self._profile_cursor_visible = True
+        self._set_profile_curve_marker(
+            "_profile_elev_cursor",
+            getattr(self, "profile_ax", None),
+            sample["dist"],
+            sample["elevation"],
+        )
+        self._set_profile_curve_marker(
+            "_profile_slope_cursor",
+            self._profile_slope_axis(),
+            sample["dist"],
+            sample["slope"],
+        )
+        view = getattr(self, "map_view", None)
+        if view is not None and hasattr(view, "set_profile_cursor"):
+            view.set_profile_cursor(sample["lon"], sample["lat"])
+        self._hover_mouse_lat = sample["lat"]
+        self._hover_mouse_lon = sample["lon"]
+        if hasattr(self, "_update_default_hover_info"):
+            self._update_default_hover_info(sample["lat"], sample["lon"], include_measurement=False)
+        if hasattr(self, "_schedule_eez_hover_lookup"):
+            self._schedule_eez_hover_lookup(sample["lat"], sample["lon"])
+        if hasattr(self, "_push_maplibre_hover"):
+            self._push_maplibre_hover()
+        canvas = getattr(self, "profile_canvas", None)
+        if canvas is not None:
+            canvas.draw_idle()
+
+    def _hide_profile_cursor(self, _event=None):
+        """Remove the profile pointer from the map and from both profile curves."""
+        if getattr(self, "_profile_cursor_dist", None) is None and not getattr(self, "_profile_cursor_visible", False):
+            return
+        self._profile_cursor_dist = None
+        was_visible = bool(getattr(self, "_profile_cursor_visible", False))
+        self._profile_cursor_visible = False
+        for attr in ("_profile_elev_cursor", "_profile_slope_cursor"):
+            artist = getattr(self, attr, None)
+            if artist is None:
+                continue
+            try:
+                artist.set_visible(False)
+            except Exception:
+                setattr(self, attr, None)
+        view = getattr(self, "map_view", None)
+        if view is not None and hasattr(view, "set_profile_cursor"):
+            view.set_profile_cursor(None, None)
+        if hasattr(self, "_cancel_eez_hover_lookup"):
+            self._cancel_eez_hover_lookup()
+        self._hover_mouse_lat = None
+        self._hover_mouse_lon = None
+        info = getattr(self, "mouse_hover_info_text", None)
+        if info is not None:
+            try:
+                info.set_visible(False)
+            except Exception:
+                pass
+        if hasattr(self, "_push_maplibre_hover"):
+            self._push_maplibre_hover()
+        if was_visible:
+            canvas = getattr(self, "profile_canvas", None)
+            if canvas is not None:
+                canvas.draw_idle()
+
+    def _on_profile_cursor_motion(self, event):
+        """Follow the pointer's distance along the profile line."""
+        if not self._profile_event_axis(getattr(event, "inaxes", None)) or event.xdata is None:
+            self._hide_profile_cursor()
+            return
+        sample = self._profile_sample_at_distance(float(event.xdata))
+        if sample is None:
+            self._hide_profile_cursor()
+            return
+        self._show_profile_cursor(sample)
 
     def _show_slope_on_profile(self):
         """Whether elevation profile plots should include the slope (twin axis) curve."""
@@ -165,6 +364,13 @@ class ProfilesMixin:
             labels.extend(slope_labels)
         if handles:
             self.profile_ax.legend(handles, labels, fontsize=10, loc='upper right')
+        self._remember_profile_track(
+            dists,
+            getattr(self, "_last_profile_sample_lats", []),
+            getattr(self, "_last_profile_sample_lons", []),
+            elevations,
+            slopes,
+        )
         self.profile_fig.tight_layout(pad=1.0)
         self.profile_canvas.draw_idle()
 
@@ -208,6 +414,8 @@ class ProfilesMixin:
         all_d = []
         all_e = []
         all_s = []
+        all_lats = []
+        all_lons = []
         slope_ax = None
         cumulative_offset = 0.0
 
@@ -215,6 +423,8 @@ class ProfilesMixin:
             dists, elevations, slopes = self._profile_arrays_along_segment_endpoints(lat1, lon1, lat2, lon2, n=100)
             if dists is None or elevations is None:
                 continue
+            all_lats.append(np.array(self._last_profile_sample_lats, dtype=float, copy=True))
+            all_lons.append(np.array(self._last_profile_sample_lons, dtype=float, copy=True))
             d_shift = dists + cumulative_offset
             cumulative_offset = float(d_shift[-1]) if len(d_shift) else cumulative_offset
             self.profile_ax.plot(d_shift, elevations, color=color, lw=1.2, label=label)
@@ -244,6 +454,13 @@ class ProfilesMixin:
         self._profile_dists = dcat
         self._profile_elevations = ecat
         self._profile_slopes = scat
+        self._remember_profile_track(
+            dcat,
+            np.concatenate(all_lats),
+            np.concatenate(all_lons),
+            ecat,
+            scat,
+        )
 
         self.profile_ax.set_xlim(float(np.nanmin(dcat)), float(np.nanmax(dcat)))
         if np.any(~np.isnan(ecat)):
@@ -408,6 +625,8 @@ class ProfilesMixin:
                     dists.append(dists[-1])
             except Exception:
                 dists.append(dists[-1])
+        self._last_profile_sample_lats = np.asarray(lats, dtype=float)
+        self._last_profile_sample_lons = np.asarray(lons, dtype=float)
         return np.array(dists, dtype=float), elevations, slopes
 
     def _draw_crossline_profile(self):
@@ -502,6 +721,7 @@ class ProfilesMixin:
             labels.extend(slope_labels)
         if handles:
             self.profile_ax.legend(handles, labels, fontsize=10, loc='upper right')
+        self._remember_profile_track(dists, lats, lons, elevations, slopes)
         self.profile_fig.tight_layout(pad=1.0)
         self.profile_canvas.draw_idle()
 
@@ -609,6 +829,7 @@ class ProfilesMixin:
             labels.extend(slope_labels)
         if handles:
             self.profile_ax.legend(handles, labels, fontsize=10, loc='upper right')
+        self._remember_profile_track(dists, lats, lons, elevations, slopes)
         self.profile_fig.tight_layout(pad=1.0)
         self.profile_canvas.draw_idle()
 
@@ -717,6 +938,7 @@ class ProfilesMixin:
             labels.extend(slope_labels)
         if handles:
             self.profile_ax.legend(handles, labels, fontsize=10, loc="upper right")
+        self._remember_profile_track(dists, lats, lons, elevations, slopes)
         self.profile_fig.tight_layout(pad=1.0)
         self.profile_canvas.draw_idle()
 
@@ -787,6 +1009,11 @@ class ProfilesMixin:
         elev_arrays = []
         slope_dists_concat = []
         slopes_concat = []
+        track_dists = []
+        track_lats = []
+        track_lons = []
+        track_elevations = []
+        track_slopes = []
 
         for seg_start, seg_end, color, label in segments:
             lat1, lon1 = seg_start
@@ -807,6 +1034,14 @@ class ProfilesMixin:
             dists_plot = dists + cumulative
             self.profile_ax.plot(dists_plot, elevations, color=color, lw=1.5, label=label)
             elev_arrays.append(elevations)
+            track_dists.extend(dists_plot.tolist())
+            track_lats.extend(np.asarray(lats, dtype=float).tolist())
+            track_lons.extend(np.asarray(lons, dtype=float).tolist())
+            track_elevations.extend(np.asarray(elevations, dtype=float).tolist())
+            if slopes is None:
+                track_slopes.extend([np.nan] * len(dists_plot))
+            else:
+                track_slopes.extend(np.asarray(slopes, dtype=float).tolist())
             if self._show_slope_on_profile() and slopes is not None:
                 # Skip first sample when appending after first segment to avoid duplicate junction point
                 start_i = 1 if slope_dists_concat else 0
@@ -841,6 +1076,7 @@ class ProfilesMixin:
             labels.extend(slope_labels)
         if handles:
             self.profile_ax.legend(handles, labels, fontsize=10, loc="upper right")
+        self._remember_profile_track(track_dists, track_lats, track_lons, track_elevations, track_slopes)
         self.profile_fig.tight_layout(pad=1.0)
         self.profile_canvas.draw_idle()
 

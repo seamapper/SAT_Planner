@@ -1442,6 +1442,7 @@ class AdcpMixin:
 
         geod = self._adcp_geod()
         if geod is None:
+            self._clear_profile_track()
             return
 
         segments = []
@@ -1458,6 +1459,11 @@ class AdcpMixin:
         self.profile_ax.set_title("ADCP Calibration — Elevation Profile", fontsize=8)
         cumulative = 0.0
         elev_arrays = []
+        track_dists = []
+        track_lats = []
+        track_lons = []
+        track_elevations = []
+        track_slopes = []
         label_used = set()
         for seg_start, seg_end, color, label in segments:
             lat1, lon1 = seg_start
@@ -1477,7 +1483,20 @@ class AdcpMixin:
                 label_used.add(plot_label)
             self.profile_ax.plot(dists_plot, elevations, color=color, lw=1.2, label=plot_label)
             elev_arrays.append(elevations)
+            track_dists.extend(dists_plot.tolist())
+            track_lats.extend(np.asarray(lats, dtype=float).tolist())
+            track_lons.extend(np.asarray(lons, dtype=float).tolist())
+            track_elevations.extend(np.asarray(elevations, dtype=float).tolist())
+            if slopes is None:
+                track_slopes.extend([np.nan] * len(dists_plot))
+            else:
+                track_slopes.extend(np.asarray(slopes, dtype=float).tolist())
             cumulative = float(dists_plot[-1])
+
+        if track_dists:
+            self._remember_profile_track(track_dists, track_lats, track_lons, track_elevations, track_slopes)
+        else:
+            self._clear_profile_track()
 
         if elev_arrays:
             ymin = min(float(np.nanmin(e)) for e in elev_arrays)

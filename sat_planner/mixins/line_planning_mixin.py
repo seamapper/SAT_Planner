@@ -213,6 +213,8 @@ class LinePlanningMixin:
             self.profile_ax.tick_params(axis='both', which='major', labelsize=7)
             if hasattr(self, 'profile_canvas'):
                 self.profile_canvas.draw_idle()
+        if hasattr(self, "_clear_profile_track"):
+            self._clear_profile_track()
 
     def _handle_line_planning_plot_click(self, event):
         """Handle plot click when in line planning tab and mode. Returns True if event was handled."""
@@ -1213,6 +1215,8 @@ class LinePlanningMixin:
         lats = np.array(lats)
         lons = np.array(lons)
         dists = np.array(dists)
+        self._last_profile_sample_lats = lats
+        self._last_profile_sample_lons = lons
         elevations, slopes, _ = self._get_profile_data_from_geotiff(lats, lons)
         if elevations is None:
             if self.geotiff_data_array is None or self.geotiff_extent is None:
@@ -1347,12 +1351,14 @@ class LinePlanningMixin:
                 self.profile_fig.tight_layout(pad=1.0)
                 if hasattr(self, 'profile_canvas'):
                     self.profile_canvas.draw_idle()
+                self._clear_profile_track()
                 return
             prof = self._line_plan_profile_arrays()
             if prof is None:
                 self.profile_fig.tight_layout(pad=1.0)
                 if hasattr(self, 'profile_canvas'):
                     self.profile_canvas.draw_idle()
+                self._clear_profile_track()
                 return
             dists, elevations, slopes, waypoint_distances = prof
             self.profile_ax.plot(dists, elevations, color='orange', lw=1, label='Elevation')
@@ -1380,6 +1386,13 @@ class LinePlanningMixin:
                 labels.extend(slope_labels)
             if handles:
                 self.profile_ax.legend(handles, labels, fontsize=10, loc='upper right')
+            self._remember_profile_track(
+                dists,
+                self._last_profile_sample_lats,
+                self._last_profile_sample_lons,
+                elevations,
+                slopes,
+            )
             self.profile_fig.tight_layout(pad=1.0)
             self.profile_canvas.draw_idle()
         finally:

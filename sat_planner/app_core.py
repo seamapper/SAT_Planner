@@ -397,6 +397,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.profile_ax = self.profile_fig.add_subplot(111)
         self.profile_canvas = FigureCanvas(self.profile_fig)
         self.profile_widget = self.profile_canvas
+        self.profile_canvas.mpl_connect("motion_notify_event", self._on_profile_cursor_motion)
+        self.profile_canvas.mpl_connect("figure_leave_event", self._hide_profile_cursor)
         self._show_profile_planning_placeholder()
 
         # Slope profile checkbox for profile plot
@@ -1017,6 +1019,19 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 profile_layout = QVBoxLayout()
                 profile_layout.setContentsMargins(0, 0, 0, 0)
                 profile_layout.addWidget(self.profile_widget)
+                self.profile_select_row = QWidget()
+                select_layout = QHBoxLayout(self.profile_select_row)
+                select_layout.setContentsMargins(0, 2, 0, 0)
+                select_layout.setSpacing(6)
+                self.profile_select_label = QLabel("Select Profile:")
+                select_layout.addWidget(self.profile_select_label)
+                if hasattr(self, "cal_profile_select_combo"):
+                    select_layout.addWidget(self.cal_profile_select_combo)
+                if hasattr(self, "ref_profile_select_combo"):
+                    select_layout.addWidget(self.ref_profile_select_combo)
+                select_layout.addStretch(1)
+                profile_layout.addWidget(self.profile_select_row)
+                self._sync_profile_select_row()
                 # Horizontal layout for checkbox and About button
                 checkbox_button_layout = QHBoxLayout()
                 checkbox_button_layout.setContentsMargins(0, 0, 0, 0)
@@ -1157,6 +1172,22 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
     def _on_gmrt_dialog_geotiff_downloaded(self, path):
         self._on_bathymetry_dialog_geotiff_downloaded(path)
 
+    def _sync_profile_select_row(self):
+        """Show the profile selector for the open survey tab, under the profile."""
+        row = getattr(self, "profile_select_row", None)
+        if row is None:
+            return
+        tab = self.param_notebook.currentIndex() if hasattr(self, "param_notebook") else -1
+        cal = getattr(self, "cal_profile_select_combo", None)
+        ref = getattr(self, "ref_profile_select_combo", None)
+        show_cal = tab == 0
+        show_ref = tab == 1
+        if cal is not None:
+            cal.setVisible(show_cal)
+        if ref is not None:
+            ref.setVisible(show_ref)
+        row.setVisible(show_cal or show_ref)
+
     def _on_tab_changed(self, event=None):
         """Handle tab change event - update profile plot for active tab."""
         if not hasattr(self, 'param_notebook'):
@@ -1174,6 +1205,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self.previous_tab_index = current_tab
             if hasattr(self, "_update_shared_survey_io_ui"):
                 self._update_shared_survey_io_ui()
+            self._sync_profile_select_row()
         except Exception as e:
             print(f"Error in tab change handler: {e}")
 
@@ -1619,12 +1651,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_test_plan_info_layout.addWidget(self.crossline_passes_entry, ref_test_plan_row, 1)
         ref_test_plan_row += 1
 
-        ref_test_plan_info_layout.addWidget(QLabel("Select Profile:"), ref_test_plan_row, 0)
         self.ref_profile_select_combo = QComboBox()
         self.ref_profile_select_combo.addItem("Crossline")
         self.ref_profile_select_combo.currentIndexChanged.connect(self._on_accuracy_profile_select_changed)
-        ref_test_plan_info_layout.addWidget(self.ref_profile_select_combo, ref_test_plan_row, 1)
-        ref_test_plan_row += 1
 
         self.ref_show_info_btn = QPushButton("Show Accuracy Test Info")
         self.ref_show_info_btn.clicked.connect(self._show_reference_planning_info)
@@ -1845,14 +1874,11 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.cal_show_stats_btn = QPushButton("Show Calibration Test Info")
         self.cal_show_stats_btn.clicked.connect(self._show_calibration_statistics)
         cal_test_plan_info_layout.addWidget(self.cal_show_stats_btn, cal_test_plan_row, 0, 1, 4)
-        cal_test_plan_row += 1
 
-        cal_test_plan_info_layout.addWidget(QLabel("Select Profile:"), cal_test_plan_row, 0, 1, 1)
         self.cal_profile_select_combo = QComboBox()
         self.cal_profile_select_combo.addItems(["Pitch", "Roll"])
         self.cal_profile_select_combo.setCurrentIndex(0)
         self.cal_profile_select_combo.currentIndexChanged.connect(self._on_calibration_profile_select_changed)
-        cal_test_plan_info_layout.addWidget(self.cal_profile_select_combo, cal_test_plan_row, 1, 1, 3)
 
         cal_layout.addWidget(cal_test_plan_info_groupbox, cal_row, 0, 1, 2)
         cal_layout.setRowStretch(cal_row, 0)

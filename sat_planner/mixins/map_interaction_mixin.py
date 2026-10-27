@@ -1703,8 +1703,10 @@ class MapInteractionMixin:
             return
         self._update_default_hover_info(current_lat, current_lon)
         self.canvas.draw_idle()
+        if hasattr(self, "_push_maplibre_hover"):
+            self._push_maplibre_hover()
 
-    def _update_default_hover_info(self, mouse_lat, mouse_lon):
+    def _update_default_hover_info(self, mouse_lat, mouse_lon, include_measurement=True):
         """Render the default hover text and include EEZ info when enabled."""
         elevation, slope = (None, None)
         if hasattr(self, 'geotiff_data_array') and self.geotiff_data_array is not None:
@@ -1721,7 +1723,7 @@ class MapInteractionMixin:
         if hasattr(self, "_active_kongsberg_depth_modes") and self._active_kongsberg_depth_modes():
             mode_name = self._depth_mode_name_at_elevation(elevation)
             info_str += f"\nDepth Mode: {mode_name if mode_name else '-'}"
-        if getattr(self, "measurement_tool_mode", False):
+        if include_measurement and getattr(self, "measurement_tool_mode", False):
             start_point = getattr(self, "measurement_start_point", None)
             if start_point is None:
                 info_str += "\nMeasurement: click first point"

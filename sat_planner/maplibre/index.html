@@ -370,6 +370,26 @@
       }
     };
 
+    var profileCursor = null;
+    window.setProfileCursor = function (lon, lat) {
+      if (!isFinite(lon) || !isFinite(lat)) {
+        if (profileCursor) {
+          profileCursor.remove();
+          profileCursor = null;
+        }
+        return;
+      }
+      if (!profileCursor) {
+        var el = document.createElement("div");
+        el.style.cssText = "width:12px;height:12px;border-radius:50%;background:#111;border:2px solid #fff;box-shadow:0 0 0 1px #111;pointer-events:none;";
+        profileCursor = new maplibregl.Marker({ element: el, anchor: "center" })
+          .setLngLat([lon, lat])
+          .addTo(map);
+        return;
+      }
+      profileCursor.setLngLat([lon, lat]);
+    };
+
     window.setLegend = function (dataUrl, visible) {
       var el = document.getElementById("legend");
       if (!el) {
