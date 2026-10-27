@@ -72,3 +72,24 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
             os.environ["PROJ_LIB"] = proj_data
             os.environ["PROJ_DATA"] = proj_data
             break
+
+    # QtWebEngineProcess is stored under PyQt6/Qt6/lib/qt6, while the Qt DLLs
+    # land in the extraction root and the resources land under PyQt6/Qt6.
+    # The qt.conf written at build time points one directory too high, so the
+    # helper aborts and the main process exits before a window appears.
+    helper_dir = os.path.join(root, "PyQt6", "Qt6", "lib", "qt6")
+    helper_exe = os.path.join(helper_dir, "QtWebEngineProcess.exe")
+    if os.path.isfile(helper_exe):
+        os.environ["QTWEBENGINEPROCESS_PATH"] = helper_exe
+        os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
+        with open(os.path.join(helper_dir, "qt.conf"), "w", encoding="utf-8") as handle:
+            handle.write(
+                "[Paths]\n"
+                "Prefix = ../../../..\n"
+                "Binaries = .\n"
+                "Libraries = .\n"
+                "Plugins = PyQt6/Qt6/plugins\n"
+                "Data = PyQt6/Qt6\n"
+                "Translations = PyQt6/Qt6/translations\n"
+                "LibraryExecutables = PyQt6/Qt6/lib/qt6\n"
+            )
