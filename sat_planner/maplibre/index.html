@@ -190,7 +190,7 @@
       minZoom: 0.5,
       maxZoom: 18,
       attributionControl: false,
-      preserveDrawingBuffer: true,
+      canvasContextAttributes: { preserveDrawingBuffer: true },
       pitchWithRotate: false,
       dragRotate: false,
       style: {
@@ -702,31 +702,16 @@
       return out.toDataURL("image/png");
     }
 
+    window.captureMapPngNow = function () {
+      try {
+        return drawLabeledMap();
+      } catch (err) {
+        return "";
+      }
+    };
+
     window.captureMapPng = function () {
-      return new Promise(function (resolve) {
-        var done = false;
-        function finish() {
-          if (done) {
-            return;
-          }
-          done = true;
-          try {
-            resolve(drawLabeledMap());
-          } catch (err) {
-            resolve("");
-          }
-        }
-        setTimeout(finish, 1200);
-        function arm() {
-          map.once("idle", finish);
-          map.triggerRepaint();
-        }
-        if (map.loaded()) {
-          arm();
-        } else {
-          map.once("load", arm);
-        }
-      });
+      return Promise.resolve(window.captureMapPngNow());
     };
 
     window.setPlan = function (collection, bounds) {

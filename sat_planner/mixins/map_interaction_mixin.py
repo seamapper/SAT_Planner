@@ -113,6 +113,145 @@ class MapInteractionMixin:
             self.backscatter_draw_info_text.set_visible(False)
             self.backscatter_draw_info_text = None
 
+    def _save_map_display_snapshot(self):
+        """Capture the map, then save a PNG or copy the picture to the clipboard."""
+        import os
+
+        from PyQt6.QtGui import QImage
+        from PyQt6.QtWidgets import QApplication, QFileDialog
+
+        view = getattr(self, "map_view", None)
+        if view is None or not hasattr(view, "capture_png"):
+            self._show_message("warning", "Save Map", "The map is not ready to capture.")
+            return
+        data = view.capture_png()
+        if not data:
+            self._show_message("warning", "Save Map", "The map is not ready to capture.")
+            return
+        if not getattr(view, "_last_capture_includes_overlays", False):
+            data = self._decorate_map_snapshot(data)
+        image = QImage()
+        if not image.loadFromData(data, "PNG") or image.isNull():
+            self._show_message("warning", "Save Map", "The map picture could not be prepared.")
+            return
+        choice = self._ask_map_snapshot_action()
+        if choice == "clipboard":
+            clipboard = QApplication.clipboard()
+            if clipboard is None:
+                self._show_message("error", "Copy Map", "The clipboard is not available.")
+                return
+            clipboard.setImage(image)
+            return
+        if choice != "save":
+            return
+        start_dir = getattr(self, "last_export_dir", None) or os.path.expanduser("~")
+        path, _selected = QFileDialog.getSaveFileName(
+            self,
+            "Save Map Display",
+            os.path.join(start_dir, "map_display.png"),
+            "PNG (*.png)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".png"):
+            path += ".png"
+        try:
+            with open(path, "wb") as handle:
+                handle.write(data)
+        except OSError as exc:
+            self._show_message("error", "Save Map", "Could not save the map picture: {0}".format(exc))
+            return
+        self.last_export_dir = os.path.dirname(path)
+        if hasattr(self, "_save_last_export_dir"):
+            self._save_last_export_dir()
+
+    def _ask_map_snapshot_action(self):
+        """Ask whether to save the captured map or copy it. None means cancel."""
+        from PyQt6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Map Picture")
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("Save this map picture or copy it to the clipboard."))
+        row = QHBoxLayout()
+        save_btn = QPushButton("Save PNG")
+        copy_btn = QPushButton("Copy to clipboard")
+        choice = {"value": None}
+
+        def pick(value):
+            choice["value"] = value
+            dialog.accept()
+
+        save_btn.clicked.connect(lambda: pick("save"))
+        copy_btn.clicked.connect(lambda: pick("clipboard"))
+        row.addWidget(save_btn)
+        row.addWidget(copy_btn)
+        layout.addLayout(row)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return choice["value"]
+
+    def _decorate_map_snapshot(self, png_bytes):
+        """Draw the on-screen legend and colorbar onto a map capture."""
+        import io
+
+        try:
+            from PIL import Image
+        except ImportError:
+            return png_bytes
+        try:
+            base = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+        except Exception:
+            return png_bytes
+        view = getattr(self, "map_view", None)
+        widget_w = max(1, view.width()) if view is not None else base.width
+        widget_h = max(1, view.height()) if view is not None else base.height
+        scale_x = base.width / float(widget_w)
+        scale_y = base.height / float(widget_h)
+
+        def paste(raw, css_left, css_top, css_right, css_bottom, max_w_frac, max_h_frac):
+            if not raw:
+                return
+            try:
+                overlay = Image.open(io.BytesIO(raw)).convert("RGBA")
+            except Exception:
+                return
+            max_css_w = widget_w * max_w_frac
+            max_css_h = widget_h * max_h_frac
+            css_scale = min(max_css_w / float(overlay.width), max_css_h / float(overlay.height), 1.0)
+            css_w = overlay.width * css_scale
+            css_h = overlay.height * css_scale
+            width = max(1, int(round(css_w * scale_x)))
+            height = max(1, int(round(css_h * scale_y)))
+            if overlay.size != (width, height):
+                overlay = overlay.resize((width, height), Image.Resampling.LANCZOS)
+            if css_right is not None:
+                x = base.width - overlay.width - int(round(css_right * scale_x))
+            else:
+                x = int(round((css_left or 0) * scale_x))
+            if css_bottom is not None:
+                y = base.height - overlay.height - int(round(css_bottom * scale_y))
+            else:
+                y = int(round((css_top or 0) * scale_y))
+            x = max(0, min(x, base.width - overlay.width))
+            y = max(0, min(y, base.height - overlay.height))
+            base.alpha_composite(overlay, (x, y))
+
+        if getattr(self, "show_map_legend_var", False):
+            legend = getattr(self, "_map_legend_png_bytes", None)
+            if not legend and hasattr(self, "_render_legend_png"):
+                legend = self._render_legend_png()
+            paste(legend, 10, None, None, 56, 0.46, 0.42)
+        if getattr(self, "show_map_colorbar_var", False):
+            colorbar = getattr(self, "_map_colorbar_png_bytes", None)
+            if not colorbar and hasattr(self, "_render_colorbar_png"):
+                colorbar = self._render_colorbar_png()
+            bar_height_frac = max(0.3, (widget_h - 110) / float(widget_h))
+            paste(colorbar, None, 72, 10, None, 0.35, bar_height_frac)
+        buffer = io.BytesIO()
+        base.save(buffer, format="PNG")
+        return buffer.getvalue()
+
     def _update_measurement_button_state(self):
         """Refresh measurement tool icon from mode state."""
         btn = getattr(self, "measurement_tool_btn", None)

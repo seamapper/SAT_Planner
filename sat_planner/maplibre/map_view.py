@@ -404,17 +404,50 @@ class MapLibreView(QWebEngineView):
             if loop.isRunning():
                 loop.quit()
 
+        script = (
+            "(function(){ try {"
+            " if (window.captureMapPngNow) return window.captureMapPngNow();"
+            " return '';"
+            " } catch (e) { return ''; } })()"
+        )
         try:
-            self.page().runJavaScript("window.captureMapPng && window.captureMapPng()", finished)
-            timer.start(int(timeout_ms))
-            loop.exec()
+            self.page().runJavaScript(script, finished)
+            if box["payload"] is None:
+                timer.start(int(timeout_ms))
+                loop.exec()
         finally:
             timer.stop()
             self._capturing_png = False
         payload = box["payload"]
-        if not isinstance(payload, str) or "," not in payload or not payload.startswith("data:image/png"):
+        if isinstance(payload, str) and "," in payload and payload.startswith("data:image/png"):
+            try:
+                self._last_capture_includes_overlays = False
+                return base64.b64decode(payload.split(",", 1)[1])
+            except Exception:
+                pass
+        self._last_capture_includes_overlays = True
+        return self._grab_widget_png()
+
+    def _grab_widget_png(self):
+        """Screenshot the map widget when the page canvas cannot be read."""
+        from PyQt6.QtCore import QBuffer, QIODevice
+
+        pixmap = self.grab()
+        if pixmap.isNull() or pixmap.width() < 2 or pixmap.height() < 2:
             return None
-        try:
-            return base64.b64decode(payload.split(",", 1)[1])
-        except Exception:
+        image = pixmap.toImage()
+        if image.isNull():
             return None
+        corners = (
+            image.pixelColor(0, 0),
+            image.pixelColor(image.width() - 1, 0),
+            image.pixelColor(0, image.height() - 1),
+            image.pixelColor(image.width() // 2, image.height() // 2),
+        )
+        if len({(color.red(), color.green(), color.blue()) for color in corners}) < 2:
+            return None
+        buffer = QBuffer()
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+        if not image.save(buffer, "PNG"):
+            return None
+        return bytes(buffer.data())

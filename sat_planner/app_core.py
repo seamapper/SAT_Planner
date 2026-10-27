@@ -863,6 +863,17 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         if hasattr(self, "_update_measurement_button_state"):
             self._update_measurement_button_state()
         bar_layout.addWidget(self.measurement_tool_btn)
+
+        camera_path = self._media_path("camera_t.png")
+        self.map_snapshot_btn = QPushButton(self._map_button_bar)
+        self.map_snapshot_btn.setFlat(True)
+        self.map_snapshot_btn.setFixedSize(icon_size, icon_size)
+        self.map_snapshot_btn.setIconSize(QSize(icon_size, icon_size))
+        self.map_snapshot_btn.setIcon(QIcon(camera_path) if os.path.exists(camera_path) else QIcon())
+        self.map_snapshot_btn.setToolTip("Save or copy a picture of the current map")
+        self.map_snapshot_btn.setStyleSheet(btn_style)
+        self.map_snapshot_btn.clicked.connect(self._save_map_display_snapshot)
+        bar_layout.addWidget(self.map_snapshot_btn)
         self._map_button_bar.adjustSize()
         self._map_button_bar.show()
 
