@@ -1059,22 +1059,18 @@ class PlottingMixin:
                 target = (float(bathy[0]), float(bathy[1]), float(bathy[2]), float(bathy[3]))
             except (TypeError, ValueError):
                 target = layers[0][1]
+        # Land and depths are reduced separately, so their pictures can differ by
+        # a pixel. Resample every layer onto one canvas instead of dropping a mismatch.
+        src_h = max(rgba.shape[0] for rgba, _extent in layers)
+        src_w = max(rgba.shape[1] for rgba, _extent in layers)
+        dst_h, dst_w = self._display_raster_shape(src_h, src_w)
         base = None
         for rgba, extent in layers:
-            if not self._extents_match(extent, target):
+            placed = self._resample_rgba_onto(rgba, extent, target, (dst_h, dst_w))
+            if placed is None or not np.any(placed[..., 3] > 0):
                 continue
-            if base is None:
-                base = rgba
-                continue
-            if rgba.shape[:2] != base.shape[:2]:
-                continue
-            base = self._composite_rgba(base, rgba)
-        if base is None:
-            return "", None
-        step = max(1, int(np.ceil(max(base.shape[:2]) / 900.0)))
-        if step > 1:
-            base = base[::step, ::step]
-        if not np.any(base[..., 3] > 0):
+            base = placed if base is None else self._composite_rgba(base, placed)
+        if base is None or not np.any(base[..., 3] > 0):
             return "", None
         picture = Image.fromarray((np.clip(base, 0.0, 1.0) * 255).astype(np.uint8), mode="RGBA")
         buffer = io.BytesIO()
@@ -1087,11 +1083,58 @@ class PlottingMixin:
         return url, (west, south, east, north)
 
     @staticmethod
-    def _extents_match(extent, target):
-        if len(extent) != 4 or len(target) != 4:
-            return False
-        span = max(abs(target[1] - target[0]), abs(target[3] - target[2]), 1e-9)
-        return max(abs(float(a) - float(b)) for a, b in zip(extent, target)) <= span * 0.05
+    def _display_raster_shape(height, width, limit=900):
+        """Fit a grid picture to the map without exceeding ``limit`` pixels on a side."""
+        height = max(1, int(height))
+        width = max(1, int(width))
+        scale = min(1.0, float(limit) / float(max(height, width)))
+        return max(1, int(round(height * scale))), max(1, int(round(width * scale)))
+
+    @staticmethod
+    def _resample_rgba_onto(rgba, src_extent, dst_extent, dst_shape):
+        """Bilinear-place one RGBA grid onto a canvas that uses ``dst_extent``.
+
+        ``src_extent`` and ``dst_extent`` are (left, right, bottom, top). Row 0 is north.
+        """
+        from PIL import Image
+
+        dst_h, dst_w = dst_shape
+        if dst_h < 1 or dst_w < 1 or rgba is None or rgba.ndim != 3 or rgba.shape[-1] != 4:
+            return None
+        s_left, s_right, s_bottom, s_top = (float(v) for v in src_extent)
+        d_left, d_right, d_bottom, d_top = (float(v) for v in dst_extent)
+        if min(s_right - s_left, s_top - s_bottom, d_right - d_left, d_top - d_bottom) <= 0:
+            return None
+        src_h, src_w = rgba.shape[:2]
+        x0 = (s_left - d_left) / (d_right - d_left) * dst_w
+        x1 = (s_right - d_left) / (d_right - d_left) * dst_w
+        y0 = (d_top - s_top) / (d_top - d_bottom) * dst_h
+        y1 = (d_top - s_bottom) / (d_top - d_bottom) * dst_h
+        ox0, ox1 = max(0.0, min(x0, x1)), min(float(dst_w), max(x0, x1))
+        oy0, oy1 = max(0.0, min(y0, y1)), min(float(dst_h), max(y0, y1))
+        if ox1 - ox0 < 0.5 or oy1 - oy0 < 0.5 or x1 == x0 or y1 == y0:
+            return None
+        sc0 = (ox0 - x0) / (x1 - x0) * src_w
+        sc1 = (ox1 - x0) / (x1 - x0) * src_w
+        sr0 = (oy0 - y0) / (y1 - y0) * src_h
+        sr1 = (oy1 - y0) / (y1 - y0) * src_h
+        ic0 = max(0, int(np.floor(min(sc0, sc1))))
+        ic1 = min(src_w, int(np.ceil(max(sc0, sc1))))
+        ir0 = max(0, int(np.floor(min(sr0, sr1))))
+        ir1 = min(src_h, int(np.ceil(max(sr0, sr1))))
+        if ic1 <= ic0 or ir1 <= ir0:
+            return None
+        crop = np.clip(rgba[ir0:ir1, ic0:ic1], 0.0, 1.0)
+        paste_c = min(max(int(round(ox0)), 0), dst_w - 1)
+        paste_r = min(max(int(round(oy0)), 0), dst_h - 1)
+        out_w = min(max(1, int(round(ox1 - ox0))), dst_w - paste_c)
+        out_h = min(max(1, int(round(oy1 - oy0))), dst_h - paste_r)
+        picture = Image.fromarray((crop * 255.0).astype(np.uint8), mode="RGBA")
+        picture = picture.resize((out_w, out_h), Image.Resampling.BILINEAR)
+        resized = np.asarray(picture).astype(np.float32) / 255.0
+        canvas = np.zeros((dst_h, dst_w, 4), dtype=np.float32)
+        canvas[paste_r:paste_r + out_h, paste_c:paste_c + out_w] = resized
+        return canvas
 
     @staticmethod
     def _axes_image_rgba(image):

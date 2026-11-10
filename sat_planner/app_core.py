@@ -42,6 +42,7 @@ from .utils_ui import (
     show_message as _show_message_fn,
     ask_yes_no as _ask_yes_no_fn,
     ask_ok_cancel as _ask_ok_cancel_fn,
+    application_icon,
     media_path,
     get_about_program_info,
 )
@@ -72,9 +73,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"UNH/CCOM-JHC - SAT Planner - v{__version__} - pjohnson@ccom.unh.edu")
-        icon_path = media_path("CCOM.ico")
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        icon = application_icon()
+        if not icon.isNull():
+            self.setWindowIcon(icon)
 
         # Set minimum window size
         self.setMinimumSize(1600, 1110)

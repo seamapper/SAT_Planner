@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 from PyQt6.QtCore import QTimer
-from PyQt6.QtGui import QPalette, QColor
+from PyQt6.QtGui import QIcon, QPalette, QColor
 
 from sat_planner.constants import __version__
 
@@ -29,6 +29,26 @@ def media_path(filename):
         return os.path.join(base, "media", filename)
     pkg_dir = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(os.path.dirname(pkg_dir), "media", filename)
+
+
+def application_icon():
+    """Icon for the window and, on macOS, the Dock.
+
+    media/CCOM.ico contains a single 16×16 image. That matches a Windows
+    taskbar slot, but the Dock asks for a Retina-sized tile and scales the
+    16×16 image up. On macOS, use media/CCOM.png (500×500) so Qt scales down.
+    """
+    png_path = media_path("CCOM.png")
+    ico_path = media_path("CCOM.ico")
+    if sys.platform == "darwin" and os.path.exists(png_path):
+        icon = QIcon(png_path)
+        if not icon.isNull():
+            return icon
+    if os.path.exists(ico_path):
+        return QIcon(ico_path)
+    if os.path.exists(png_path):
+        return QIcon(png_path)
+    return QIcon()
 
 
 def get_about_program_info(source_path=None):

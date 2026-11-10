@@ -33,18 +33,17 @@ try:
 except ImportError:
     pass
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QIcon
 # Qt WebEngine must be imported before the QApplication object is created.
 import PyQt6.QtWebEngineWidgets  # noqa: F401
 from sat_planner import SurveyPlanApp
-from sat_planner.utils_ui import apply_dark_theme, media_path
+from sat_planner.utils_ui import application_icon, apply_dark_theme
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     apply_dark_theme(app)
-    icon_path = media_path("CCOM.ico")
-    if os.path.exists(icon_path):
-        app.setWindowIcon(QIcon(icon_path))
+    icon = application_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
     window = SurveyPlanApp()
     window.show()
     sys.exit(app.exec())

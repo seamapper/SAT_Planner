@@ -1342,13 +1342,16 @@ class GeoTIFFMixin:
             if downsample_factor > 1 and native_pixels <= native_fullres_threshold_pixels:
                 downsample_factor = 1
 
-            # Read the visible region
+            # Read the visible region, resampling instead of keeping every nth cell.
             window = Window.from_slices((row_min, row_max), (col_min, col_max))
-            data = self.geotiff_dataset_original.read(1, window=window)
-
-            # Apply downsampling if needed
-            if downsample_factor > 1:
-                data = data[::downsample_factor, ::downsample_factor]
+            out_height = max(1, native_rows // downsample_factor)
+            out_width = max(1, native_cols // downsample_factor)
+            data = self.geotiff_dataset_original.read(
+                1,
+                window=window,
+                out_shape=(out_height, out_width),
+                resampling=Resampling.bilinear,
+            )
 
             # Calculate the extent of the loaded region
             # Get the bounds of the window in the original CRS
@@ -1923,11 +1926,11 @@ class GeoTIFFMixin:
 
             if total_pixels > 10000000:  # 10 million pixels threshold
                 downsample_factor = 4
-                progress_label.setText(f"Large file detected. Downsampling by factor {downsample_factor} for performance...")
+                progress_label.setText(f"Large file detected. Resampling by factor {downsample_factor} for performance...")
                 QApplication.processEvents()
             elif total_pixels > 5000000:  # 5 million pixels threshold
                 downsample_factor = 2
-                progress_label.setText(f"Downsampling by factor {downsample_factor} for performance...")
+                progress_label.setText(f"Resampling by factor {downsample_factor} for performance...")
                 QApplication.processEvents()
 
             # Check if loading was cancelled
@@ -1963,38 +1966,36 @@ class GeoTIFFMixin:
                     dst_left, dst_bottom = transformer_bounds.transform(left, bottom)
                     dst_right, dst_top = transformer_bounds.transform(right, top)
 
-                # Apply downsampling if needed
-                target_height = self.geotiff_dataset_original.height // downsample_factor
-                target_width = self.geotiff_dataset_original.width // downsample_factor
-
-                # Create a new array for the reprojected data
-                reprojected_data = np.empty((target_height, target_width),
-                                           dtype=self.geotiff_dataset_original.dtypes[0])
-
-                # Perform the reprojection with downsampling
-                if downsample_factor > 1:
-                    # Read with downsampling
-                    window = Window.from_slices((0, self.geotiff_dataset_original.height), (0, self.geotiff_dataset_original.width))
-                    data = self.geotiff_dataset_original.read(1, window=window)
-                    # Simple downsampling by taking every nth pixel
-                    data = data[::downsample_factor, ::downsample_factor]
-                    source_data = data
-                else:
-                    source_data = rasterio.band(self.geotiff_dataset_original, 1)
+                # Resample while reprojecting so the overview matches the topography grid size.
+                target_height = max(1, self.geotiff_dataset_original.height // downsample_factor)
+                target_width = max(1, self.geotiff_dataset_original.width // downsample_factor)
+                reprojected_data = np.empty((target_height, target_width), dtype=np.float32)
+                nodata = getattr(self.geotiff_dataset_original, "nodata", None)
+                nodata_arg = None
+                try:
+                    if nodata is not None and np.isfinite(float(nodata)):
+                        nodata_arg = float(nodata)
+                except (TypeError, ValueError):
+                    nodata_arg = None
 
                 # Check if loading was cancelled before reprojection
                 if hasattr(self, 'loading_cancelled') and self.loading_cancelled:
                     progress_window.close()
                     return
 
+                reproject_kwargs = {}
+                if nodata_arg is not None:
+                    reproject_kwargs["src_nodata"] = nodata_arg
+                    reproject_kwargs["dst_nodata"] = nodata_arg
                 reproject(
-                    source=source_data,
+                    source=rasterio.band(self.geotiff_dataset_original, 1),
                     destination=reprojected_data,
                     src_transform=self.geotiff_dataset_original.transform,
                     src_crs=src_crs,
                     dst_transform=transform.from_bounds(dst_left, dst_bottom, dst_right, dst_top, target_width, target_height),
                     dst_crs=dst_crs,
-                    resampling=Resampling.bilinear
+                    resampling=Resampling.bilinear,
+                    **reproject_kwargs,
                 )
                 self.geotiff_data_array = reprojected_data.astype(float)
                 self.geotiff_extent = [dst_left, dst_right, dst_bottom, dst_top]
@@ -2009,15 +2010,14 @@ class GeoTIFFMixin:
                 progress_label.setText("Reading GeoTIFF data...")
                 QApplication.processEvents()
 
-                if downsample_factor > 1:
-                    # Read with downsampling
-                    window = Window.from_slices((0, self.geotiff_dataset_original.height), (0, self.geotiff_dataset_original.width))
-                    data = self.geotiff_dataset_original.read(1, window=window)
-                    # Simple downsampling
-                    data = data[::downsample_factor, ::downsample_factor]
-                    self.geotiff_data_array = data.astype(float)
-                else:
-                    self.geotiff_data_array = self.geotiff_dataset_original.read(1).astype(float)
+                target_height = max(1, self.geotiff_dataset_original.height // downsample_factor)
+                target_width = max(1, self.geotiff_dataset_original.width // downsample_factor)
+                data = self.geotiff_dataset_original.read(
+                    1,
+                    out_shape=(target_height, target_width),
+                    resampling=Resampling.bilinear,
+                )
+                self.geotiff_data_array = data.astype(float)
 
                 bounds = self.geotiff_dataset_original.bounds
                 self.geotiff_extent = [bounds.left, bounds.right, bounds.bottom, bounds.top]
@@ -2076,7 +2076,7 @@ class GeoTIFFMixin:
             # Show success message
             filename = os.path.basename(file_path)
             if downsample_factor > 1:
-                success_msg = f"GeoTIFF '{filename}' loaded successfully (downsampled {downsample_factor}x for performance). Dynamic resolution enabled - zoom in for higher detail."
+                success_msg = f"GeoTIFF '{filename}' loaded successfully (resampled {downsample_factor}x for performance). Dynamic resolution enabled - zoom in for higher detail."
             else:
                 success_msg = f"GeoTIFF '{filename}' loaded successfully. Dynamic resolution enabled - zoom in for higher detail."
 

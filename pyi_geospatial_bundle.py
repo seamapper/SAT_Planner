@@ -77,6 +77,112 @@ _PACKAGE_DLL_NAMES = frozenset(
 _PACKAGE_DESTS = ("rasterio", "fiona")
 
 
+def conda_macos_prefix():
+    """Return the conda prefix when this Mac env has GDAL/PROJ share data."""
+    if not sys.platform.startswith("darwin"):
+        return None
+    # sys.prefix is the interpreter running this build. Prefer it over
+    # CONDA_PREFIX so a base-env variable does not hide the env that has rasterio.
+    py_tag = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    candidates = [
+        sys.prefix,
+        os.environ.get("CONDA_PREFIX", ""),
+        getattr(sys, "base_prefix", ""),
+    ]
+    seen = set()
+    for prefix in candidates:
+        if not prefix or prefix in seen:
+            continue
+        seen.add(prefix)
+        gdal_share = os.path.join(prefix, "share", "gdal")
+        rasterio_dir = os.path.join(prefix, "lib", py_tag, "site-packages", "rasterio")
+        if os.path.isdir(gdal_share) and os.path.isdir(rasterio_dir):
+            return prefix
+    return None
+
+
+def collect_macos_gdal_data(prefix):
+    """Return PyInstaller datas for the Mac runtime hook (share/gdal, share/proj)."""
+    datas = []
+    for name in ("gdal", "proj"):
+        src = os.path.join(prefix, "share", name)
+        if os.path.isdir(src):
+            datas.append((src, os.path.join("share", name)))
+    plugins = os.path.join(prefix, "lib", "gdalplugins")
+    if os.path.isdir(plugins):
+        datas.append((plugins, "gdalplugins"))
+    return datas
+
+
+def collect_macos_dylibs(prefix):
+    """Bundle conda dylibs linked from rasterio, fiona, shapely, and pyproj.
+
+    On macOS those extensions load libgdal/libproj/libgeos by @rpath from the
+    conda env, and libgdal pulls in more conda libraries by name. PyInstaller's
+    package scan does not see that tree.
+    """
+    import glob
+
+    from PyInstaller.depend.bindepend import get_imports
+
+    lib_dir = os.path.join(prefix, "lib")
+    py_tag = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    site = os.path.join(lib_dir, py_tag, "site-packages")
+    seeds = []
+    for pattern in ("rasterio/*.so", "fiona/*.so", "shapely/*.so", "pyproj/*.so"):
+        for so_path in glob.glob(os.path.join(site, pattern)):
+            try:
+                deps = get_imports(so_path)
+            except Exception:
+                continue
+            for dep, _ in deps:
+                resolved = _resolve_conda_dylib(dep, lib_dir, prefix)
+                if resolved:
+                    seeds.append(resolved)
+
+    seen = set()
+    binaries = []
+    queue = list(seeds)
+    while queue:
+        path = queue.pop()
+        key = os.path.normpath(path)
+        if key in seen:
+            continue
+        if not os.path.exists(key):
+            continue
+        seen.add(key)
+        binaries.append((key, "."))
+        real = os.path.realpath(key)
+        try:
+            deps = get_imports(real if os.path.isfile(real) else key)
+        except Exception:
+            continue
+        for dep, _ in deps:
+            resolved = _resolve_conda_dylib(dep, lib_dir, prefix)
+            if resolved and os.path.normpath(resolved) not in seen:
+                queue.append(resolved)
+    return binaries
+
+
+def _resolve_conda_dylib(dep, lib_dir, prefix):
+    """Return a conda-prefix dylib path, or None for system libraries."""
+    if not dep:
+        return None
+    name = os.path.basename(dep)
+    if name in {"libSystem.B.dylib", "libc++.1.dylib", "libc++abi.dylib"}:
+        return None
+    if dep.startswith(("/usr/lib", "/System")):
+        return None
+    if os.path.isabs(dep) and os.path.exists(dep):
+        if dep.startswith(prefix + os.sep):
+            return dep
+        return None
+    candidate = os.path.join(lib_dir, name)
+    if os.path.exists(candidate):
+        return candidate
+    return None
+
+
 def collect_gdal_dlls(bin_dir):
     """Return PyInstaller binaries entries for GDAL/PROJ/GEOS DLLs and dependencies."""
     from PyInstaller.depend.bindepend import get_imports

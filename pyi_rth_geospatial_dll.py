@@ -59,6 +59,11 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
             os.environ["GDAL_DATA"] = gdal_data
             break
 
+    if not sys.platform.startswith("win"):
+        plugin_dir = os.path.join(root, "gdalplugins")
+        if os.path.isdir(plugin_dir):
+            os.environ["GDAL_DRIVER_PATH"] = plugin_dir
+
     # PROJ_LIB: match PyInstaller pyproj hook layout (Library/share/proj).
     if sys.platform.startswith("win"):
         proj_candidates = (
@@ -73,23 +78,30 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
             os.environ["PROJ_DATA"] = proj_data
             break
 
-    # QtWebEngineProcess is stored under PyQt6/Qt6/lib/qt6, while the Qt DLLs
-    # land in the extraction root and the resources land under PyQt6/Qt6.
-    # The qt.conf written at build time points one directory too high, so the
-    # helper aborts and the main process exits before a window appears.
+    # QtWebEngineProcess is stored under PyQt6/Qt6/lib/qt6. Qt does not look
+    # there, so the helper is never started and the process exits before a
+    # window appears. Point Qt at the bundled helper directly.
     helper_dir = os.path.join(root, "PyQt6", "Qt6", "lib", "qt6")
-    helper_exe = os.path.join(helper_dir, "QtWebEngineProcess.exe")
-    if os.path.isfile(helper_exe):
+    helper_exe = None
+    for helper_name in ("QtWebEngineProcess.exe", "QtWebEngineProcess"):
+        candidate = os.path.join(helper_dir, helper_name)
+        if os.path.isfile(candidate):
+            helper_exe = candidate
+            break
+    if helper_exe:
         os.environ["QTWEBENGINEPROCESS_PATH"] = helper_exe
         os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
-        with open(os.path.join(helper_dir, "qt.conf"), "w", encoding="utf-8") as handle:
-            handle.write(
-                "[Paths]\n"
-                "Prefix = ../../../..\n"
-                "Binaries = .\n"
-                "Libraries = .\n"
-                "Plugins = PyQt6/Qt6/plugins\n"
-                "Data = PyQt6/Qt6\n"
-                "Translations = PyQt6/Qt6/translations\n"
-                "LibraryExecutables = PyQt6/Qt6/lib/qt6\n"
-            )
+        # The Windows one-file layout needs a rewritten qt.conf. The macOS
+        # bundle already ships one next to the helper (Prefix = ..).
+        if helper_exe.endswith(".exe"):
+            with open(os.path.join(helper_dir, "qt.conf"), "w", encoding="utf-8") as handle:
+                handle.write(
+                    "[Paths]\n"
+                    "Prefix = ../../../..\n"
+                    "Binaries = .\n"
+                    "Libraries = .\n"
+                    "Plugins = PyQt6/Qt6/plugins\n"
+                    "Data = PyQt6/Qt6\n"
+                    "Translations = PyQt6/Qt6/translations\n"
+                    "LibraryExecutables = PyQt6/Qt6/lib/qt6\n"
+                )
