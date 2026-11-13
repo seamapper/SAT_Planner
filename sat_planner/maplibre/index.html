@@ -286,10 +286,13 @@
         if (!(east > west) || !(north > south)) {
           return;
         }
+        if (map.resize) {
+          map.resize();
+        }
         suppressView += 1;
         map.fitBounds([[west, south], [east, north]], {
           padding: 28,
-          maxZoom: 14,
+          maxZoom: map.getMaxZoom ? map.getMaxZoom() : 18,
           duration: 0
         });
         map.once("idle", function () {

@@ -6,7 +6,7 @@ import os
 import sys
 import traceback
 
-__version__ = "2026.47"
+__version__ = "2026.48"
 
 CONFIG_FILENAME = os.path.join(os.path.expanduser("~"), ".cal_ref_planner_config.json")
 
