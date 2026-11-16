@@ -29,7 +29,10 @@ from sat_planner.dyn_vert_exag_dialog import DynVertExagDialog
 from sat_planner.constants import (
     DEFAULT_SHADED_RELIEF_CMAP,
     GEOSPATIAL_LIBS_AVAILABLE,
+    GMRT_NODATA_VALUE,
     KONGSBERG_DEPTH_MODE_DISPLAY_LABELS,
+    REALISTIC_ELEVATION_MAX_M,
+    REALISTIC_ELEVATION_MIN_M,
     LineString,
     RasterioIOError,
     Resampling,
@@ -1120,13 +1123,98 @@ class GeoTIFFMixin:
         return True
 
     def _apply_geotiff_nan_filter(self, data_array):
-        """Apply configured NaN sentinel filtering in place and return the array."""
+        """Apply configured NaN sentinel filtering in place and return the array.
+
+        Also drops elevations outside the realistic Earth range. GMRT stores empty
+        cells as -99999, and bilinear resampling turns that fill into other huge
+        negative values that would otherwise become the color-scale minimum.
+        """
         if data_array is None:
             return data_array
         cutoff = self._get_geotiff_nan_cutoff()
-        # Treat only the configured sentinel value as NaN (not a threshold).
-        data_array[np.isclose(data_array, cutoff, rtol=0.0, atol=1e-9)] = np.nan
+        # Float32 cannot always hold the sentinel exactly; allow one ulp at 1e5.
+        atol = max(1e-3, abs(cutoff) * 1e-6)
+        data_array[np.isclose(data_array, cutoff, rtol=0.0, atol=atol)] = np.nan
+        data_array[np.isclose(data_array, GMRT_NODATA_VALUE, rtol=0.0, atol=1.0)] = np.nan
+        data_array[data_array < REALISTIC_ELEVATION_MIN_M] = np.nan
+        data_array[data_array > REALISTIC_ELEVATION_MAX_M] = np.nan
         return data_array
+
+    def _elevation_source_nodata(self, dataset):
+        """Nodata value to honor while resampling an elevation grid.
+
+        A finite band nodata tag is used as-is. GMRT split files tag nodata as
+        NaN but still store empty cells as -99999, which bilinear resampling
+        would otherwise blend into real depths.
+        """
+        nodata = getattr(dataset, "nodata", None)
+        try:
+            if nodata is not None and np.isfinite(float(nodata)):
+                return float(nodata)
+        except (TypeError, ValueError):
+            pass
+        return float(GMRT_NODATA_VALUE)
+
+    def _read_elevation_array(self, dataset, out_height, out_width, window=None):
+        """Read one elevation band, optionally resampled, without blending fill values."""
+        out_height = max(1, int(out_height))
+        out_width = max(1, int(out_width))
+        if window is None:
+            native_h = int(dataset.height)
+            native_w = int(dataset.width)
+            left, bottom, right, top = (
+                dataset.bounds.left,
+                dataset.bounds.bottom,
+                dataset.bounds.right,
+                dataset.bounds.top,
+            )
+        else:
+            native_h = max(1, int(round(window.height)))
+            native_w = max(1, int(round(window.width)))
+            left, bottom, right, top = window_bounds(window, dataset.transform)
+
+        src_nodata = self._elevation_source_nodata(dataset)
+        band_nodata = getattr(dataset, "nodata", None)
+        band_nodata_matches = False
+        try:
+            band_nodata_matches = (
+                band_nodata is not None
+                and np.isfinite(float(band_nodata))
+                and abs(float(band_nodata) - src_nodata) <= 1.0
+            )
+        except (TypeError, ValueError):
+            band_nodata_matches = False
+
+        needs_resample = native_h != out_height or native_w != out_width
+        # Downsampling a grid whose nodata tag does not cover the fill blends
+        # -99999 into neighboring depths and pins the color scale to the fill.
+        if needs_resample and not band_nodata_matches and getattr(dataset, "crs", None) is not None:
+            try:
+                from rasterio.vrt import WarpedVRT
+
+                dst_transform = transform.from_bounds(left, bottom, right, top, out_width, out_height)
+                with WarpedVRT(
+                    dataset,
+                    src_crs=dataset.crs,
+                    crs=dataset.crs,
+                    transform=dst_transform,
+                    width=out_width,
+                    height=out_height,
+                    resampling=Resampling.bilinear,
+                    src_nodata=src_nodata,
+                    nodata=src_nodata,
+                ) as warped:
+                    return warped.read(1)
+            except Exception:
+                traceback.print_exc()
+
+        read_kwargs = {}
+        if window is not None:
+            read_kwargs["window"] = window
+        if needs_resample:
+            read_kwargs["out_shape"] = (out_height, out_width)
+            read_kwargs["resampling"] = Resampling.bilinear
+        return dataset.read(1, **read_kwargs)
 
     def _set_backscatter_nan_cutoff(self, value, update_entry=True):
         """Persist backscatter NaN cutoff and optionally synchronize the UI entry."""
@@ -1346,11 +1434,11 @@ class GeoTIFFMixin:
             window = Window.from_slices((row_min, row_max), (col_min, col_max))
             out_height = max(1, native_rows // downsample_factor)
             out_width = max(1, native_cols // downsample_factor)
-            data = self.geotiff_dataset_original.read(
-                1,
+            data = self._read_elevation_array(
+                self.geotiff_dataset_original,
+                out_height,
+                out_width,
                 window=window,
-                out_shape=(out_height, out_width),
-                resampling=Resampling.bilinear,
             )
 
             # Calculate the extent of the loaded region
@@ -1371,7 +1459,8 @@ class GeoTIFFMixin:
                 # Already in WGS84
                 region_extent = [left, right, bottom, top]
 
-            # Filter Z-values (user-configurable low cutoff and non-negative values)
+            # Filter Z-values (user-configurable sentinel and grid-fill values)
+            data = np.asarray(data, dtype=float)
             self._apply_geotiff_nan_filter(data)
 
             # Validate the extent to prevent flipping
@@ -1970,23 +2059,17 @@ class GeoTIFFMixin:
                 target_height = max(1, self.geotiff_dataset_original.height // downsample_factor)
                 target_width = max(1, self.geotiff_dataset_original.width // downsample_factor)
                 reprojected_data = np.empty((target_height, target_width), dtype=np.float32)
-                nodata = getattr(self.geotiff_dataset_original, "nodata", None)
-                nodata_arg = None
-                try:
-                    if nodata is not None and np.isfinite(float(nodata)):
-                        nodata_arg = float(nodata)
-                except (TypeError, ValueError):
-                    nodata_arg = None
+                nodata_arg = self._elevation_source_nodata(self.geotiff_dataset_original)
 
                 # Check if loading was cancelled before reprojection
                 if hasattr(self, 'loading_cancelled') and self.loading_cancelled:
                     progress_window.close()
                     return
 
-                reproject_kwargs = {}
-                if nodata_arg is not None:
-                    reproject_kwargs["src_nodata"] = nodata_arg
-                    reproject_kwargs["dst_nodata"] = nodata_arg
+                reproject_kwargs = {
+                    "src_nodata": nodata_arg,
+                    "dst_nodata": nodata_arg,
+                }
                 reproject(
                     source=rasterio.band(self.geotiff_dataset_original, 1),
                     destination=reprojected_data,
@@ -2012,10 +2095,10 @@ class GeoTIFFMixin:
 
                 target_height = max(1, self.geotiff_dataset_original.height // downsample_factor)
                 target_width = max(1, self.geotiff_dataset_original.width // downsample_factor)
-                data = self.geotiff_dataset_original.read(
-                    1,
-                    out_shape=(target_height, target_width),
-                    resampling=Resampling.bilinear,
+                data = self._read_elevation_array(
+                    self.geotiff_dataset_original,
+                    target_height,
+                    target_width,
                 )
                 self.geotiff_data_array = data.astype(float)
 

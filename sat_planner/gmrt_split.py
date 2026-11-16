@@ -23,6 +23,12 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from sat_planner.constants import (
+    GMRT_NODATA_VALUE,
+    REALISTIC_ELEVATION_MAX_M,
+    REALISTIC_ELEVATION_MIN_M,
+)
+
 try:
     import rasterio
 except ImportError:
@@ -64,6 +70,32 @@ def topo_path_after_split(src_path: str) -> str:
     return base + "_topo" + output_ext
 
 
+def mask_grid_fill(data, nodata=None):
+    """Return a float32 copy with grid-fill cells set to NaN.
+
+    GMRT mosaics store empty cells as -99999. That value is negative, so a
+    later "keep depths < 0" split would keep it as if it were seabed. Resampling
+    then blends it into real soundings and the color scale runs down to the fill.
+    """
+    arr = np.asarray(data, dtype=np.float32)
+    invalid = ~np.isfinite(arr)
+    if nodata is not None:
+        try:
+            nodata_value = float(nodata)
+        except (TypeError, ValueError):
+            nodata_value = None
+        else:
+            # GEBCO uses 0 as a real elevation. Never treat that as fill.
+            if np.isfinite(nodata_value) and nodata_value != 0.0:
+                atol = max(1.0, abs(nodata_value) * 1e-6)
+                invalid |= np.isclose(arr, np.float32(nodata_value), rtol=0.0, atol=np.float32(atol))
+    invalid |= np.isclose(arr, np.float32(GMRT_NODATA_VALUE), rtol=0.0, atol=np.float32(1.0))
+    invalid |= (arr < REALISTIC_ELEVATION_MIN_M) | (arr > REALISTIC_ELEVATION_MAX_M)
+    cleaned = arr.copy()
+    cleaned[invalid] = np.nan
+    return cleaned
+
+
 def split_topo_bathy(src_path: str, *, log: Optional[Callable[[str], None]] = None) -> SplitResult:
     """Split src_path into <base>_topo and <base>_bathy GeoTIFFs.
 
@@ -100,10 +132,11 @@ def split_topo_bathy(src_path: str, *, log: Optional[Callable[[str], None]] = No
 
     try:
         with rasterio.open(src_path) as src:
-            data = src.read(1)
+            data = mask_grid_fill(src.read(1), src.nodata)
             profile = src.profile
 
             # 0 lands in topo (>= 0); strictly negative depths in bathy (< 0).
+            # Fill values were removed above so -99999 cannot land in the bathy file.
             topo_data = np.where(data >= 0, data, np.nan)
             bathy_data = np.where(data < 0, data, np.nan)
 

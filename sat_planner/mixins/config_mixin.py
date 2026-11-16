@@ -14,6 +14,8 @@ _load_vert_exag_table, _save_vert_exag_table, _default_vert_exag_table,
 _vert_exag_table_for_params, _add_vert_exag_table_to_params, _apply_vert_exag_table_from_params,
 _load_shaded_relief_cmap, _save_shaded_relief_cmap, _normalize_shaded_relief_cmap,
 _load_show_map_colorbar, _save_show_map_colorbar,
+_load_show_topography, _save_show_topography,
+_load_show_imagery_basemap, _save_show_imagery_basemap,
 _load_show_map_legend, _save_show_map_legend,
 _load_show_point_labels, _save_show_point_labels,
 _load_show_line_labels, _save_show_line_labels,
@@ -563,6 +565,64 @@ class ConfigMixin:
                 with open(self.CONFIG_FILENAME, "r") as f:
                     config = json.load(f)
             config["show_map_colorbar"] = bool(getattr(self, "show_map_colorbar_var", False))
+            with open(self.CONFIG_FILENAME, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+
+    def _load_show_topography(self):
+        """Topography overlay. Missing config means on."""
+        self.show_topography_var = True
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+                if "show_topography" in config:
+                    self.show_topography_var = bool(config.get("show_topography"))
+        except Exception:
+            self.show_topography_var = True
+        checkbox = getattr(self, "show_topography_checkbox", None)
+        if checkbox is not None:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(self.show_topography_var)
+            checkbox.blockSignals(False)
+
+    def _save_show_topography(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            config["show_topography"] = bool(getattr(self, "show_topography_var", True))
+            with open(self.CONFIG_FILENAME, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+
+    def _load_show_imagery_basemap(self):
+        """Imagery basemap. Missing config means off."""
+        self.show_imagery_basemap_var = False
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+                if "show_imagery_basemap" in config:
+                    self.show_imagery_basemap_var = bool(config.get("show_imagery_basemap"))
+        except Exception:
+            self.show_imagery_basemap_var = False
+        checkbox = getattr(self, "imagery_basemap_checkbox", None)
+        if checkbox is not None:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(self.show_imagery_basemap_var)
+            checkbox.blockSignals(False)
+
+    def _save_show_imagery_basemap(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            config["show_imagery_basemap"] = bool(getattr(self, "show_imagery_basemap_var", False))
             with open(self.CONFIG_FILENAME, "w") as f:
                 json.dump(config, f, indent=2)
         except Exception:

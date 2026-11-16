@@ -6,11 +6,17 @@ import os
 import sys
 import traceback
 
-__version__ = "2026.48"
+__version__ = "2026.49"
 
 CONFIG_FILENAME = os.path.join(os.path.expanduser("~"), ".cal_ref_planner_config.json")
 
 PLANNING_PLACEHOLDER_TEXT = "Load a Test Plan or Bathymetry\nto begin planning"
+
+# GMRT writes empty cells as -99999. Real Earth elevations sit between the
+# trenches and the highest peaks; anything outside this is grid fill.
+GMRT_NODATA_VALUE = -99999.0
+REALISTIC_ELEVATION_MIN_M = -12000.0
+REALISTIC_ELEVATION_MAX_M = 9000.0
 
 # Register third-party colormaps with matplotlib (via colormaps package).
 _OPTIONAL_COLORMAP_NAMES = ("ice", "arctic", "sapphire", "torch")

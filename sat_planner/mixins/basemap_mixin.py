@@ -55,6 +55,8 @@ class BasemapMixin:
             current_ylim = self.ax.get_ylim()
             
             self.show_imagery_basemap_var = self.imagery_basemap_checkbox.isChecked()
+            if hasattr(self, "_save_show_imagery_basemap"):
+                self._save_show_imagery_basemap()
             if not hasattr(self, '_last_basemap_zoom_level'):
                 self._last_basemap_zoom_level = None
             if not hasattr(self, '_last_basemap_extent'):

@@ -19,6 +19,8 @@ from sat_planner.constants import (
     GEOSPATIAL_LIBS_AVAILABLE,
     KONGSBERG_DEPTH_MODES,
     PLANNING_PLACEHOLDER_TEXT,
+    REALISTIC_ELEVATION_MAX_M,
+    REALISTIC_ELEVATION_MIN_M,
     CRSError,
     kongsberg_depth_mode_indices,
     pyproj,
@@ -465,6 +467,8 @@ class PlottingMixin:
         """Show or hide a loaded topography grid."""
         checkbox = getattr(self, "show_topography_checkbox", None)
         self.show_topography_var = bool(checkbox.isChecked()) if checkbox is not None else True
+        if hasattr(self, "_save_show_topography"):
+            self._save_show_topography()
         if getattr(self, "topography_data_array", None) is None:
             return
         self._plot_survey_plan(preserve_view_limits=True)
@@ -1745,12 +1749,25 @@ class PlottingMixin:
             image_kwargs["vmax"] = vmax
         self.topography_image_plot = self.ax.imshow(masked_elev, **image_kwargs)
 
+    def _elevations_for_scale(self, values):
+        """Finite elevations used for the color scale, ignoring grid-fill values."""
+        vals = np.asarray(values, dtype=float).ravel()
+        finite = vals[np.isfinite(vals)]
+        if finite.size == 0:
+            return finite
+        realistic = finite[
+            (finite >= REALISTIC_ELEVATION_MIN_M) & (finite <= REALISTIC_ELEVATION_MAX_M)
+        ]
+        if realistic.size:
+            return realistic
+        return finite
+
     def _calculate_adaptive_vert_exag(self, data_array, inverted=False):
         """
         Calculate adaptive vertical exaggeration based on elevation range.
         Returns a vert_exag value that adapts to the relief in the data.
         """
-        valid_data = data_array[~np.isnan(data_array)]
+        valid_data = self._elevations_for_scale(data_array)
         if len(valid_data) == 0:
             table = getattr(self, "vert_exag_table", None) or self._default_vert_exag_table()
             key = "shaded_relief_dyn" if inverted else "shaded_relief"
@@ -2084,11 +2101,12 @@ class PlottingMixin:
         r0, r1 = sorted([row_min, row_max])
         c0, c1 = sorted([col_min, col_max])
         visible = data[r0:r1 + 1, c0:c1 + 1]
-        if visible.size > 0 and not np.all(np.isnan(visible)):
-            return float(np.nanmin(visible)), float(np.nanmax(visible))
-        if np.all(np.isnan(data)):
+        chosen = self._elevations_for_scale(visible)
+        if chosen.size == 0:
+            chosen = self._elevations_for_scale(data)
+        if chosen.size == 0:
             return None, None
-        return float(np.nanmin(data)), float(np.nanmax(data))
+        return float(np.min(chosen)), float(np.max(chosen))
 
     def _draw_kongsberg_depth_mode_overlay(self, bands):
         """Paint depth-mode colors over the Shaded Relief hillshade.
@@ -2279,26 +2297,9 @@ class PlottingMixin:
                             getattr(self, "shaded_relief_cmap", None)
                         )
 
-                        # Calculate min/max for the displayed elevation data (ignoring NaNs) in the current plot window
-                        xlim = self.ax.get_xlim()
-                        ylim = self.ax.get_ylim()
-                        left, right, bottom, top = tuple(self.geotiff_extent)
-                        nrows, ncols = display_data.shape
-                        # Find the pixel indices that correspond to the current axes limits
-                        col_min = int(np.clip((min(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
-                        col_max = int(np.clip((max(xlim) - left) / (right - left) * (ncols - 1), 0, ncols - 1))
-                        row_min = int(np.clip((top - max(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
-                        row_max = int(np.clip((top - min(ylim)) / (top - bottom) * (nrows - 1), 0, nrows - 1))
-                        # Ensure min <= max
-                        r0, r1 = sorted([row_min, row_max])
-                        c0, c1 = sorted([col_min, col_max])
-                        visible_region = display_data[r0:r1+1, c0:c1+1]
-                        if visible_region.size > 0 and not np.all(np.isnan(visible_region)):
-                            vmin_elev = np.nanmin(visible_region)
-                            vmax_elev = np.nanmax(visible_region)
-                        else:
-                            vmin_elev = np.nanmin(display_data) if not np.all(np.isnan(display_data)) else None
-                            vmax_elev = np.nanmax(display_data) if not np.all(np.isnan(display_data)) else None
+                        # Scale colors to real depths in view. Grid fill (-99999 and
+                        # values resampled from it) is left out of the range.
+                        vmin_elev, vmax_elev = self._visible_elevation_limits(display_data)
 
                         # Only set vmin/vmax if valid range exists
                         if vmin_elev is not None and vmax_elev is not None and vmin_elev != vmax_elev:

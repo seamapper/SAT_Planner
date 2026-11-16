@@ -143,7 +143,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # On-screen colorbar. Off until the user turns it on; the choice is saved.
         self.show_map_colorbar_var = False
-        # Loaded topography is drawn until the user hides it.
+        # Loaded topography is drawn until the user hides it. The choice is saved.
         self.show_topography_var = True
         # On-screen legend. Off until the user turns it on; the choice is saved.
         self.show_map_legend_var = False
@@ -598,6 +598,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_vert_exag_table()
         self._load_shaded_relief_cmap()
         self._load_show_map_colorbar()
+        self._load_show_topography()
+        self._load_show_imagery_basemap()
         self._load_show_map_legend()
         self._load_show_point_labels()
         self._load_show_line_labels()
