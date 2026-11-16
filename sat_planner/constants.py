@@ -18,6 +18,10 @@ GMRT_NODATA_VALUE = -99999.0
 REALISTIC_ELEVATION_MIN_M = -12000.0
 REALISTIC_ELEVATION_MAX_M = 9000.0
 
+# Longest side of the elevation grid used for the on-screen shaded relief.
+# The map picture is about 900 pixels, so 1800 keeps the lighting smooth.
+WORKING_GRID_LONG_SIDE_PX = 1800
+
 # Register third-party colormaps with matplotlib (via colormaps package).
 _OPTIONAL_COLORMAP_NAMES = ("ice", "arctic", "sapphire", "torch")
 _COLORMAPS_EXTRA = ()

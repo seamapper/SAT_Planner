@@ -349,7 +349,7 @@ class MapInteractionMixin:
             self._clear_measurement_line_overlay()
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
         self._update_measurement_button_state()
-        self.canvas.draw_idle()
+        self._draw_visible_map_canvas()
 
     def _toggle_pick_center_mode(self):
         if not GEOSPATIAL_LIBS_AVAILABLE:
@@ -374,7 +374,7 @@ class MapInteractionMixin:
             if hasattr(self, 'pick_center_info_text') and self.pick_center_info_text is not None:
                 self.pick_center_info_text.set_visible(False)
                 self.pick_center_info_text = None
-                self.canvas.draw_idle()
+                self._draw_visible_map_canvas()
         else:
             if hasattr(self, 'pick_center_btn'):
                 self.pick_center_btn.setText("Pick Center from GeoTIFF")
@@ -386,7 +386,7 @@ class MapInteractionMixin:
             if hasattr(self, 'pick_center_info_text') and self.pick_center_info_text is not None:
                 self.pick_center_info_text.set_visible(False)
                 self.pick_center_info_text = None
-                self.canvas.draw_idle()
+                self._draw_visible_map_canvas()
 
     def _on_plot_click(self, event):
         # Ignore middle button (button 2) - let it be handled by pan handlers
@@ -500,7 +500,7 @@ class MapInteractionMixin:
 
             self._update_default_hover_info(clicked_lat, clicked_lon)
             self._schedule_eez_hover_lookup(clicked_lat, clicked_lon)
-            self.canvas.draw_idle()
+            self._draw_visible_map_canvas()
             return
         if getattr(self, '_handle_adcp_plot_click', lambda e: False)(event):
             return
@@ -522,12 +522,12 @@ class MapInteractionMixin:
                 self._temp_line = self.ax.plot([clicked_lon, clicked_lon], [clicked_lat, clicked_lat], color='orange', linestyle='--', linewidth=2)[0]
                 self._temp_line_start = (clicked_lat, clicked_lon)
                 self._temp_line_motion_cid = self.canvas.mpl_connect('motion_notify_event', self._on_temp_line_motion)
-                self.canvas.draw_idle()
+                self._draw_visible_map_canvas()
                 # Remove info text if present
                 if hasattr(self, 'pitch_line_info_text') and self.pitch_line_info_text is not None:
                     self.pitch_line_info_text.set_visible(False)
                     self.pitch_line_info_text = None
-                    self.canvas.draw_idle()
+                    self._draw_visible_map_canvas()
             elif len(self.pitch_line_points) == 2:
                 self.pick_pitch_line_btn.setText("Draw Pitch Line")
                 self.pick_pitch_line_mode = False
@@ -549,7 +549,7 @@ class MapInteractionMixin:
                 if hasattr(self, 'pitch_line_info_text') and self.pitch_line_info_text is not None:
                     self.pitch_line_info_text.set_visible(False)
                     self.pitch_line_info_text = None
-                    self.canvas.draw_idle()
+                    self._draw_visible_map_canvas()
                 # Report pitch line summary in info/error box
                 try:
                     import pyproj
@@ -599,7 +599,7 @@ class MapInteractionMixin:
                 self._temp_line = self.ax.plot([clicked_lon, clicked_lon], [clicked_lat, clicked_lat], color='purple', linestyle='--', linewidth=2)[0]
                 self._temp_line_start = (clicked_lat, clicked_lon)
                 self._temp_line_motion_cid = self.canvas.mpl_connect('motion_notify_event', self._on_temp_line_motion)
-                self.canvas.draw_idle()
+                self._draw_visible_map_canvas()
             elif len(self.roll_line_points) == 2:
                 self.pick_roll_line_btn.setText("Draw Roll Line")
                 self.pick_roll_line_mode = False
@@ -692,7 +692,7 @@ class MapInteractionMixin:
                 bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
                 zorder=13
             )
-        self.canvas.draw_idle()
+        self._draw_visible_map_canvas()
         print(f"INFO: {info_msg.replace(chr(10), ', ')}")
 
         current_tab = self.param_notebook.currentIndex() if hasattr(self, 'param_notebook') else -1
@@ -987,7 +987,7 @@ class MapInteractionMixin:
             self._eez_reload_timer.start(200)
 
         # Use draw_idle() for non-blocking updates during zoom
-        self.canvas.draw_idle()
+        self._draw_visible_map_canvas()
 
     def _on_axis_limits_changed(self, ax):
         """Callback for axis limit changes (e.g., from toolbar zoom/pan)."""
@@ -1089,7 +1089,7 @@ class MapInteractionMixin:
         else:
             # If nothing to zoom to, just reset view
             self.ax.autoscale_view()
-            self.canvas.draw_idle()
+            self._draw_visible_map_canvas()
 
     def _on_middle_press(self, event):
         # Only handle middle button (button 2)
@@ -1169,7 +1169,7 @@ class MapInteractionMixin:
             pass
         
         # Use draw_idle() for non-blocking updates during panning
-        self.canvas.draw_idle()
+        self._draw_visible_map_canvas()
 
     def _on_middle_release(self, event):
         # Only handle middle button (button 2)
@@ -1441,6 +1441,18 @@ class MapInteractionMixin:
         ylim = (min_lat - buffer_lat, max_lat + buffer_lat)
         self._apply_map_zoom_limits_and_reload_geotiff(xlim, ylim)
 
+    def _draw_visible_map_canvas(self):
+        """Redraw the matplotlib map only when it is the map on screen.
+
+        The MapLibre view is what the user sees. Hover and pan updates there
+        do not need a second draw of the hidden plot canvas.
+        """
+        if getattr(self, "map_view", None) is not None:
+            return
+        canvas = getattr(self, "canvas", None)
+        if canvas is not None:
+            canvas.draw_idle()
+
     def _on_mouse_motion(self, event):
         """Handle all mouse motion events including hover info, line planning, pitch line, and pick center."""
         if event.inaxes != self.ax:
@@ -1448,7 +1460,7 @@ class MapInteractionMixin:
             if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
                 self.mouse_hover_info_text.set_visible(False)
                 self.mouse_hover_info_text = None
-                self.canvas.draw_idle()
+                self._draw_visible_map_canvas()
             return
 
         mouse_lon = event.xdata
@@ -1459,7 +1471,7 @@ class MapInteractionMixin:
             if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
                 self.mouse_hover_info_text.set_visible(False)
                 self.mouse_hover_info_text = None
-                self.canvas.draw_idle()
+                self._draw_visible_map_canvas()
             return
 
         if getattr(self, "backscatter_box_draw_mode", False):
@@ -1474,7 +1486,7 @@ class MapInteractionMixin:
                     vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, mouse_lat, mouse_lon, 0.0)
                     if vertices is not None:
                         self._update_backscatter_box_patch(vertices)
-                        self.canvas.draw_idle()
+                        self._draw_visible_map_canvas()
             elif stage == 2 and centerline and centerline[0] is not None and centerline[1] is not None:
                 (a_lat, a_lon), (b_lat, b_lon) = centerline
                 centerline_m = self._approx_map_distance_m(a_lat, a_lon, b_lat, b_lon)
@@ -1490,7 +1502,7 @@ class MapInteractionMixin:
                     vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, b_lat, b_lon, half_width_m)
                     if vertices is not None:
                         self._update_backscatter_box_patch(vertices)
-                        self.canvas.draw_idle()
+                        self._draw_visible_map_canvas()
             else:
                 self._set_backscatter_draw_tooltip()
             return
@@ -1512,7 +1524,7 @@ class MapInteractionMixin:
                     vertices = self._backscatter_oriented_box_vertices(a_lat, a_lon, b_lat, b_lon, half_width_m)
                     if vertices is not None:
                         self._update_backscatter_box_patch(vertices)
-                        self.canvas.draw_idle()
+                        self._draw_visible_map_canvas()
             return
         if getattr(self, "measurement_tool_mode", False):
             start_point = getattr(self, "measurement_start_point", None)
@@ -1524,7 +1536,7 @@ class MapInteractionMixin:
             self._hover_mouse_lon = mouse_lon
             self._update_default_hover_info(mouse_lat, mouse_lon)
             self._schedule_eez_hover_lookup(mouse_lat, mouse_lon)
-            self.canvas.draw_idle()
+            self._draw_visible_map_canvas()
             return
 
         if hasattr(self, 'line_planning_mode') and self.line_planning_mode and len(self.line_planning_points) >= 1:
@@ -1552,7 +1564,7 @@ class MapInteractionMixin:
                                                                  fontsize=9, va='top', ha='left',
                                                                  bbox=dict(boxstyle='round', facecolor='plum', alpha=0.8),
                                                                  zorder=13)
-                    self.canvas.draw_idle()
+                    self._draw_visible_map_canvas()
                 return
             if len(self.pitch_line_points) == 1:
                 lats = [self.pitch_line_points[0][0], mouse_lat]
@@ -1589,7 +1601,7 @@ class MapInteractionMixin:
                                                                  fontsize=9, va='top', ha='left',
                                                                  bbox=dict(boxstyle='round', facecolor='plum', alpha=0.8),
                                                                  zorder=13)
-                self.canvas.draw_idle()
+                self._draw_visible_map_canvas()
             return
 
         if hasattr(self, 'pick_center_mode') and self.pick_center_mode:
@@ -1602,7 +1614,7 @@ class MapInteractionMixin:
                     pass
                 self.pick_center_crosshair = None
             self.pick_center_crosshair, = self.ax.plot(mouse_lon, mouse_lat, '+', color='red', markersize=15, markeredgewidth=2)
-            self.canvas.draw_idle()
+            self._draw_visible_map_canvas()
             return
 
         if hasattr(self, 'pick_roll_line_mode') and self.pick_roll_line_mode:
@@ -1642,7 +1654,7 @@ class MapInteractionMixin:
                                                                  fontsize=9, va='top', ha='left',
                                                                  bbox=dict(boxstyle='round', facecolor='plum', alpha=0.8),
                                                                  zorder=13)
-                self.canvas.draw_idle()
+                self._draw_visible_map_canvas()
             return
 
         if not (hasattr(self, 'line_planning_mode') and self.line_planning_mode or
@@ -1656,14 +1668,14 @@ class MapInteractionMixin:
                 if hasattr(self, 'mouse_hover_info_text') and self.mouse_hover_info_text is not None:
                     self.mouse_hover_info_text.set_visible(False)
                     self.mouse_hover_info_text = None
-                    self.canvas.draw_idle()
+                    self._draw_visible_map_canvas()
                 return
 
             self._hover_mouse_lat = mouse_lat
             self._hover_mouse_lon = mouse_lon
             self._update_default_hover_info(mouse_lat, mouse_lon)
             self._schedule_eez_hover_lookup(mouse_lat, mouse_lon)
-            self.canvas.draw_idle()
+            self._draw_visible_map_canvas()
 
     def _cancel_eez_hover_lookup(self):
         if hasattr(self, '_eez_hover_timer') and self._eez_hover_timer is not None:
@@ -1702,7 +1714,7 @@ class MapInteractionMixin:
         if abs(current_lat - lat) > 0.001 or abs(current_lon - lon) > 0.001:
             return
         self._update_default_hover_info(current_lat, current_lon)
-        self.canvas.draw_idle()
+        self._draw_visible_map_canvas()
         if hasattr(self, "_push_maplibre_hover"):
             self._push_maplibre_hover()
 
@@ -1985,22 +1997,33 @@ class MapInteractionMixin:
             has_grid = getattr(self, "geotiff_dataset_original", None) is not None
             if has_grid and hasattr(self, "_set_geotiff_zoom_level_for_window"):
                 self._set_geotiff_zoom_level_for_window((west, east), (south, north))
-            if has_grid and hasattr(self, "_load_geotiff_at_resolution"):
+            # A small pan inside the loaded grid, at the same sample step, keeps
+            # that grid. Contours and EEZ are baked from the axes, so they still redraw.
+            covered = (
+                has_grid
+                and hasattr(self, "_loaded_geotiff_matches_view")
+                and self._loaded_geotiff_matches_view((west, east), (south, north))
+            )
+            if covered:
+                if hasattr(self, "_recolor_bathy_for_shown_view"):
+                    self._recolor_bathy_for_shown_view(west, south, east, north)
+            else:
+                if has_grid and hasattr(self, "_load_geotiff_at_resolution"):
+                    try:
+                        self._load_geotiff_at_resolution()
+                    except Exception:
+                        traceback.print_exc()
+                # EEZ is still drawn in Python and baked into the terrain image, so a pan has to redraw it.
+                # The survey lines already on the map are left in place.
+                needs_redraw = has_grid or bool(getattr(self, "show_eez_var", False))
+                self._maplibre_terrain_only = True
                 try:
-                    self._load_geotiff_at_resolution()
-                except Exception:
-                    traceback.print_exc()
-            # EEZ is still drawn in Python and baked into the terrain image, so a pan has to redraw it.
-            # The survey lines already on the map are left in place.
-            needs_redraw = has_grid or bool(getattr(self, "show_eez_var", False))
-            self._maplibre_terrain_only = True
-            try:
-                if needs_redraw and hasattr(self, "_plot_survey_plan"):
-                    self._plot_survey_plan(preserve_view_limits=True)
-                elif hasattr(self, "_sync_maplibre_bathymetry"):
-                    self._sync_maplibre_bathymetry()
-            finally:
-                self._maplibre_terrain_only = False
+                    if needs_redraw and hasattr(self, "_plot_survey_plan"):
+                        self._plot_survey_plan(preserve_view_limits=True)
+                    elif hasattr(self, "_sync_maplibre_bathymetry"):
+                        self._sync_maplibre_bathymetry()
+                finally:
+                    self._maplibre_terrain_only = False
         finally:
             self._setting_limits_programmatically = False
             self._maplibre_hold_view = False

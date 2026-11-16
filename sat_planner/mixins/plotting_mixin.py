@@ -1705,13 +1705,36 @@ class PlottingMixin:
             if not has_any_colorbar and hasattr(self, '_axes_pos_with_colorbar'):
                 delattr(self, '_axes_pos_with_colorbar')
 
-    def _multidirectional_hillshade(self, data, vert_exag, altitude=45):
-        """Average hillshades from the four directions used by Shaded Relief."""
+    def _multidirectional_hillshade(self, data, vert_exag, altitude=45, cache_source=None):
+        """Average hillshades from the four directions used by Shaded Relief.
+
+        cache_source is the elevation grid this lighting belongs to. The same
+        grid and vertical exaggeration reuse the previous result.
+        """
+        source = data if cache_source is None else cache_source
+        try:
+            ve_key = round(float(vert_exag), 5)
+            altitude_key = float(altitude)
+        except (TypeError, ValueError):
+            ve_key = vert_exag
+            altitude_key = altitude
+        key = (id(source), ve_key, altitude_key, tuple(getattr(data, "shape", ())))
+        cache = getattr(self, "_hillshade_cache", None)
+        if cache is None:
+            cache = {}
+            self._hillshade_cache = cache
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
         hillshades = []
         for azimuth in (45, 135, 225, 315):
             light = LightSource(azdeg=azimuth, altdeg=altitude)
             hillshades.append(light.hillshade(data, vert_exag=vert_exag))
-        return np.mean(hillshades, axis=0)
+        result = np.mean(hillshades, axis=0)
+        cache[key] = result
+        while len(cache) > 4:
+            cache.pop(next(iter(cache)))
+        return result
 
     def _draw_topography_underlay(self):
         """Draw the land GeoTIFF under every other map layer."""
@@ -1726,7 +1749,7 @@ class PlottingMixin:
         finite = np.isfinite(data)
         filled = np.nan_to_num(data, nan=float(np.nanmin(data)))
         vert_exag = self._calculate_adaptive_vert_exag(data, inverted=True)
-        hillshade = self._multidirectional_hillshade(filled, vert_exag)
+        hillshade = self._multidirectional_hillshade(filled, vert_exag, cache_source=data)
         masked_hillshade = np.ma.masked_where(~finite, hillshade)
         self.topography_hillshade_plot = self.ax.imshow(
             masked_hillshade,
@@ -2280,7 +2303,9 @@ class PlottingMixin:
                         elif current_tab == 2 and hasattr(self, 'set_line_info_text'):
                             self.set_line_info_text(f"{vert_exag_label}: {vert_exag:.3f}")
                     self._vert_exag_logged_this_cycle = True
-                    hillshade_array = self._multidirectional_hillshade(data_for_hillshade, vert_exag)
+                    hillshade_array = self._multidirectional_hillshade(
+                        data_for_hillshade, vert_exag, cache_source=self.geotiff_data_array
+                    )
                     # Mask NaN values to make them transparent
                     masked_hillshade = np.ma.masked_where(np.isnan(self.geotiff_data_array), hillshade_array)
                     self.geotiff_hillshade_plot = self.ax.imshow(masked_hillshade, extent=tuple(self.geotiff_extent),
@@ -3493,7 +3518,10 @@ class PlottingMixin:
             self._refresh_line_label_artists()
             if hasattr(self, "_apply_visible_depth_range"):
                 self._apply_visible_depth_range()
-            self.canvas.draw_idle()
+            # The on-screen map is the MapLibre picture. Drawing the hidden
+            # matplotlib canvas here only repeats that work.
+            if getattr(self, "map_view", None) is None:
+                self.canvas.draw_idle()
             self._sync_maplibre_plan(fit=not preserve_view_limits, terrain=True)
 
         except Exception as e:

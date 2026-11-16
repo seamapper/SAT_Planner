@@ -33,6 +33,7 @@ from sat_planner.constants import (
     KONGSBERG_DEPTH_MODE_DISPLAY_LABELS,
     REALISTIC_ELEVATION_MAX_M,
     REALISTIC_ELEVATION_MIN_M,
+    WORKING_GRID_LONG_SIDE_PX,
     LineString,
     RasterioIOError,
     Resampling,
@@ -48,6 +49,26 @@ from sat_planner import export_utils
 from sat_planner.utils_geo import decimal_degrees_to_ddm
 from sat_planner.utils_geo import lat_lon_decimal_from_survey_csv_row
 from sat_planner.utils_ui import show_statistics_dialog
+
+
+def working_grid_shape(native_rows, native_cols, long_side_px=WORKING_GRID_LONG_SIDE_PX):
+    """Fit a grid window to the on-screen pixel budget.
+
+    Returns (rows, cols, downsample_factor). A window already within the
+    budget stays at its native cell size so a zoomed-in view keeps real cells.
+    """
+    native_rows = max(1, int(native_rows))
+    native_cols = max(1, int(native_cols))
+    budget = max(1, int(long_side_px))
+    long_side = max(native_rows, native_cols)
+    if long_side <= budget:
+        return native_rows, native_cols, 1
+    scale = budget / float(long_side)
+    out_rows = max(1, int(round(native_rows * scale)))
+    out_cols = max(1, int(round(native_cols * scale)))
+    shown = max(out_rows, out_cols)
+    factor = max(2, int(round(long_side / float(shown))))
+    return out_rows, out_cols, factor
 
 
 class GeoTIFFMixin:
@@ -74,6 +95,50 @@ class GeoTIFFMixin:
         width_ratio = current_width / full_width if full_width > 0 else 1.0
         height_ratio = current_height / full_height if full_height > 0 else 1.0
         self.geotiff_zoom_level = max(0.01, min(10.0, max(width_ratio, height_ratio)))
+
+    def _loaded_geotiff_matches_view(self, xlim, ylim):
+        """True when the grid in memory already covers this view at screen resolution."""
+        data = getattr(self, "geotiff_data_array", None)
+        extent = getattr(self, "geotiff_extent", None)
+        dataset = getattr(self, "geotiff_dataset_original", None)
+        if data is None or extent is None or dataset is None or not getattr(self, "dynamic_resolution_enabled", True):
+            return False
+        if getattr(self, "show_contours_var", False) or getattr(self, "show_eez_var", False):
+            return False
+        ref = self._dynamic_resolution_reference_extent()
+        if ref is None:
+            return False
+        try:
+            west, east = float(min(xlim)), float(max(xlim))
+            south, north = float(min(ylim)), float(max(ylim))
+            left, right, bottom, top = (float(v) for v in extent)
+            ref_left, ref_right, ref_bottom, ref_top = (float(v) for v in ref)
+        except (TypeError, ValueError):
+            return False
+        view_w = east - west
+        view_h = north - south
+        full_w = ref_right - ref_left
+        full_h = ref_top - ref_bottom
+        if min(view_w, view_h, full_w, full_h, right - left, top - bottom) <= 0:
+            return False
+        tol_x = max(1e-9, view_w * 1e-4)
+        tol_y = max(1e-9, view_h * 1e-4)
+        if west < left - tol_x or east > right + tol_x or south < bottom - tol_y or north > top + tol_y:
+            return False
+        loaded_rows, loaded_cols = data.shape[:2]
+        loaded_step_x = (right - left) / max(1, loaded_cols)
+        loaded_step_y = (top - bottom) / max(1, loaded_rows)
+        native_step_x = full_w / max(1, int(dataset.width))
+        native_step_y = full_h / max(1, int(dataset.height))
+        budget = float(WORKING_GRID_LONG_SIDE_PX)
+        # Coarser than native only while the window still has more cells than the screen.
+        desired_step_x = max(native_step_x, view_w / budget)
+        desired_step_y = max(native_step_y, view_h / budget)
+        # The loader keeps a margin around the view, so its cells are a little
+        # coarser than view/budget. A real zoom still exceeds this margin.
+        if loaded_step_x > desired_step_x * 1.4 or loaded_step_y > desired_step_y * 1.4:
+            return False
+        return True
 
     def _transform_bounds_to_wgs84(self, left, bottom, right, top, src_crs):
         """Transform bounds to WGS84 using densified edges for better large-area alignment."""
@@ -1323,30 +1388,11 @@ class GeoTIFFMixin:
         if not GEOSPATIAL_LIBS_AVAILABLE or self.geotiff_dataset_original is None:
             return False
 
-        # If dynamic resolution is disabled, always use full resolution
-        if not self.dynamic_resolution_enabled:
-            downsample_factor = 1
-            print("DEBUG: Dynamic resolution disabled, using full resolution")
-        else:
-            if zoom_level is None:
-                zoom_level = self.geotiff_zoom_level
-
-            # Clamp zoom level to prevent extreme values that could cause issues
-            # Allow zoom levels up to 10.0 for zoom out operations
-            zoom_level = max(0.01, min(10.0, zoom_level))
-
-            # Determine downsampling factor based on zoom level
-            # For zoom out (zoom_level > 1.0), we want higher downsampling
-            if zoom_level <= 0.5:  # Zoomed in close - use full resolution
-                downsample_factor = 1
-            elif zoom_level <= 1.0:  # Medium zoom - use 2x downsampling
-                downsample_factor = 2
-            elif zoom_level <= 2.0:  # Far zoom - use 4x downsampling
-                downsample_factor = 4
-            elif zoom_level <= 5.0:  # Very far zoom - use 8x downsampling
-                downsample_factor = 8
-            else:  # Extremely far zoom - use 16x downsampling
-                downsample_factor = 16
+        # Dynamic resolution fits the visible window to the screen. Full
+        # resolution of that window is used once it is already small enough.
+        # zoom_level is retained for callers that still track the view ratio.
+        if zoom_level is not None and self.dynamic_resolution_enabled:
+            self.geotiff_zoom_level = max(0.01, min(10.0, float(zoom_level)))
 
         try:
             # Use current axes limits (call canvas.draw() before this if limits just changed)
@@ -1421,19 +1467,17 @@ class GeoTIFFMixin:
                 row_min, row_max = 0, self.geotiff_dataset_original.height
                 col_min, col_max = 0, self.geotiff_dataset_original.width
 
-            # If the requested native window is already small, force full/native resolution.
-            # This avoids needlessly coarse rendering when zoomed in to a limited number of cells.
+            # Fit the visible window to the screen. A window already that small
+            # stays at native resolution.
             native_rows = max(1, row_max - row_min)
             native_cols = max(1, col_max - col_min)
-            native_pixels = native_rows * native_cols
-            native_fullres_threshold_pixels = int(getattr(self, "dynamic_native_fullres_threshold_pixels", 1_500_000))
-            if downsample_factor > 1 and native_pixels <= native_fullres_threshold_pixels:
-                downsample_factor = 1
+            if self.dynamic_resolution_enabled:
+                out_height, out_width, downsample_factor = working_grid_shape(native_rows, native_cols)
+            else:
+                out_height, out_width, downsample_factor = native_rows, native_cols, 1
 
             # Read the visible region, resampling instead of keeping every nth cell.
             window = Window.from_slices((row_min, row_max), (col_min, col_max))
-            out_height = max(1, native_rows // downsample_factor)
-            out_width = max(1, native_cols // downsample_factor)
             data = self._read_elevation_array(
                 self.geotiff_dataset_original,
                 out_height,
@@ -1519,7 +1563,8 @@ class GeoTIFFMixin:
                 self.ax.set_xlim(current_xlim)
                 self.ax.set_ylim(current_ylim)
 
-                self.canvas.draw_idle()
+                if getattr(self, "map_view", None) is None:
+                    self.canvas.draw_idle()
 
                 # Update info text to show current resolution
                 if not self.dynamic_resolution_enabled:
@@ -1815,10 +1860,7 @@ class GeoTIFFMixin:
     def _read_wgs84_geotiff_array(self, file_path):
         """Return (array, [left, right, bottom, top]) in WGS84 for a GeoTIFF."""
         with rasterio.open(file_path) as src:
-            total_pixels = src.width * src.height
-            downsample = 4 if total_pixels > 10000000 else 2 if total_pixels > 5000000 else 1
-            target_h = max(1, src.height // downsample)
-            target_w = max(1, src.width // downsample)
+            target_h, target_w, _downsample = working_grid_shape(src.height, src.width)
             data = src.read(1, out_shape=(target_h, target_w), resampling=Resampling.bilinear)
             data = data.astype(float)
             nodata = getattr(src, "nodata", None)
@@ -2009,17 +2051,15 @@ class GeoTIFFMixin:
             # The timeout will be handled by the progress window and user can cancel
             self.geotiff_dataset_original = rasterio.open(file_path)
 
-            # Check if we need to downsample for large files
-            total_pixels = self.geotiff_dataset_original.width * self.geotiff_dataset_original.height
-            downsample_factor = 1
-
-            if total_pixels > 10000000:  # 10 million pixels threshold
-                downsample_factor = 4
-                progress_label.setText(f"Large file detected. Resampling by factor {downsample_factor} for performance...")
-                QApplication.processEvents()
-            elif total_pixels > 5000000:  # 5 million pixels threshold
-                downsample_factor = 2
-                progress_label.setText(f"Resampling by factor {downsample_factor} for performance...")
+            # Fit the first view to the screen. Zooming in loads the real cells
+            # for that smaller window, up to the same pixel budget.
+            src_height = self.geotiff_dataset_original.height
+            src_width = self.geotiff_dataset_original.width
+            target_height, target_width, downsample_factor = working_grid_shape(src_height, src_width)
+            if downsample_factor > 1:
+                progress_label.setText(
+                    f"Large file detected. Resampling to {target_width}×{target_height} for display..."
+                )
                 QApplication.processEvents()
 
             # Check if loading was cancelled
@@ -2055,9 +2095,7 @@ class GeoTIFFMixin:
                     dst_left, dst_bottom = transformer_bounds.transform(left, bottom)
                     dst_right, dst_top = transformer_bounds.transform(right, top)
 
-                # Resample while reprojecting so the overview matches the topography grid size.
-                target_height = max(1, self.geotiff_dataset_original.height // downsample_factor)
-                target_width = max(1, self.geotiff_dataset_original.width // downsample_factor)
+                # Resample while reprojecting so the overview matches the screen grid size.
                 reprojected_data = np.empty((target_height, target_width), dtype=np.float32)
                 nodata_arg = self._elevation_source_nodata(self.geotiff_dataset_original)
 
@@ -2093,8 +2131,6 @@ class GeoTIFFMixin:
                 progress_label.setText("Reading GeoTIFF data...")
                 QApplication.processEvents()
 
-                target_height = max(1, self.geotiff_dataset_original.height // downsample_factor)
-                target_width = max(1, self.geotiff_dataset_original.width // downsample_factor)
                 data = self._read_elevation_array(
                     self.geotiff_dataset_original,
                     target_height,
@@ -5033,27 +5069,45 @@ class GeoTIFFMixin:
             image.set_clim(vmin=vmin, vmax=vmax)
 
     def _apply_visible_depth_range(self, xlim=None, ylim=None):
-        """Stretch elevation colors across the depths in one map window."""
+        """Stretch elevation colors across the depths in one map window.
+
+        Returns True when the on-screen picture changed.
+        """
         self._update_topography_visible_clim()
         image = getattr(self, "geotiff_image_plot", None)
         data = getattr(self, "geotiff_data_array", None)
         extent = getattr(self, "geotiff_extent", None)
         if image is None or data is None or extent is None:
-            return
+            return False
         depth_modes_on = bool(self._active_kongsberg_depth_modes()) if hasattr(self, "_active_kongsberg_depth_modes") else False
         if not depth_modes_on and getattr(self, "geotiff_display_mode", None) not in ("elevation", "elevation_dyn"):
-            return
+            return False
         if not hasattr(self, "_visible_elevation_limits"):
-            return
+            return False
         vmin, vmax = self._visible_elevation_limits(data, extent, xlim=xlim, ylim=ylim)
         if vmin is None or vmax is None or vmin == vmax:
-            return
-        image.set_clim(vmin=vmin, vmax=vmax)
-        self._rescale_bathy_hillshade_to_range(abs(float(vmax) - float(vmin)))
+            return False
+        changed = False
+        norm = getattr(image, "norm", None)
+        try:
+            same_limits = (
+                norm is not None
+                and norm.vmin is not None
+                and norm.vmax is not None
+                and abs(float(norm.vmin) - float(vmin)) <= max(1e-3, abs(float(vmin)) * 1e-4)
+                and abs(float(norm.vmax) - float(vmax)) <= max(1e-3, abs(float(vmax)) * 1e-4)
+            )
+        except (TypeError, ValueError):
+            same_limits = False
+        if not same_limits:
+            image.set_clim(vmin=vmin, vmax=vmax)
+            changed = True
+        if self._rescale_bathy_hillshade_to_range(abs(float(vmax) - float(vmin))):
+            changed = True
         colorbar = getattr(self, "elevation_colorbar", None)
-        if depth_modes_on or colorbar is None or not hasattr(self, "_label_colorbar_to_data_range"):
-            return
-        self._label_colorbar_to_data_range(colorbar, vmin, vmax)
+        if changed and not depth_modes_on and colorbar is not None and hasattr(self, "_label_colorbar_to_data_range"):
+            self._label_colorbar_to_data_range(colorbar, vmin, vmax)
+        return changed
 
     def _recolor_bathy_for_shown_view(self, west, south, east, north):
         """Color the shaded relief from the depths in the view the map is showing."""
@@ -5084,8 +5138,8 @@ class GeoTIFFMixin:
             self.current_ylim = ylim
             self._last_user_xlim = xlim
             self._last_user_ylim = ylim
-            self._apply_visible_depth_range(xlim, ylim)
-            if hasattr(self, "_sync_maplibre_bathymetry"):
+            changed = self._apply_visible_depth_range(xlim, ylim)
+            if changed and hasattr(self, "_sync_maplibre_bathymetry"):
                 self._sync_maplibre_bathymetry()
         finally:
             self._setting_limits_programmatically = False
@@ -5096,13 +5150,13 @@ class GeoTIFFMixin:
         plot = getattr(self, "geotiff_hillshade_plot", None)
         data = getattr(self, "geotiff_data_array", None)
         if plot is None or data is None or not np.isfinite(elevation_range):
-            return
+            return False
         previous = getattr(self, "_bathy_hillshade_range", None)
         if previous is not None and abs(previous - elevation_range) <= max(1e-3, abs(elevation_range) * 1e-4):
-            return
+            return False
         self._bathy_hillshade_range = float(elevation_range)
         if getattr(self, "hillshade_vs_slope_viz_mode", "hillshade") != "hillshade":
-            return
+            return False
         depth_modes_on = bool(self._active_kongsberg_depth_modes()) if hasattr(self, "_active_kongsberg_depth_modes") else False
         use_inverted = bool(depth_modes_on) or getattr(self, "geotiff_display_mode", None) in (
             "elevation_dyn", "hillshade_only", "slope",
@@ -5112,13 +5166,14 @@ class GeoTIFFMixin:
         elif hasattr(self, "_interp_shaded_relief_vert_exag"):
             vert_exag = self._interp_shaded_relief_vert_exag(elevation_range)
         else:
-            return
+            return False
         finite = np.isfinite(data)
         if not np.any(finite):
-            return
+            return False
         filled = np.nan_to_num(data, nan=float(np.nanmin(data[finite])))
-        hillshade = self._multidirectional_hillshade(filled, vert_exag)
+        hillshade = self._multidirectional_hillshade(filled, vert_exag, cache_source=data)
         plot.set_data(np.ma.masked_where(~finite, hillshade))
+        return True
 
     def _on_draw_event_update_colormap(self, event=None):
         """Update elevation colormap to visible region when view changes."""
