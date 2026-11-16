@@ -12,6 +12,41 @@ Copyright (c) 2025, UNH/CCOM-JHC. BSD 3-Clause License (see LICENSE in repo root
 import sys
 import os
 
+
+def _configure_tls_ca_bundle():
+    """Point HTTPS clients at a CA bundle that is actually on disk.
+
+    Conda-forge certifi does not ship cacert.pem. It looks under
+    sys.base_prefix, which is the conda install when running from source and
+    the unpacked app folder when frozen. requests then raises "Could not find
+    a suitable TLS CA certificate bundle" if that path is missing.
+    """
+    roots = []
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        roots.append(sys._MEIPASS)
+    roots.append(getattr(sys, "base_prefix", ""))
+    roots.append(getattr(sys, "prefix", ""))
+    candidates = []
+    for key in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        value = os.environ.get(key)
+        if value:
+            candidates.append(value)
+    for root in roots:
+        if not root:
+            continue
+        candidates.append(os.path.join(root, "Library", "ssl", "cacert.pem"))
+        candidates.append(os.path.join(root, "ssl", "cacert.pem"))
+    chosen = next((path for path in candidates if path and os.path.isfile(path)), None)
+    if not chosen:
+        return
+    for key in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+        current = os.environ.get(key)
+        if not current or not os.path.isfile(current):
+            os.environ[key] = chosen
+
+
+_configure_tls_ca_bundle()
+
 # Fledermaus ships DLLs that collide with conda rasterio/GDAL. Drop any
 # Fledermaus folder from this process only so the system PATH stays unchanged.
 def _is_fledermaus_path(entry):

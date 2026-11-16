@@ -88,6 +88,22 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         if os.path.isfile(candidate):
             helper_exe = candidate
             break
+    # Conda certifi looks for Library/ssl/cacert.pem under sys.base_prefix.
+    # Bundle that file and publish it before requests is imported.
+    ca_candidates = [
+        os.environ.get("SSL_CERT_FILE", ""),
+        os.environ.get("REQUESTS_CA_BUNDLE", ""),
+        os.environ.get("CURL_CA_BUNDLE", ""),
+        os.path.join(root, "Library", "ssl", "cacert.pem"),
+        os.path.join(root, "ssl", "cacert.pem"),
+    ]
+    ca_bundle = next((path for path in ca_candidates if path and os.path.isfile(path)), None)
+    if ca_bundle:
+        for key in ("SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE"):
+            current = os.environ.get(key)
+            if not current or not os.path.isfile(current):
+                os.environ[key] = ca_bundle
+
     if helper_exe:
         os.environ["QTWEBENGINEPROCESS_PATH"] = helper_exe
         os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"

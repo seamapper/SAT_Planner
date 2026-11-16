@@ -53,6 +53,12 @@ if _prefix:
     _gdal_proj_data = collect_macos_gdal_data(_prefix)
     datas += _gdal_proj_data
     binaries += collect_macos_dylibs(_prefix)
+    _ca_bundle = os.path.join(_prefix, "ssl", "cacert.pem")
+    if os.path.isfile(_ca_bundle):
+        datas.append((_ca_bundle, "ssl"))
+        print(f"Bundling TLS CA bundle: {_ca_bundle}")
+    else:
+        print("WARNING: ssl/cacert.pem not found; HTTPS downloads may fail in the app.")
     print(f"Bundling GDAL/PROJ data: {len(_gdal_proj_data)} director{'y' if len(_gdal_proj_data) == 1 else 'ies'}")
     print(f"Bundling conda dylibs: {len(binaries)} file(s)")
 else:

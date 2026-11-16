@@ -38,6 +38,15 @@ for pkg in ('pyproj', 'fiona', 'shapely', 'rasterio', 'matplotlib', 'colormaps')
     except Exception:
         pass
 datas += [(os.path.join(_spec_dir, 'media'), 'media')]
+# conda-forge certifi has no bundled cacert.pem; requests needs this file.
+for _ca_root in (getattr(sys, 'base_prefix', ''), getattr(sys, 'prefix', '')):
+    _ca_bundle = os.path.join(_ca_root, 'Library', 'ssl', 'cacert.pem') if _ca_root else ''
+    if _ca_bundle and os.path.isfile(_ca_bundle):
+        datas.append((_ca_bundle, os.path.join('Library', 'ssl')))
+        print(f'Bundling TLS CA bundle: {_ca_bundle}')
+        break
+else:
+    print('WARNING: Library/ssl/cacert.pem not found; HTTPS downloads may fail in the exe.')
 _maplibre_dir = os.path.join(_spec_dir, 'sat_planner', 'maplibre')
 for _map_asset in ('index.html', 'maplibre-gl.js', 'maplibre-gl.css'):
     datas.append((os.path.join(_maplibre_dir, _map_asset), os.path.join('sat_planner', 'maplibre')))
