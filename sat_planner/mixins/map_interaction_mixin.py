@@ -1813,6 +1813,15 @@ class MapInteractionMixin:
         if hasattr(self, "_set_travel_direction_arrows_visible"):
             self._set_travel_direction_arrows_visible(False)
 
+    def _on_map_home(self):
+        """Zoom to the current tab's survey, or to the whole overview."""
+        if hasattr(self, "_overview_tab_is_current") and self._overview_tab_is_current():
+            if hasattr(self, "_zoom_overview_home"):
+                self._zoom_overview_home()
+            return
+        if hasattr(self, "_zoom_to_tab_plan"):
+            self._zoom_to_tab_plan()
+
     def _connect_maplibre_bridge(self):
         """Send map clicks, moves, and settled view bounds into the existing handlers."""
         view = getattr(self, "map_view", None)
@@ -1823,6 +1832,7 @@ class MapInteractionMixin:
         view.mapReleased.connect(self._on_maplibre_release)
         view.mapMoved.connect(self._on_maplibre_move)
         view.viewChanged.connect(self._on_maplibre_view_changed)
+        view.homeClicked.connect(self._on_map_home)
         canvas = getattr(self, "canvas", None)
         if canvas is not None and not getattr(canvas, "_maplibre_cursor_wrapped", False):
             original_set_cursor = canvas.setCursor
@@ -1838,6 +1848,10 @@ class MapInteractionMixin:
             self._sync_maplibre_web_layers()
 
     def _on_maplibre_click(self, lon, lat, button):
+        if getattr(self, "_overview_map_active", False):
+            if int(button) == 1 and hasattr(self, "_overview_apply_map_click"):
+                self._overview_apply_map_click(float(lon), float(lat))
+            return
         try:
             self._on_plot_click(_MapLibreEvent(getattr(self, "ax", None), lon, lat, button))
             if hasattr(self, "_sync_maplibre_plan"):
@@ -1889,6 +1903,8 @@ class MapInteractionMixin:
 
     def _on_maplibre_press(self, lon, lat, button):
         """Start a waypoint drag when the press lands on a handle."""
+        if getattr(self, "_overview_map_active", False):
+            return
         if int(button) != 1:
             return
         artist = self._nearest_pick_handle(float(lon), float(lat))
@@ -1934,11 +1950,15 @@ class MapInteractionMixin:
         return False
 
     def _on_maplibre_release(self, lon, lat, button):
+        if getattr(self, "_overview_map_active", False):
+            return
         event = _MapLibreEvent(getattr(self, "ax", None), lon, lat, button)
         if self._dispatch_handle_drag(event, release=True) and hasattr(self, "_publish_drag_handles"):
             self._publish_drag_handles()
 
     def _on_maplibre_move(self, lon, lat):
+        if getattr(self, "_overview_map_active", False):
+            return
         try:
             event = _MapLibreEvent(getattr(self, "ax", None), lon, lat)
             if self._dispatch_handle_drag(event, release=False):
@@ -1967,6 +1987,8 @@ class MapInteractionMixin:
         """Keep the hidden axes on the view the user just panned or zoomed to."""
         ax = getattr(self, "ax", None)
         if ax is None or getattr(self, "_maplibre_refreshing_view", False):
+            return
+        if getattr(self, "_overview_map_active", False):
             return
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()

@@ -55,7 +55,8 @@ class MapOptionsDialog(QDialog):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
 
-        layers_group = QGroupBox("Map Overlay Options")
+        self.layers_group = QGroupBox("Map Overlay Options")
+        layers_group = self.layers_group
         layers_layout = QVBoxLayout(layers_group)
         layers_layout.setSpacing(6)
         layers_layout.addWidget(imagery_basemap_checkbox)
@@ -75,9 +76,18 @@ class MapOptionsDialog(QDialog):
         layers_layout.addLayout(eez_row)
 
         layers_layout.addWidget(add_shapefile_btn)
+        label_row = QHBoxLayout()
+        label_row.addWidget(show_map_legend_checkbox)
+        label_row.addWidget(show_point_labels_checkbox)
+        label_row.addWidget(show_line_labels_checkbox)
+        label_row.addStretch()
+        layers_layout.addLayout(label_row)
+        self._point_labels_checkbox = show_point_labels_checkbox
+        self._line_labels_checkbox = show_line_labels_checkbox
         layout.addWidget(layers_group)
 
-        geotiff_group = QGroupBox("GeoTIFF Overlay Options")
+        self.geotiff_group = QGroupBox("GeoTIFF Overlay Options")
+        geotiff_group = self.geotiff_group
         geotiff_layout = QVBoxLayout(geotiff_group)
         geotiff_layout.setSpacing(6)
 
@@ -99,13 +109,6 @@ class MapOptionsDialog(QDialog):
         colorbar_row.addWidget(show_topography_checkbox)
         colorbar_row.addStretch()
         geotiff_layout.addLayout(colorbar_row)
-
-        legend_row = QHBoxLayout()
-        legend_row.addWidget(show_map_legend_checkbox)
-        legend_row.addWidget(show_point_labels_checkbox)
-        legend_row.addWidget(show_line_labels_checkbox)
-        legend_row.addStretch()
-        geotiff_layout.addLayout(legend_row)
 
         display_row = QHBoxLayout()
         dyn_vert_exag_btn.setSizePolicy(half_width)
@@ -174,6 +177,18 @@ class MapOptionsDialog(QDialog):
 
         # Prevent Enter in text fields from activating Add Shapefile / other buttons.
         self._disable_dialog_button_defaults()
+
+    def set_overview_mode(self, overview):
+        """On the overview map, keep imagery, charts, and the legend toggle."""
+        overview = bool(overview)
+        changed = overview != getattr(self, "_overview_mode", None)
+        self._point_labels_checkbox.setVisible(not overview)
+        self._line_labels_checkbox.setVisible(not overview)
+        self.geotiff_group.setVisible(not overview)
+        self._overview_mode = overview
+        hint = self.sizeHint()
+        self.resize(max(420, hint.width()), hint.height())
+        return changed
 
     def _disable_dialog_button_defaults(self):
         """Make sure no button becomes the dialog default on Return."""

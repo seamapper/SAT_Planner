@@ -394,7 +394,7 @@ class GeoTIFFMixin:
         )
         stats_text += f"Survey Speed: {stats['speed_knots']:.1f} knots\n"
         stats_text += (
-            f"Estimated Time: {stats['total_time_minutes']:.1f} min "
+            f"Total Time: {stats['total_time_minutes']:.1f} min "
             f"({stats['total_time_hours']:.2f} hr)\n"
         )
         if stats.get("centerline_time_seconds") is not None:

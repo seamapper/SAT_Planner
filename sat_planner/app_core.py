@@ -62,12 +62,13 @@ from .mixins.map_interaction_mixin import MapInteractionMixin
 from .mixins.export_import_mixin import ExportImportMixin
 from .mixins.config_mixin import ConfigMixin
 from .mixins.deferred_params_mixin import DeferredParamsMixin
+from .mixins.overview_mixin import OverviewMixin
 from .bathymetry_download import DownloadBathymetryDialog
 from .map_options_dialog import MapOptionsDialog
 from .maplibre import MapLibreView
 
 
-class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, PerformanceMixin, AdcpMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, DeferredParamsMixin, QMainWindow):
+class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, PerformanceMixin, AdcpMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, DeferredParamsMixin, OverviewMixin, QMainWindow):
     CONFIG_FILENAME = CONFIG_FILENAME  # from package
 
     def __init__(self):
@@ -581,6 +582,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.vert_exag_table = self._default_vert_exag_table()
         self.shaded_relief_cmap = DEFAULT_SHADED_RELIEF_CMAP
         self._load_last_used_dir()
+        self._load_last_overview_dir()
+        self._load_overview_export_options()
         self._load_last_geotiff_dir()
         self._load_last_backscatter_dir()
         self._load_last_backscatter_import_dir()
@@ -979,15 +982,24 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self.map_options_dialog.close()
             return
 
+        overview = hasattr(self, "_overview_tab_is_current") and self._overview_tab_is_current()
+        self.map_options_dialog.set_overview_mode(overview)
         self._set_map_options_icon_active(True)
         self.map_options_dialog.show()
-        self.map_options_dialog.adjustSize()
-        btn = self.map_options_btn
-        global_pos = btn.mapToGlobal(btn.rect().topLeft())
-        dlg_h = self.map_options_dialog.frameGeometry().height()
-        self.map_options_dialog.move(global_pos.x(), max(0, global_pos.y() - dlg_h - 4))
+        self._place_map_options_dialog()
         self.map_options_dialog.raise_()
         self.map_options_dialog.activateWindow()
+
+    def _place_map_options_dialog(self):
+        """Anchor the dialog just above the map options button for its current height."""
+        dialog = getattr(self, "map_options_dialog", None)
+        btn = getattr(self, "map_options_btn", None)
+        if dialog is None or btn is None:
+            return
+        dialog.adjustSize()
+        anchor = btn.mapToGlobal(btn.rect().topLeft())
+        height = dialog.frameGeometry().height()
+        dialog.move(anchor.x(), max(0, anchor.y() - height - 4))
 
     def _on_map_options_dialog_finished(self, _result=None):
         """Reset Map Options icon when the dialog closes."""
@@ -1061,6 +1073,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 bottom_strip_widget = QWidget()
                 bottom_strip_widget.setLayout(bottom_strip_layout)
                 bottom_strip_widget.setMaximumHeight(250)
+                self.bottom_strip_widget = bottom_strip_widget
                 right_side_layout.addWidget(bottom_strip_widget)
             else:
                 print(f"WARNING: Missing profile widgets - profile_widget: {hasattr(self, 'profile_widget')}, slope_profile_checkbox: {hasattr(self, 'slope_profile_checkbox')}")
@@ -1211,6 +1224,19 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self._sync_profile_select_row()
         except Exception as e:
             print(f"Error in tab change handler: {e}")
+
+        try:
+            if hasattr(self, "_on_overview_tab_changed"):
+                self._on_overview_tab_changed(current_tab)
+        except Exception as e:
+            print(f"Error restoring the overview map: {e}")
+
+        dialog = getattr(self, "map_options_dialog", None)
+        if dialog is not None:
+            overview = hasattr(self, "_overview_tab_is_current") and self._overview_tab_is_current()
+            changed = dialog.set_overview_mode(overview)
+            if dialog.isVisible() and changed and not overview:
+                self._place_map_options_dialog()
 
         # Always update profile plot to show the profile for the active tab
         try:
@@ -1469,6 +1495,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.param_notebook.addTab(self.backscatter_frame, "Backscatter")
         self.param_notebook.addTab(self.performance_frame, "Performance")
         self.param_notebook.addTab(self.adcp_frame, "ADCP")
+        self.overview_frame = QWidget()
+        self.overview_tab_index = self.param_notebook.addTab(self.overview_frame, "Overview")
+        self._build_overview_tab()
 
         self._test_planning_layout.addWidget(self.param_notebook)
         param_layout.addWidget(test_planning_groupbox)

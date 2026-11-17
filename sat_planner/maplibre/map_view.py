@@ -245,6 +245,10 @@ class _MapBridge(QObject):
     def viewChanged(self, west, south, east, north):
         self._view.viewChanged.emit(float(west), float(south), float(east), float(north))
 
+    @pyqtSlot()
+    def homeClicked(self):
+        self._view.homeClicked.emit()
+
 
 class MapLibreView(QWebEngineView):
     """MapLibre map with a Qt channel for pointer events and drawing commands."""
@@ -254,6 +258,7 @@ class MapLibreView(QWebEngineView):
     mapPressed = pyqtSignal(float, float, int)
     mapReleased = pyqtSignal(float, float, int)
     viewChanged = pyqtSignal(float, float, float, float)
+    homeClicked = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)

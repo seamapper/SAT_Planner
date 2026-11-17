@@ -74,6 +74,9 @@
       font-size: 11px;
       background: rgba(255, 255, 255, 0.75);
     }
+    .maplibregl-ctrl-group button.maplibregl-ctrl-home .maplibregl-ctrl-icon {
+      background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='29' height='29' fill='%23333' viewBox='0 0 29 29'%3E%3Cpath d='M14.5 7.4 7 13.7V21.6h5.2v-4.6h4.6V21.6H22V13.7z'/%3E%3C/svg%3E");
+    }
     #legend {
       display: none;
       position: absolute;
@@ -210,6 +213,36 @@
       }
     });
     map.touchZoomRotate.disableRotation();
+
+    function HomeControl() {}
+    HomeControl.prototype.onAdd = function (mapInstance) {
+      this._map = mapInstance;
+      var container = document.createElement("div");
+      container.className = "maplibregl-ctrl maplibregl-ctrl-group";
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "maplibregl-ctrl-home";
+      button.title = "Home";
+      button.setAttribute("aria-label", "Home");
+      button.innerHTML = '<span class="maplibregl-ctrl-icon" aria-hidden="true"></span>';
+      button.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (window.bridge && window.bridge.homeClicked) {
+          window.bridge.homeClicked();
+        }
+      });
+      container.appendChild(button);
+      this._container = container;
+      return container;
+    };
+    HomeControl.prototype.onRemove = function () {
+      if (this._container && this._container.parentNode) {
+        this._container.parentNode.removeChild(this._container);
+      }
+      this._map = undefined;
+    };
+    map.addControl(new HomeControl(), "top-right");
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     map.addControl(new maplibregl.AttributionControl({
       compact: false,

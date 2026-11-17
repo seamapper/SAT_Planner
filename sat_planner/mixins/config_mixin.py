@@ -1,6 +1,7 @@
 """
 Config: load/save last-used directories to/from JSON config file.
-_load_last_used_dir, _save_last_used_dir, _load_last_geotiff_dir, _save_last_geotiff_dir,
+_load_last_used_dir, _save_last_used_dir, _load_last_overview_dir, _save_last_overview_dir,
+_load_last_geotiff_dir, _save_last_geotiff_dir,
 _load_last_backscatter_dir, _save_last_backscatter_dir,
 _load_last_backscatter_import_dir, _save_last_backscatter_import_dir,
 _load_last_backscatter_export_dir, _save_last_backscatter_export_dir,
@@ -41,7 +42,7 @@ class ConfigMixin:
     def _default_export_type_options(self):
         return {
             "esri_shapefile": True,
-            "gpkg": False,
+            "gpkg": True,
             "sis_asciiplan": True,
             "gpx": True,
             "text_csv": True,
@@ -81,6 +82,62 @@ class ConfigMixin:
             config['last_used_dir'] = self.last_used_dir
             with open(self.CONFIG_FILENAME, 'w') as f:
                 json.dump(config, f)
+        except Exception:
+            pass
+
+    def _load_last_overview_dir(self):
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, 'r') as f:
+                    config = json.load(f)
+                folder = config.get('last_overview_dir')
+                if folder and os.path.isdir(folder):
+                    self.last_overview_dir = folder
+        except Exception:
+            pass
+
+    def _save_last_overview_dir(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, 'r') as f:
+                    config = json.load(f)
+            config['last_overview_dir'] = self.last_overview_dir
+            with open(self.CONFIG_FILENAME, 'w') as f:
+                json.dump(config, f)
+        except Exception:
+            pass
+
+    def _load_overview_export_options(self):
+        try:
+            defaults = (
+                self._default_overview_export_options()
+                if hasattr(self, "_default_overview_export_options")
+                else {}
+            )
+            self.overview_export_options = dict(defaults)
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as handle:
+                    config = json.load(handle)
+                saved = config.get("overview_export_options") or {}
+                if isinstance(saved, dict):
+                    for key in defaults:
+                        if key in saved:
+                            self.overview_export_options[key] = bool(saved[key])
+        except Exception:
+            self.overview_export_options = {}
+
+    def _save_overview_export_options(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as handle:
+                    config = json.load(handle)
+            config["overview_export_options"] = dict(
+                getattr(self, "overview_export_options", {}) or {}
+            )
+            with open(self.CONFIG_FILENAME, "w") as handle:
+                json.dump(config, handle)
         except Exception:
             pass
 

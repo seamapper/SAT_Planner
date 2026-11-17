@@ -662,6 +662,16 @@ class ExportImportMixin:
         if not hasattr(self, "param_notebook") or not hasattr(self, "shared_import_btn"):
             return
         tab_index = self.param_notebook.currentIndex()
+        group = getattr(self, "shared_survey_io_groupbox", None)
+        overview_index = getattr(self, "overview_tab_index", None)
+        if overview_index is not None and tab_index == overview_index:
+            if group is not None:
+                group.hide()
+            return
+        if group is not None and group.isHidden():
+            group.show()
+        if tab_index < 0 or tab_index >= len(self._SURVEY_IO_TAB_SPECS):
+            return
         spec = self._survey_io_spec(tab_index)
         self.shared_export_name_stack.setCurrentIndex(tab_index)
         self.shared_import_btn.setText(spec["import_label"])

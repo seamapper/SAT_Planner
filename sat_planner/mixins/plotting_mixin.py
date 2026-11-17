@@ -398,6 +398,10 @@ class PlottingMixin:
         view = getattr(self, "map_view", None)
         if view is None or not hasattr(view, "show_plan"):
             return
+        if getattr(self, "_overview_map_active", False):
+            if hasattr(self, "_show_overview_on_map"):
+                self._show_overview_on_map(fit=False)
+            return
         try:
             if getattr(self, "_maplibre_hold_view", False):
                 fit = False
@@ -479,6 +483,9 @@ class PlottingMixin:
         self.show_map_legend_var = bool(checkbox.isChecked()) if checkbox is not None else False
         if hasattr(self, "_save_show_map_legend"):
             self._save_show_map_legend()
+        if getattr(self, "_overview_map_active", False) and hasattr(self, "_sync_overview_legend"):
+            self._sync_overview_legend()
+            return
         self._sync_map_legend_overlay()
 
     def _on_point_labels_checkbox_changed(self, _state=None):
@@ -615,14 +622,15 @@ class PlottingMixin:
             kept_labels.append(text)
         return kept_handles, kept_labels
 
-    def _render_legend_png(self):
-        """Draw the survey-line legend to PNG bytes."""
+    def _render_legend_png(self, handles=None, labels=None):
+        """Draw a line legend to PNG bytes. Defaults to the survey-line labels."""
         import io
 
         from matplotlib.backends.backend_agg import FigureCanvasAgg
         from matplotlib.figure import Figure
 
-        handles, labels = self._legend_entries()
+        if handles is None or labels is None:
+            handles, labels = self._legend_entries()
         if not handles:
             return None
         try:
