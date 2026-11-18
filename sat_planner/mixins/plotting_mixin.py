@@ -467,6 +467,14 @@ class PlottingMixin:
             self._save_show_map_colorbar()
         self._sync_map_colorbar_overlay()
 
+    def _on_show_bathymetry_checkbox_changed(self, _state=None):
+        """Show or hide the planning bathymetry. The colorbar follows this layer."""
+        checkbox = getattr(self, "show_bathymetry_checkbox", None)
+        self.show_bathymetry_var = bool(checkbox.isChecked()) if checkbox is not None else True
+        if hasattr(self, "_save_show_bathymetry"):
+            self._save_show_bathymetry()
+        self._plot_survey_plan(preserve_view_limits=True)
+
     def _on_show_topography_checkbox_changed(self, _state=None):
         """Show or hide a loaded topography grid."""
         checkbox = getattr(self, "show_topography_checkbox", None)
@@ -973,7 +981,13 @@ class PlottingMixin:
             view.set_colorbar("", False)
             return
         url = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
-        view.set_colorbar(url, bool(getattr(self, "show_map_colorbar_var", False)))
+        view.set_colorbar(url, self._map_colorbar_visible())
+
+    def _map_colorbar_visible(self):
+        """The depth scale is shown only while bathymetry and the colorbar are both on."""
+        return bool(getattr(self, "show_map_colorbar_var", False)) and bool(
+            getattr(self, "show_bathymetry_var", True)
+        )
 
     def _axes_frame_grid(self):
         """True when the axes window is a close view of the loaded grid."""
@@ -2285,8 +2299,12 @@ class PlottingMixin:
             if hasattr(self, 'show_imagery_basemap_var') and self.show_imagery_basemap_var:
                 self._load_and_plot_basemap(force_reload=True)
 
-            # Plot GeoTIFF if loaded
-            if self.geotiff_data_array is not None and self.geotiff_extent is not None:
+            # Plot GeoTIFF if loaded and the bathymetry layer is on.
+            if (
+                getattr(self, "show_bathymetry_var", True)
+                and self.geotiff_data_array is not None
+                and self.geotiff_extent is not None
+            ):
                 # Reset flag for logging vertical exaggeration (only log once per plot cycle)
                 self._vert_exag_logged_this_cycle = False
                 depth_mode_bands = self._active_kongsberg_depth_modes()

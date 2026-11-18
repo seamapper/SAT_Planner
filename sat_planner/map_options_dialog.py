@@ -39,6 +39,7 @@ class MapOptionsDialog(QDialog):
         elevation_slope_combo,
         shaded_relief_cmap_combo,
         show_map_colorbar_checkbox,
+        show_bathymetry_checkbox,
         show_topography_checkbox,
         show_map_legend_checkbox,
         show_point_labels_checkbox,
@@ -105,8 +106,9 @@ class MapOptionsDialog(QDialog):
         cmap_row.addWidget(shaded_relief_cmap_combo, 1)
         geotiff_layout.addLayout(cmap_row)
         colorbar_row = QHBoxLayout()
-        colorbar_row.addWidget(show_map_colorbar_checkbox)
+        colorbar_row.addWidget(show_bathymetry_checkbox)
         colorbar_row.addWidget(show_topography_checkbox)
+        colorbar_row.addWidget(show_map_colorbar_checkbox)
         colorbar_row.addStretch()
         geotiff_layout.addLayout(colorbar_row)
 
@@ -179,12 +181,12 @@ class MapOptionsDialog(QDialog):
         self._disable_dialog_button_defaults()
 
     def set_overview_mode(self, overview):
-        """On the overview map, keep imagery, charts, and the legend toggle."""
+        """On the overview map, keep the GeoTIFF controls and hide survey line labels."""
         overview = bool(overview)
         changed = overview != getattr(self, "_overview_mode", None)
         self._point_labels_checkbox.setVisible(not overview)
         self._line_labels_checkbox.setVisible(not overview)
-        self.geotiff_group.setVisible(not overview)
+        self.geotiff_group.setVisible(True)
         self._overview_mode = overview
         hint = self.sizeHint()
         self.resize(max(420, hint.width()), hint.height())

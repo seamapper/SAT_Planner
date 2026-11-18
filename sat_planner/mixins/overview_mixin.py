@@ -617,6 +617,12 @@ class OverviewMixin:
             self.overview_transit_leads,
             self.overview_transit_durations,
         )
+        payload["geotiff_path"] = self._overview_grid_path_for_json(
+            getattr(self, "current_geotiff_path", None), directory
+        )
+        payload["topography_geotiff_path"] = self._overview_grid_path_for_json(
+            getattr(self, "topography_geotiff_path", None), directory
+        )
         try:
             with open(json_path, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, indent=2)
@@ -815,10 +821,73 @@ class OverviewMixin:
             ))
         self.overview_start_check.blockSignals(False)
         self.overview_start_edit.blockSignals(False)
+        warnings.extend(self._overview_restore_grids(payload, os.path.dirname(path)))
         self._fill_overview_list(select=0 if stops else -1)
         self._refresh_overview(fit=True)
         if warnings:
             self._overview_message("\n".join(warnings))
+
+    def _overview_grid_path_for_json(self, path, directory):
+        """Store a grid path beside the overview, or as an absolute path."""
+        if not path:
+            return ""
+        if hasattr(self, "_path_for_params_sidecar"):
+            stored = self._path_for_params_sidecar(path, directory)
+            return stored or ""
+        return os.path.abspath(path)
+
+    def _overview_resolve_grid_path(self, stored, directory):
+        if hasattr(self, "_resolve_import_sidecar_path"):
+            return self._resolve_import_sidecar_path(stored, directory)
+        if stored and os.path.isfile(stored):
+            return stored
+        return None
+
+    def _overview_same_grid(self, path, current):
+        if not path or not current:
+            return False
+        try:
+            return os.path.normcase(os.path.abspath(path)) == os.path.normcase(os.path.abspath(current))
+        except Exception:
+            return False
+
+    def _overview_restore_grids(self, payload, directory):
+        """Load the bathymetry and topography recorded in an overview file."""
+        warnings = []
+        for key, label, current_name, loader in (
+            (
+                "geotiff_path",
+                "Bathymetry grid",
+                "current_geotiff_path",
+                "_load_geotiff_from_path",
+            ),
+            (
+                "topography_geotiff_path",
+                "Topography grid",
+                "topography_geotiff_path",
+                "_load_topography_geotiff_from_path",
+            ),
+        ):
+            if key not in payload:
+                continue
+            stored = payload.get(key) or ""
+            if not str(stored).strip():
+                continue
+            resolved = self._overview_resolve_grid_path(stored, directory)
+            if not resolved or not os.path.isfile(resolved):
+                warnings.append(f"{label} was not found:\n{stored}")
+                continue
+            if self._overview_same_grid(resolved, getattr(self, current_name, None)):
+                continue
+            load = getattr(self, loader, None)
+            if load is None:
+                warnings.append(f"{label} could not be loaded:\n{stored}")
+                continue
+            if loader == "_load_geotiff_from_path":
+                load(resolved, use_background_loading=False, auto_zoom_to_geotiff=False)
+            else:
+                load(resolved, replot=True)
+        return warnings
 
     def _overview_move(self, delta):
         index = self._overview_selected_stop_index()
@@ -1251,7 +1320,7 @@ class OverviewMixin:
         view.fit_bounds(bounds[0], bounds[1], bounds[2], bounds[3])
 
     def _show_overview_on_map(self, fit=False, legend=True):
-        """Draw the sequence on the imagery map. The survey grid stays put underneath."""
+        """Draw the sequence on the map, over the planning GeoTIFF already loaded."""
         self._overview_set_bottom_strip_visible(False)
         view = getattr(self, "map_view", None)
         if view is None or not hasattr(view, "show_plan"):
@@ -1264,12 +1333,10 @@ class OverviewMixin:
             selected = index if kind == "transit" and index >= 0 else None
         collection = map_features(self.overview_stops, selected)
         bounds = feature_bounds(collection) if fit else None
-        if hasattr(view, "set_web_layers"):
-            view.set_web_layers(True, False, 0.0)
-        if hasattr(view, "show_bathymetry"):
-            view.show_bathymetry("", None, None, None, None)
-        if hasattr(view, "set_colorbar"):
-            view.set_colorbar("", False)
+        if hasattr(self, "_sync_maplibre_web_layers"):
+            self._sync_maplibre_web_layers()
+        if hasattr(self, "_sync_maplibre_bathymetry"):
+            self._sync_maplibre_bathymetry()
         if legend:
             self._sync_overview_legend()
         preview = getattr(self, "_overview_pick_preview", None)
@@ -1279,8 +1346,7 @@ class OverviewMixin:
                 "geometry": {"type": "Point", "coordinates": [preview[1], preview[0]]},
                 "properties": {"color": "#111111", "marker": True, "pick": True, "label": "Pick"},
             })
-        # Draw after the imagery change. An earlier plan would be replaced by
-        # the empty picture that clearing the depth grid can leave behind.
+        # The depth picture is sent first. The overview lines are drawn on top of it.
         view.show_plan(collection, bounds)
         if fit and bounds is not None and hasattr(view, "fit_bounds"):
             view.fit_bounds(bounds[0], bounds[1], bounds[2], bounds[3])

@@ -6,25 +6,27 @@ A comprehensive Shipboard Acceptance Testing (SAT) and Quality Assurance Testing
 
 ## Overview
 
-The SAT/QAT Planner is a desktop application designed for planning and visualizing multibeam testing and calibration operations. It supports six main planning modes:
+The SAT/QAT Planner is a desktop application designed for planning and visualizing multibeam testing and calibration operations. It supports six planning modes plus an **Overview** of the whole operation:
 - **Calibration Survey Planning**: Plan pitch, roll, and heading calibration lines
 - **Accuracy Survey Planning**: Generate parallel survey lines with customizable parameters
 - **Line Planning**: Interactive line drawing with real-time elevation profiles
 - **Backscatter Normalization Planning**: Interactive line and area selection for backscatter calibration
 - **Performance (Swath) Survey Planning**: Plan a four-heading swath performance test with optional RX-noise BIST legs relative to swell direction
 - **ADCP Calibration Planning**: Plan dual-circle ADCP calibration tracks with segment-based profiles and import/export
+- **Overview**: Order finished test plans and points, steam between them, and build a dated schedule on the imagery map
 
 ## Features
 
 ### Core Functionality
-- **Multi-tab Interface**: Calibration, Accuracy, Line, Backscatter, Performance, and ADCP tabs (left panel)
+- **Multi-tab Interface**: Calibration, Accuracy, Line, Backscatter, Performance, ADCP, and Overview tabs (left panel)
 - **Shared Import/Export**: A single **Import/Export** group above the tab notebook; **Import Survey** / **Export Survey** labels and the **Export Name** field follow the active tab. When that tab’s plan is complete, the **Export** label and the tab’s **Show … Info** label turn **orange and bold** (the button face does not change). A plan is complete when every part of that test exists: Calibration = pitch, roll, and both heading lines; Accuracy = survey lines, plus the crossline when crossline passes is greater than 0; Line = a line with at least two points; Backscatter = a centerline; Performance = four swath lines; ADCP = both circles
 - **Dark Theme**: Qt GUI always uses a dark theme. The map is a local MapLibre view (bathymetry image, survey lines, imagery, and charts). The profile chart stays matplotlib
 - **Startup Guidance**: The map and profile plots show *Load a Test Plan or Bathymetry to begin planning* until bathymetry or survey geometry is loaded. At startup, **Load Bathymetry GeoTIFF**, **Download Online Bathymetry**, and **Import Survey** are orange and bold until a grid is loaded or a survey plan exists
 - **GeoTIFF Support**: Load and visualize elevation data from GeoTIFF files
 - **Download Online Bathymetry**: **Download Online Bathymetry** in the **Bathymetry/Topography GeoTIFFs** panel opens an interactive dialog (GEBCO 2026, GMRT Topo-Bathy / Observed Only, NCEI multibeam mosaics, WGOM-LI-SNE) with map preview, AOI selection, and GeoTIFF download into the planner
 - **GMRT on Import**: After you **select a survey file**, if the import has **no planning bathymetry** (no `geotiff_path` in metadata, or the saved file is missing), a dialog offers **GMRT download** for the survey area (**Cell Size** 60/120/240/480/960 m matching Download Bathymetry, default **60 m**; buffer; optional Split Topo/Depths). If bathymetry was loaded from the survey, the dialog is skipped. While a download is in flight, **Import Survey** turns orange as **Downloading GMRT - Click to Cancel**; clicking again cancels the worker, removes any partial file, and restores the button
-- **Map Options** (icon, lower-left of the map): Non-modal dialog for Imagery Basemap, NOAA ENC + opacity, EEZs + opacity, Add/Remove Shapefile, **Map Display**, **Color Map**, **Colorbar**, **Topography**, **Legend**, **Point Label** (on by default), **Line Label** (off by default; names are drawn along each line), Vertical Exaggeration, Dyn Res, Contours, **High Res Display** (on by default; sharper on-screen contours), and multi-range Slopes overlay. The icon is orange while the dialog is open and white when it is closed. Qt overlay icons are not included in exported map PNGs
+- **Map Options** (icon, lower-left of the map): Non-modal dialog. **Map Overlay Options** holds Imagery Basemap, NOAA ENC + opacity, EEZs + opacity, Add/Remove Shapefile, then **Legend**, **Point Label** (on by default), and **Line Label** (off by default; names are drawn along each line). **GeoTIFF Overlay Options** holds **Map Display**, **Color Map**, **Bathymetry** (on by default; the colorbar is hidden while it is off), **Topography**, **Colorbar**, Vertical Exaggeration, Dyn Res, Contours, **High Res Display** (on by default; sharper on-screen contours), and multi-range Slopes. On the **Overview** tab the same GeoTIFF controls stay available and the planning grid is drawn under the overview. Point Label and Line Label are hidden there. Switching tabs while the dialog is open places it above the map button again. The icon is orange while the dialog is open and white when it is closed. Qt overlay icons are not included in exported map PNGs
+- **Home** (house icon above the map **+** / **−** buttons): Zooms to the current tab’s survey, or to every stop and transit when Overview is current
 - **Measurement Tool** (icon to the right of Map Options): Toggle distance/heading measure mode; orange thick `+` cursor while active; bottom-strip prompt explains how to deactivate. The icon is orange while measuring and white when idle
 - **Camera** (icon to the right of Measurement): Captures the current map (bathymetry, lines, labels, and the on-screen colorbar and legend when those are on) and asks whether to **Save PNG** or **Copy to clipboard**
 - **Interactive Plotting**: Drag to pan and scroll to zoom with the map’s own gestures. Draw, pick, and drag survey plans on the map (no matplotlib toolbar)
@@ -90,7 +92,7 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - Edit existing lines by dragging waypoints
 - Import/export line plans (DDD, DMS, DMM, LNW, CSV, GeoJSON, Shapefile `.shp`, GeoPackage `.gpkg`; single polyline, no assignment dialog)
 - **GMRT download offered after import** when no planning GeoTIFF is present
-- **Survey Info** dialog and *_info.txt with **Line Plan Waypoints (DMM)** and **Line Plan Waypoints (DDD)** sections (WP1, WP2, …)
+- **Survey Info** dialog and *_info.txt with **Line Plan Waypoints (DMM)** and **Line Plan Waypoints (DDD)** sections (WP1, WP2, …). The run time is written as **Total Time** (same label as the other surveys). Older line plans that say **Estimated Time** still load
 - Calculate survey statistics for drawn lines
 - Export uses shared DDD/DMM/DMS CSV and TXT, asciiplan, LNW via `sat_planner.export_utils`
 - Line export writes `*_params.json` including line survey speed, GeoTIFF path, visualization shapefile path list, and optional **`vert_exag_table`** / **`shaded_relief_cmap`** / **`slope_overlay_bands`** / **`slope_overlay_opacity`**
@@ -112,6 +114,15 @@ The SAT/QAT Planner is a desktop application designed for planning and visualizi
 - **ADCP Plot Control**: Zoom to plan, show direction of travel, clear plan, **Show ADCP Cal Info**
 - Import/export ADCP calibration (same survey file families as other tabs where applicable); `{name}_adcp_params.json` sidecar; **GMRT download offered after import** when no planning GeoTIFF is present
 - Elevation profile follows circle segments when bathymetry is loaded
+
+### Overview
+- **Overview** tab: load finished test plans (**Load Test Plans** reads their info files for time), add map points, and order the operation. The imagery map draws each plan, the steam between stops, and the points. Survey files are not rewritten
+- While Overview is current, the profile, profile options, and activity log are hidden so the map fills the right side. The bathymetry and topography grids already loaded for survey planning stay on the map, and pan and zoom refresh them. **Home** fits every stop and transit. **Map Options** keeps the imagery, chart, shapefile, legend, and GeoTIFF controls
+- Table columns: **#**, **Type**, **Name**, **Time**, **Extra**, **Speed**, **Total**, **Start**, **End**, **Note**. **Extra** (minutes at a stop), a transit **Speed**, **Start**, and **End** are editable. A point **Name** is editable in the table (a blank name becomes **Point**). Plan names stay as loaded
+- **Start** at the top of the tab is the first activity. Editing a row **Start** keeps that activity’s length and shifts it and every later activity (the first row also moves the top Start). Editing an **End** changes that activity’s length and later activities follow. With Start off, typing a time turns the clock on and places the sequence so that boundary lands on the typed time
+- Custom gaps and length changes are stored as minute offsets from the overview start (`lead_min`, `adjust_min`, and transit lead/duration pairs), so changing the beginning Start shifts every custom start and end by the same amount. A transit **End** edit holds until that row’s **Speed** is edited, which then uses distance and speed again
+- **Up** / **Down** reorder stops. **Swap ends** flips a survey’s overview start and end. **Set start** / **Set end** pick a line end on the map; **Use plan ends** restores the file. **Add Point** / **Edit Point** take a name, coordinate (typed or clicked on the map), and time at the point
+- **Open Overview** / **Save Overview** use `{name}.json`. The last open/save folder is remembered (`last_overview_dir`). Save asks for a folder, then a name used as the stem of every file, then which products to write. Choices are remembered (`overview_export_options`; all default on, including GeoPackage and KML). The JSON is always written and records the loaded bathymetry and topography grids (`geotiff_path`, `topography_geotiff_path`). A grid in the overview folder is stored by filename; otherwise the full path is stored. Opening the overview loads those grids when the files are still there. Optional products: ESRI Shapefile (lines and points), GeoPackage, KML (survey lines, transits, and stops), **Table (.csv)** (the activity table), **Info (.txt)** (the schedule under the table), and map PNG high/low. Overview save does not write LNW, SIS ASCIIplan, GPX, profiles, or GeoTIFFs
 
 ### Bathymetry and topography grids
 - The **Bathymetry/Topography GeoTIFFs** panel holds **Load Bathymetry GeoTIFF**, **NaN Value**, **Zoom to Bathymetry GeoTIFF**, **Remove Bathymetry GeoTIFF**, **Download Online Bathymetry**, **Load Topography GeoTIFF**, and **Remove Topography GeoTIFF**
@@ -181,7 +192,8 @@ The application is organized as a package plus a launcher:
   - **`performance_import_dialog.py`** – Assignment dialog for mapping imported segments to Performance swath lines 1–4 and optional BIST 1–4.
   - **`import_survey_dialog.py`** – Post-import GMRT bathymetry prompt when a survey has no planning GeoTIFF.
   - **`dyn_vert_exag_dialog.py`** – Dialog for editing dynamic vertical exaggeration breakpoint tables (Map Options → Vertical Exaggeration).
-  - **`map_options_dialog.py`** – Non-modal Map Options dialog (layers, V.E., Dyn Res, contours, slope ranges, colorbar, legend, labels, High Res Display).
+  - **`map_options_dialog.py`** – Non-modal Map Options dialog. Survey tabs show Map Overlay Options and GeoTIFF Overlay Options, with legend and labels under Add Shapefile. Overview keeps the GeoTIFF controls and hides the survey point and line labels.
+  - **`overview_planner.py`** – Overview stops, transits, schedule clocks, GeoJSON/KML for the overview map, and the overview JSON document.
   - **`maplibre/`** – Local MapLibre page (`index.html`, `maplibre-gl.js`, `maplibre-gl.css`) and the Qt web view that hosts it. MapLibre is loaded from these files, not from a network CDN.
   - **`utils_geo.py`** – Coordinate helpers (e.g. decimal degrees to DDM).
   - **`utils_ui.py`** – UI helpers (message boxes, confirmations).
@@ -202,14 +214,15 @@ The application is organized as a package plus a launcher:
     - **ProfilesMixin** – Crossline, pitch, line-planning, backscatter, performance, and ADCP elevation profiles.
     - **MapInteractionMixin** – Click, scroll, pan, zoom, pick center/pitch/roll, measurement tool.
     - **ExportImportMixin** – Shared Import/Export UI, save/load parameters, export survey files, **Select Export Directory** dialog with **Export Types** button, post-import GMRT prompt.
-    - **ConfigMixin** – Last-used directories, config load/save, persisted **Export Types** options, **`vert_exag_table`**, **`shaded_relief_cmap`**, **`slope_overlay_bands`**, and **`slope_overlay_opacity`** (with migration from legacy `map_png` / `profiles_png` keys).
+    - **OverviewMixin** – Overview tab: load plans and points, order, clocks, map, and save/open.
+    - **ConfigMixin** – Last-used directories (including the overview folder), config load/save, persisted **Export Types** and **overview export** options, **`vert_exag_table`**, **`shaded_relief_cmap`**, **`slope_overlay_bands`**, and **`slope_overlay_opacity`** (with migration from legacy `map_png` / `profiles_png` keys).
 
 ## Installation
 
 ### Option 1: Using Pre-built Executable
 
 Download the latest executable from the [Releases](https://github.com/seamapper/SAT_Planner/releases) page:
-- `SAT_Planner_v2026.46.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
+- `SAT_Planner_v2026.50.exe` (Windows) or newer — version is in the filename (see `sat_planner/constants.py`).
 - `SAT_Planner.app` (macOS) — if available
 
 No installation required - just run the executable or app bundle.
@@ -273,9 +286,9 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 ### Basic Workflow
 
 1. **Load bathymetry** (optional): Click **Load Bathymetry GeoTIFF**, or **Download Online Bathymetry** to fetch a grid (GEBCO, GMRT, NCEI, WGOM, etc.) and load it into the planner. Optionally click **Load Topography GeoTIFF** for a land underlay. Until bathymetry, topography, or a survey plan is loaded, the map and profile show a short *Load a Test Plan or Bathymetry to begin planning* message.
-2. **GeoTIFF display** (optional): Open **Map Options** (map icon) for **Map Display** (Shaded Relief, Shaded Slope, Hillshade, Slope, or a Kongsberg depth-mode entry), **Color Map**, Vertical Exaggeration, Dyn Res, Contours, and Slopes
+2. **GeoTIFF display** (optional): Open **Map Options** (map icon) for **Map Display** (Shaded Relief, Shaded Slope, Hillshade, Slope, or a Kongsberg depth-mode entry), **Color Map**, Vertical Exaggeration, Dyn Res, Contours, and Slopes. **Legend**, **Point Label**, and **Line Label** are in the same dialog, under **Add Shapefile**
 3. **Map overlays / measure / picture** (optional): Use **Map Options** for Imagery Basemap, NOAA ENC, EEZs, and shapefiles; use the **Measurement** icon for distance/heading; use the **Camera** icon to save or copy the current map
-4. **Select Planning Mode**: Choose Calibration, Accuracy, Line, Backscatter, Performance, or ADCP
+4. **Select Planning Mode**: Choose Calibration, Accuracy, Line, Backscatter, Performance, ADCP, or Overview
 5. **Configure Parameters**: Set survey parameters in the appropriate tab
 6. **Generate/Plan** or **Import Survey**: Create survey lines from parameters, draw interactively, or use the shared **Import Survey** button (label follows the active tab). If the imported survey has no planning GeoTIFF, you will be prompted to download GMRT for the survey area.
 7. **View Statistics / test info**: Open the tab’s survey-info dialog (Calibration, Accuracy, Performance, Line, Backscatter, or ADCP)
@@ -339,6 +352,14 @@ Use `.icns` for the app icon (convert `media/CCOM.ico` with `sips -s format icns
 3. Pick **Circle 1 Center**, then follow the orange bold label: **Pick Circle 1 Start**, **Pick Circle 2 Center**, then **Pick Circle 2 Start**. Use **Zoom to ADCP Cal** and **Show ADCP Cal Info** as needed.
 4. Use **Import Survey** / **Export Survey** to share geometry and `{name}_adcp_params.json` metadata.
 
+### Overview
+
+1. Open the **Overview** tab. The map fills the right side.
+2. **Load Test Plans** (info files supply the times) and **Add Point** for stops that are not a survey.
+3. Order the rows with **Up** and **Down**. Turn on **Start** and set the first date and time, or type a **Start** or **End** in the table.
+4. Use **Home** to fit the whole operation. Map Options still has the GeoTIFF controls, so the planning grid can be shown under the lines, and **Legend** draws the line key.
+5. **Save Overview**: pick a folder, a name, and the files to write. **Open Overview** reads the `{name}.json` from that save.
+
 ### Download Online Bathymetry
 
 Click **Download Online Bathymetry** in the **Bathymetry/Topography GeoTIFFs** panel to open the interactive download dialog. Sources include:
@@ -374,15 +395,17 @@ Downloads are always GeoTIFF. The legacy dialog uses its own config: `~/.gmrtgra
 Map controls sit as **Qt icons on the lower-left of the map** (not drawn into export PNGs):
 
 1. **Map Options** (orange while the dialog is open, white when it is closed): Non-modal dialog with:
-   - **Imagery Basemap**, **NOAA ENC Charts** (+ opacity), **Show EEZs** (+ opacity), **Add/Remove Shapefile**
-   - **Map Display**, **Color Map**, **Colorbar**, **Topography**, **Legend**, **Point Label**, and **Line Label**
-   - **Vertical Exaggeration** and **Dyn Res**
-   - **Contours (m)**, **High Res Display**, and **Slopes** (three ranges + shared opacity)
+   - **Map Overlay Options**: **Imagery Basemap**, **NOAA ENC Charts** (+ opacity), **Show EEZs** (+ opacity), **Add/Remove Shapefile**, then **Legend**, **Point Label**, and **Line Label**
+   - **GeoTIFF Overlay Options**: **Map Display**, **Color Map**, **Bathymetry**, **Topography**, **Colorbar**, **Vertical Exaggeration**, **Dyn Res**, **Contours (m)**, **High Res Display**, and **Slopes** (three ranges + shared opacity)
    - Basemap, chart, and EEZ layers update as you pan and zoom
 
 2. **Measurement Tool** (orange while active, white while idle): Click two points for distance and heading; orange thick `+` cursor while measuring. Click the icon again to deactivate (prompt on the bottom strip while active).
 
 3. **Camera** (`camera_t.png`): Capture the current map, then choose **Save PNG** or **Copy to clipboard**. Closing the choice does neither.
+
+4. **Home** (above the map **+** / **−** buttons): Fit the current survey, or the whole overview when that tab is open.
+
+On a survey tab, **Legend**, **Point Label**, and **Line Label** are in **Map Overlay Options**, under **Add Shapefile**. On Overview, **Point Label** and **Line Label** are hidden and the GeoTIFF controls stay with the overlay options. Switching tabs while the dialog is open places it above the map button.
 
 Bottom strip (under the profile): **Select Profile** on the left when the Calibration or Accuracy tab is open; prompts (for example while measuring); **Show Slope Profile** and **About This Program** on the right.
 
@@ -391,12 +414,15 @@ Bottom strip (under the profile): **Select Profile** on the left when the Calibr
 The application saves configuration in:
 - `~/.cal_ref_planner_config.json` (user preferences), including:
   - Last used directories
-  - **`export_type_options`**: per-format export toggles (`esri_shapefile`, `gpkg`, `sis_asciiplan`, `gpx`, `text_csv`, `text_txt`, `hypack_lnw`, `map_png_high`, `map_png_low`, `profiles_png_high`, `profiles_png_low`, `geotiff_full`, `geotiff_view`; most default **on**, `gpkg` / `geotiff_full` / `geotiff_view` default **off**; Full and View are mutually exclusive)
+  - **`export_type_options`**: per-format export toggles (`esri_shapefile`, `gpkg`, `sis_asciiplan`, `gpx`, `text_csv`, `text_txt`, `hypack_lnw`, `map_png_high`, `map_png_low`, `profiles_png_high`, `profiles_png_low`, `geotiff_full`, `geotiff_view`; most default **on**, including **`gpkg`**; `geotiff_full` / `geotiff_view` default **off**; Full and View are mutually exclusive)
+  - **`last_overview_dir`** / **`last_overview_name`**: last folder and name used for an overview
+  - **`overview_export_options`**: overview save toggles (`esri_shapefile`, `gpkg`, `kml`, `table_csv`, `info_txt`, `map_png_high`, `map_png_low`; all default **on**)
   - **`gmrt_import_options`**: post-import GMRT prompt settings (`download`, `cell_size_m` = 60|120|240|480|960 default **60**, `buffer_mode` = `degrees`|`percent` default **percent**, `buffer_deg` default **0.5**, `buffer_percent` default **20** applied to the visible map-frame extent, `split_topo_depths`)
   - **`vert_exag_table`**: Shaded Relief dynamic vertical exaggeration breakpoints (elevation range minima and **Shaded Relief** / **Shaded Relief Dyn** values); default breakpoints 0, 20, 50, 200, 1000 m
   - **`shaded_relief_cmap`**: Last selected Shaded Relief elevation overlay colormap (default **rainbow**)
   - **`slope_overlay_bands`**: Three slope-overlay ranges (min/max degrees or null, color hex)
   - **`slope_overlay_opacity`**: Slope overlay opacity percent (default **40**)
+  - **`show_bathymetry`**: Planning bathymetry layer (default **on**). While it is off, the on-screen colorbar stays hidden
   - **`show_map_colorbar`** / **`show_map_legend`**: On-screen colorbar and legend (default **off** when the key is missing)
   - **`show_point_labels`**: Waypoint labels on the map (default **on**)
   - **`show_line_labels`**: Names drawn along survey lines (default **off**)
@@ -419,7 +445,7 @@ In the **Select Export Directory** dialog, click **Export Types** to enable or d
 | Toggle | Product |
 |--------|---------|
 | ESRI Shapefile | `.shp` (+ sidecars) |
-| GeoPackage | `.gpkg` (default off) |
+| GeoPackage | `.gpkg` (default on) |
 | SIS ASCIIplan | asciiplan file |
 | GPX | `.gpx` (and per-test GPX where applicable) |
 | Text (.csv) | DDD, DMM, DMS CSV |
@@ -486,6 +512,7 @@ The application will run with limited functionality if geospatial libraries aren
 
 ## Version History
 
+- **v2026.50**: **Overview** tab for ordering finished test plans and points, with transits, an editable activity table (extra time, transit speed, point name, start and end clocks), and a schedule. Clocks are saved as minute offsets from the overview start. **Save Overview** writes `{name}.json` plus the chosen shapefile, GeoPackage, KML, table CSV, info text, and map PNGs; the folder and checkboxes are remembered. The overview map fills the right side and draws the planning bathymetry and topography under the operation; pan and zoom refresh that grid, and Map Options keeps the GeoTIFF controls. **Home** sits above the zoom buttons and fits the current survey or the overview. Map Options puts **Legend**, **Point Label**, and **Line Label** under Add Shapefile; on Overview the point and line labels are hidden. Switching tabs while the dialog is open places it again. Survey **GeoPackage** export defaults on. New line plans write **Total Time**; older **Estimated Time** files still load.
 - **v2026.46**: The main map is a local **MapLibre** view (drag to pan, scroll to zoom). Bathymetry, contours, and slope bands are one image from Python; survey lines stay vectors. **Map Options**, **Measurement**, and **Camera** icons sit at the lower left (orange when active, white when idle). The camera saves a PNG or copies the picture. **Select Profile** is under the profile on the left. Moving across the profile tracks that distance on the map and on the elevation and slope curves, and fills the map tooltip. Line-survey segments can be labeled **LS1**, **LS2**, …. **High Res Display**, **Point Label**, and **Line Label** are in Map Options and are remembered. The one-file Windows exe starts Qt WebEngine from `pyi_rth_geospatial_dll.py` so the window opens.
 - **v2026.45**: **Bathymetry/Topography GeoTIFFs** panel (**Load / Zoom to / Remove Bathymetry GeoTIFF**, **Load Topography GeoTIFF**, **Remove Topography GeoTIFF**). Land is a gray hillshade underlay under imagery and bathymetry; its path is stored as **`topography_geotiff_path`** and reloaded on import. **Map Display** (in Map Options) adds **EM712 / EM304 / EM124 Depth Modes** (hillshade plus named mode colors; color bar runs shallow-to-deep from top to bottom; hover shows **Depth Mode**). When a test plan is complete, the **Export** label and that tab’s **Show … Info** label turn orange and bold. ADCP pick buttons highlight the next step’s label (Circle 1 Start, Circle 2 Center, Circle 2 Start) in orange bold text.
 - **v2026.43**: Portable `geotiff_path` in survey packages. When an exported GeoTIFF (or other planning raster) lives in the same directory as `*_params.json` / GeoJSON, the path is stored as a relative filename so the package can be moved; import resolves relative paths (and missing absolute paths) against the survey directory. Same treatment for `backscatter_geotiff_path` when applicable. Post-import GMRT prompt **Cell Size (m)** pulldown (60/120/240/480/960, default **60**) matching Download Bathymetry presets; selection persists in `gmrt_import_options`.

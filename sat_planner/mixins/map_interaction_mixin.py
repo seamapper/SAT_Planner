@@ -241,13 +241,13 @@ class MapInteractionMixin:
             legend = getattr(self, "_map_legend_png_bytes", None)
             if not legend and hasattr(self, "_render_legend_png"):
                 legend = self._render_legend_png()
-            paste(legend, 10, None, None, 56, 0.46, 0.42)
-        if getattr(self, "show_map_colorbar_var", False):
+            paste(legend, None, 10, 10, None, 0.46, 0.42)
+        if getattr(self, "show_map_colorbar_var", False) and getattr(self, "show_bathymetry_var", True):
             colorbar = getattr(self, "_map_colorbar_png_bytes", None)
             if not colorbar and hasattr(self, "_render_colorbar_png"):
                 colorbar = self._render_colorbar_png()
-            bar_height_frac = max(0.3, (widget_h - 110) / float(widget_h))
-            paste(colorbar, None, 72, 10, None, 0.35, bar_height_frac)
+            bar_height_frac = max(0.3, (widget_h - 150) / float(widget_h))
+            paste(colorbar, None, None, 10, 28, 0.28, bar_height_frac)
         buffer = io.BytesIO()
         base.save(buffer, format="PNG")
         return buffer.getvalue()
@@ -1958,6 +1958,7 @@ class MapInteractionMixin:
 
     def _on_maplibre_move(self, lon, lat):
         if getattr(self, "_overview_map_active", False):
+            self._on_overview_map_hover(lon, lat)
             return
         try:
             event = _MapLibreEvent(getattr(self, "ax", None), lon, lat)
@@ -1971,6 +1972,28 @@ class MapInteractionMixin:
             self._push_maplibre_hover()
         except Exception:
             traceback.print_exc()
+
+    def _on_overview_map_hover(self, lon, lat):
+        """Show latitude, longitude, depth, and slope while the overview map is open."""
+        try:
+            lon = float(lon)
+            lat = float(lat)
+        except (TypeError, ValueError):
+            return
+        if getattr(self, "ax", None) is None:
+            return
+        has_geotiff = getattr(self, "geotiff_data_array", None) is not None
+        if not has_geotiff and not getattr(self, "show_eez_var", False):
+            if getattr(self, "mouse_hover_info_text", None) is not None:
+                self.mouse_hover_info_text.set_visible(False)
+                self.mouse_hover_info_text = None
+            self._push_maplibre_hover()
+            return
+        self._hover_mouse_lat = lat
+        self._hover_mouse_lon = lon
+        self._update_default_hover_info(lat, lon, include_measurement=False)
+        self._schedule_eez_hover_lookup(lat, lon)
+        self._push_maplibre_hover()
 
     def _maplibre_motion_needs_redraw(self):
         return any(getattr(self, name, False) for name in (
@@ -1987,8 +2010,6 @@ class MapInteractionMixin:
         """Keep the hidden axes on the view the user just panned or zoomed to."""
         ax = getattr(self, "ax", None)
         if ax is None or getattr(self, "_maplibre_refreshing_view", False):
-            return
-        if getattr(self, "_overview_map_active", False):
             return
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()

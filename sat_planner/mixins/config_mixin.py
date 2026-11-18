@@ -15,6 +15,7 @@ _load_vert_exag_table, _save_vert_exag_table, _default_vert_exag_table,
 _vert_exag_table_for_params, _add_vert_exag_table_to_params, _apply_vert_exag_table_from_params,
 _load_shaded_relief_cmap, _save_shaded_relief_cmap, _normalize_shaded_relief_cmap,
 _load_show_map_colorbar, _save_show_map_colorbar,
+_load_show_bathymetry, _save_show_bathymetry,
 _load_show_topography, _save_show_topography,
 _load_show_imagery_basemap, _save_show_imagery_basemap,
 _load_show_map_legend, _save_show_map_legend,
@@ -622,6 +623,35 @@ class ConfigMixin:
                 with open(self.CONFIG_FILENAME, "r") as f:
                     config = json.load(f)
             config["show_map_colorbar"] = bool(getattr(self, "show_map_colorbar_var", False))
+            with open(self.CONFIG_FILENAME, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+
+    def _load_show_bathymetry(self):
+        """Planning bathymetry layer. Missing config means on."""
+        self.show_bathymetry_var = True
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+                if "show_bathymetry" in config:
+                    self.show_bathymetry_var = bool(config.get("show_bathymetry"))
+        except Exception:
+            self.show_bathymetry_var = True
+        checkbox = getattr(self, "show_bathymetry_checkbox", None)
+        if checkbox is not None:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(self.show_bathymetry_var)
+            checkbox.blockSignals(False)
+
+    def _save_show_bathymetry(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            config["show_bathymetry"] = bool(getattr(self, "show_bathymetry_var", True))
             with open(self.CONFIG_FILENAME, "w") as f:
                 json.dump(config, f, indent=2)
         except Exception:

@@ -77,11 +77,17 @@
     .maplibregl-ctrl-group button.maplibregl-ctrl-home .maplibregl-ctrl-icon {
       background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='29' height='29' fill='%23333' viewBox='0 0 29 29'%3E%3Cpath d='M14.5 7.4 7 13.7V21.6h5.2v-4.6h4.6V21.6H22V13.7z'/%3E%3C/svg%3E");
     }
+    .maplibregl-ctrl-bottom-left {
+      bottom: 46px;
+    }
+    .maplibregl-ctrl-bottom-left .maplibregl-ctrl {
+      margin: 0 0 10px 8px;
+    }
     #legend {
       display: none;
       position: absolute;
-      left: 10px;
-      bottom: 56px;
+      top: 10px;
+      right: 10px;
       z-index: 3;
       max-width: 46%;
       max-height: 42%;
@@ -92,9 +98,11 @@
       display: none;
       position: absolute;
       right: 10px;
-      top: 72px;
+      bottom: 28px;
       z-index: 3;
-      max-height: calc(100% - 110px);
+      max-height: calc(100% - 150px);
+      max-width: 28%;
+      height: auto;
       width: auto;
       pointer-events: none;
       background: rgba(255, 255, 255, 0.94);
@@ -242,8 +250,8 @@
       }
       this._map = undefined;
     };
-    map.addControl(new HomeControl(), "top-right");
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    map.addControl(new HomeControl(), "bottom-left");
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-left");
     map.addControl(new maplibregl.AttributionControl({
       compact: false,
       customAttribution: "MapLibre GL"

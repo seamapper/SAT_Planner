@@ -144,6 +144,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # On-screen colorbar. Off until the user turns it on; the choice is saved.
         self.show_map_colorbar_var = False
+        # Planning bathymetry is drawn until the user hides it. The choice is saved.
+        self.show_bathymetry_var = True
         # Loaded topography is drawn until the user hides it. The choice is saved.
         self.show_topography_var = True
         # On-screen legend. Off until the user turns it on; the choice is saved.
@@ -601,6 +603,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_vert_exag_table()
         self._load_shaded_relief_cmap()
         self._load_show_map_colorbar()
+        self._load_show_bathymetry()
         self._load_show_topography()
         self._load_show_imagery_basemap()
         self._load_show_map_legend()
@@ -969,6 +972,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.elevation_slope_combo,
                 self.shaded_relief_cmap_combo,
                 self.show_map_colorbar_checkbox,
+                self.show_bathymetry_checkbox,
                 self.show_topography_checkbox,
                 self.show_map_legend_checkbox,
                 self.show_point_labels_checkbox,
@@ -1235,7 +1239,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         if dialog is not None:
             overview = hasattr(self, "_overview_tab_is_current") and self._overview_tab_is_current()
             changed = dialog.set_overview_mode(overview)
-            if dialog.isVisible() and changed and not overview:
+            if dialog.isVisible() and changed:
                 self._place_map_options_dialog()
 
         # Always update profile plot to show the profile for the active tab
@@ -1366,6 +1370,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.show_map_colorbar_checkbox = QCheckBox("Colorbar")
         self.show_map_colorbar_checkbox.setChecked(self.show_map_colorbar_var)
         self.show_map_colorbar_checkbox.stateChanged.connect(self._on_map_colorbar_checkbox_changed)
+        self.show_bathymetry_checkbox = QCheckBox("Bathymetry")
+        self.show_bathymetry_checkbox.setChecked(self.show_bathymetry_var)
+        self.show_bathymetry_checkbox.setToolTip(
+            "Show or hide the planning bathymetry. The colorbar stays hidden while this is off."
+        )
+        self.show_bathymetry_checkbox.stateChanged.connect(self._on_show_bathymetry_checkbox_changed)
         self.show_topography_checkbox = QCheckBox("Topography")
         self.show_topography_checkbox.setChecked(self.show_topography_var)
         self.show_topography_checkbox.stateChanged.connect(self._on_show_topography_checkbox_changed)
