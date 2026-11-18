@@ -37,6 +37,7 @@ from sat_planner.overview_planner import (
     document_to_stops,
     clear_end_overrides,
     end_snap_limit_m,
+    activity_time_features,
     feature_bounds,
     format_clock,
     format_schedule,
@@ -349,6 +350,27 @@ class OverviewMixin:
                 return row
         return -1
 
+    def _overview_select_activity(self, activity):
+        """Select the table row for a survey, point, or transit clicked on the map."""
+        text = str(activity or "")
+        kind, separator, index_text = text.partition(":")
+        if not separator or kind not in ("stop", "transit"):
+            return
+        try:
+            index = int(index_text)
+        except ValueError:
+            return
+        row = self._overview_table_row_for(kind, index)
+        table = getattr(self, "overview_list", None)
+        if row < 0 or table is None:
+            return
+        if table.currentRow() == row:
+            return
+        table.setCurrentCell(row, 0)
+        item = table.item(row, 0)
+        if item is not None:
+            table.scrollToItem(item)
+
     def _overview_edit_point(self):
         index = self._overview_selected_stop_index()
         if index < 0 or index >= len(self.overview_stops):
@@ -476,9 +498,7 @@ class OverviewMixin:
         self._overview_point_pick = None
         self._overview_pick_preview = None
         self._overview_point_dialog_widget = None
-        view = getattr(self, "map_view", None)
-        if view is not None and hasattr(view, "set_cursor"):
-            view.set_cursor("")
+        self._restore_overview_map_cursor()
         if self._overview_tab_is_current() or getattr(self, "_overview_map_active", False):
             self._show_overview_on_map(fit=False)
 
@@ -984,11 +1004,20 @@ class OverviewMixin:
             hint.hide()
         if not was:
             return
+        self._restore_overview_map_cursor()
+        if redraw and (self._overview_tab_is_current() or getattr(self, "_overview_map_active", False)):
+            self._show_overview_on_map(fit=False)
+
+    def _restore_overview_map_cursor(self):
+        """Put the measurement cross back after a point or end pick finishes."""
+        if getattr(self, "measurement_tool_mode", False) and hasattr(self, "_measurement_cursor"):
+            canvas = getattr(self, "canvas_widget", None)
+            if canvas is not None:
+                canvas.setCursor(self._measurement_cursor())
+                return
         view = getattr(self, "map_view", None)
         if view is not None and hasattr(view, "set_cursor"):
             view.set_cursor("")
-        if redraw and (self._overview_tab_is_current() or getattr(self, "_overview_map_active", False)):
-            self._show_overview_on_map(fit=False)
 
     def _overview_remove(self):
         index = self._overview_selected_stop_index()
@@ -1298,6 +1327,8 @@ class OverviewMixin:
         self._overview_cancel_end_pick(redraw=False)
         if was:
             self._overview_map_active = False
+            if hasattr(self, "_publish_measurement_line"):
+                self._publish_measurement_line()
             if hasattr(self, "_sync_maplibre_plan"):
                 self._sync_maplibre_plan(fit=True, terrain=True)
 
@@ -1319,6 +1350,15 @@ class OverviewMixin:
             return
         view.fit_bounds(bounds[0], bounds[1], bounds[2], bounds[3])
 
+    def _on_overview_activity_time_checkbox_changed(self, _state=None):
+        """Show or hide the time in the middle of each overview activity."""
+        checkbox = getattr(self, "show_overview_activity_time_checkbox", None)
+        self.show_overview_activity_time_var = bool(checkbox.isChecked()) if checkbox is not None else False
+        if hasattr(self, "_save_show_overview_activity_time"):
+            self._save_show_overview_activity_time()
+        if getattr(self, "_overview_map_active", False):
+            self._show_overview_on_map(fit=False, legend=False)
+
     def _show_overview_on_map(self, fit=False, legend=True):
         """Draw the sequence on the map, over the planning GeoTIFF already loaded."""
         self._overview_set_bottom_strip_visible(False)
@@ -1339,6 +1379,13 @@ class OverviewMixin:
             self._sync_maplibre_bathymetry()
         if legend:
             self._sync_overview_legend()
+        if getattr(self, "show_overview_activity_time_var", False):
+            collection["features"].extend(activity_time_features(
+                self.overview_stops,
+                self._overview_default_speed(),
+                getattr(self, "overview_transit_speeds", None),
+                getattr(self, "overview_transit_durations", None),
+            ))
         preview = getattr(self, "_overview_pick_preview", None)
         if preview is not None:
             collection["features"].append({
@@ -1348,6 +1395,8 @@ class OverviewMixin:
             })
         # The depth picture is sent first. The overview lines are drawn on top of it.
         view.show_plan(collection, bounds)
+        if hasattr(self, "_publish_measurement_line"):
+            self._publish_measurement_line()
         if fit and bounds is not None and hasattr(view, "fit_bounds"):
             view.fit_bounds(bounds[0], bounds[1], bounds[2], bounds[3])
 

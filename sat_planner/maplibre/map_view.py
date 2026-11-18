@@ -225,9 +225,9 @@ class _MapBridge(QObject):
         super().__init__(view)
         self._view = view
 
-    @pyqtSlot(float, float, float)
-    def mapClick(self, lon, lat, button):
-        self._view.mapClicked.emit(float(lon), float(lat), int(button))
+    @pyqtSlot(float, float, float, str)
+    def mapClick(self, lon, lat, button, activity):
+        self._view.mapClicked.emit(float(lon), float(lat), int(button), str(activity or ""))
 
     @pyqtSlot(float, float, float)
     def mapPress(self, lon, lat, button):
@@ -253,7 +253,7 @@ class _MapBridge(QObject):
 class MapLibreView(QWebEngineView):
     """MapLibre map with a Qt channel for pointer events and drawing commands."""
 
-    mapClicked = pyqtSignal(float, float, int)
+    mapClicked = pyqtSignal(float, float, int, str)
     mapMoved = pyqtSignal(float, float)
     mapPressed = pyqtSignal(float, float, int)
     mapReleased = pyqtSignal(float, float, int)
@@ -270,6 +270,8 @@ class MapLibreView(QWebEngineView):
         self._pending_hover = None
         self._pending_colorbar = None
         self._pending_legend = None
+        self._pending_measurement = None
+        self._measurement_cleared = False
         self._pending_web_layers = None
         self._pending_fit = None
         page = _MapPage(self)
@@ -317,6 +319,10 @@ class MapLibreView(QWebEngineView):
             self.set_colorbar(*self._pending_colorbar)
         if self._pending_legend is not None:
             self.set_legend(*self._pending_legend)
+        if self._pending_measurement is not None:
+            self.set_measurement(*self._pending_measurement)
+        elif getattr(self, "_measurement_cleared", False):
+            self.set_measurement(None, None, None, None, False)
 
     def show_plan(self, collection, bounds=None):
         """Draw a GeoJSON feature collection and optionally fit the view to bounds."""
@@ -384,6 +390,32 @@ class MapLibreView(QWebEngineView):
             "if (window.setProfileCursor) window.setProfileCursor({lon}, {lat});".format(
                 lon=json.dumps(lon),
                 lat=json.dumps(lat),
+            )
+        )
+
+    def set_measurement(self, start_lon, start_lat, end_lon, end_lat, dashed=False):
+        """Draw or clear the orange measurement line on the overview map."""
+        if start_lon is None or start_lat is None or end_lon is None or end_lat is None:
+            self._pending_measurement = None
+            self._measurement_cleared = True
+            self._run("if (window.setMeasurement) window.setMeasurement(NaN, NaN, NaN, NaN, false);")
+            return
+        self._measurement_cleared = False
+        self._pending_measurement = (
+            float(start_lon),
+            float(start_lat),
+            float(end_lon),
+            float(end_lat),
+            bool(dashed),
+        )
+        lon1, lat1, lon2, lat2, dashed = self._pending_measurement
+        self._run(
+            "if (window.setMeasurement) window.setMeasurement({lon1}, {lat1}, {lon2}, {lat2}, {dashed});".format(
+                lon1=json.dumps(lon1),
+                lat1=json.dumps(lat1),
+                lon2=json.dumps(lon2),
+                lat2=json.dumps(lat2),
+                dashed="true" if dashed else "false",
             )
         )
 

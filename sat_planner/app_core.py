@@ -9,8 +9,11 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QScrollArea, QTabWidget, QFileDialog, QMessageBox, QDialog,
                              QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar, QGroupBox,
                              QDoubleSpinBox)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QEvent, QSize, QPoint
-from PyQt6.QtGui import QTextCursor, QColor, QTextCharFormat, QPixmap, QIcon
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QEvent, QSize, QPoint, QPointF, QRectF
+from PyQt6.QtGui import (
+    QTextCursor, QColor, QTextCharFormat, QPixmap, QIcon, QImage, QPainter,
+    QPainterPath, QPen, QBrush,
+)
 import matplotlib
 matplotlib.use('QtAgg')
 import matplotlib.pyplot as plt
@@ -154,6 +157,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.show_point_labels_var = True
         # Names drawn along survey lines. Off until the user turns them on.
         self.show_line_labels_var = False
+        # Time in the middle of each overview activity. Off until the user turns it on.
+        self.show_overview_activity_time_var = False
 
         # Contour display variables
         self.show_contours_var = False  # Default to off
@@ -609,6 +614,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_show_map_legend()
         self._load_show_point_labels()
         self._load_show_line_labels()
+        self._load_show_overview_activity_time()
         self._load_high_res_display()
         if hasattr(self, "_update_shaded_relief_cmap_button"):
             self._update_shaded_relief_cmap_button()
@@ -823,15 +829,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         self.map_options_dialog = None
         self._map_options_icon_active = False
-        self._map_overlay_icon_size = 36
+        # Same 29px square as the MapLibre Home and zoom buttons.
+        self._map_overlay_icon_size = 29
         icon_size = self._map_overlay_icon_size
-        btn_style = "QPushButton { border: none; background: transparent; padding: 0px; }"
-
-        # The orange glyph is in the "off" file and the white glyph is in the "on" file.
-        map_options_off = self._media_path("layers_t_on.png")
-        map_options_on = self._media_path("layers_t_off.png")
-        self._map_options_icon_off = QIcon(map_options_off) if os.path.exists(map_options_off) else QIcon()
-        self._map_options_icon_on = QIcon(map_options_on) if os.path.exists(map_options_on) else QIcon()
 
         # The map is a native WebEngine window and covers ordinary child widgets.
         # A tool window is a separate window, so these buttons stay above the map and receive clicks.
@@ -842,47 +842,86 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._map_button_bar.setObjectName("mapButtonBar")
         self._map_button_bar.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self._map_button_bar.setStyleSheet(
-            "QWidget#mapButtonBar { background: rgba(247, 245, 242, 230); border: 1px solid rgba(0, 0, 0, 40); border-radius: 6px; }"
-            "QPushButton { border: none; background: transparent; padding: 0px; }"
+            "QWidget#mapButtonBar {"
+            " background: #ffffff;"
+            " border: 2px solid rgba(0, 0, 0, 0.10);"
+            " border-radius: 4px;"
+            "}"
+            "QWidget#mapButtonBar QPushButton {"
+            " background: #ffffff;"
+            " border: none;"
+            " border-radius: 0px;"
+            " padding: 0px;"
+            "}"
+            "QWidget#mapButtonBar QPushButton:hover {"
+            " background: rgba(0, 0, 0, 0.05);"
+            "}"
+            "QWidget#mapButtonBar QPushButton[active=\"true\"] {"
+            " background: rgba(0, 0, 0, 0.10);"
+            "}"
+            "QWidget#mapButtonBar QPushButton#mapOptionsBtn {"
+            " border-top-left-radius: 4px;"
+            " border-bottom-left-radius: 4px;"
+            "}"
+            "QWidget#mapButtonBar QPushButton#mapCameraBtn {"
+            " border-top-right-radius: 4px;"
+            " border-bottom-right-radius: 4px;"
+            "}"
+            "QWidget#mapButtonBar QFrame#mapButtonDivider {"
+            " background: #dddddd;"
+            " border: none;"
+            "}"
         )
         bar_layout = QHBoxLayout(self._map_button_bar)
-        bar_layout.setContentsMargins(4, 4, 4, 4)
-        bar_layout.setSpacing(4)
+        bar_layout.setContentsMargins(2, 2, 2, 2)
+        bar_layout.setSpacing(0)
 
+        def add_divider():
+            line = QFrame(self._map_button_bar)
+            line.setObjectName("mapButtonDivider")
+            line.setFixedSize(1, icon_size)
+            bar_layout.addWidget(line)
+
+        self._map_options_icon_off = self._black_figure_icon("layers")
         self.map_options_btn = QPushButton(self._map_button_bar)
+        self.map_options_btn.setObjectName("mapOptionsBtn")
         self.map_options_btn.setFlat(True)
+        self.map_options_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.map_options_btn.setFixedSize(icon_size, icon_size)
         self.map_options_btn.setIconSize(QSize(icon_size, icon_size))
+        self.map_options_btn.setIcon(self._map_options_icon_off)
         self.map_options_btn.setToolTip("Layer Options")
-        self.map_options_btn.setStyleSheet(btn_style)
+        self.map_options_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.map_options_btn.clicked.connect(self._toggle_map_options_dialog)
         self._set_map_options_icon_active(False)
         bar_layout.addWidget(self.map_options_btn)
+        add_divider()
 
-        measure_off = self._media_path("dht_t_grey_on.png")
-        measure_on = self._media_path("dht_t_grey_off.png")
-        self._measurement_icon_off = QIcon(measure_off) if os.path.exists(measure_off) else QIcon()
-        self._measurement_icon_on = QIcon(measure_on) if os.path.exists(measure_on) else QIcon()
-
+        self._measurement_icon_off = self._black_figure_icon("measure")
         self.measurement_tool_btn = QPushButton(self._map_button_bar)
+        self.measurement_tool_btn.setObjectName("mapMeasureBtn")
         self.measurement_tool_btn.setFlat(True)
+        self.measurement_tool_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.measurement_tool_btn.setFixedSize(icon_size, icon_size)
         self.measurement_tool_btn.setIconSize(QSize(icon_size, icon_size))
+        self.measurement_tool_btn.setIcon(self._measurement_icon_off)
         self.measurement_tool_btn.setToolTip("Measurement Tool")
-        self.measurement_tool_btn.setStyleSheet(btn_style)
+        self.measurement_tool_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.measurement_tool_btn.clicked.connect(self._toggle_measurement_tool_mode)
         if hasattr(self, "_update_measurement_button_state"):
             self._update_measurement_button_state()
         bar_layout.addWidget(self.measurement_tool_btn)
+        add_divider()
 
-        camera_path = self._media_path("camera_t.png")
         self.map_snapshot_btn = QPushButton(self._map_button_bar)
+        self.map_snapshot_btn.setObjectName("mapCameraBtn")
         self.map_snapshot_btn.setFlat(True)
+        self.map_snapshot_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.map_snapshot_btn.setFixedSize(icon_size, icon_size)
         self.map_snapshot_btn.setIconSize(QSize(icon_size, icon_size))
-        self.map_snapshot_btn.setIcon(QIcon(camera_path) if os.path.exists(camera_path) else QIcon())
+        self.map_snapshot_btn.setIcon(self._black_figure_icon("camera"))
         self.map_snapshot_btn.setToolTip("Save or copy a picture of the current map")
-        self.map_snapshot_btn.setStyleSheet(btn_style)
+        self.map_snapshot_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.map_snapshot_btn.clicked.connect(self._save_map_display_snapshot)
         bar_layout.addWidget(self.map_snapshot_btn)
         self._map_button_bar.adjustSize()
@@ -894,13 +933,99 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         if hasattr(self, "map_view"):
             self.map_view.loadFinished.connect(lambda _ok: self._position_map_overlay_buttons())
 
-    def _set_map_options_icon_active(self, active):
-        """Switch Map Options icon between off and on states."""
-        self._map_options_icon_active = bool(active)
-        if not hasattr(self, "map_options_btn"):
+    def _black_figure_icon(self, kind, box=29):
+        """Black figure on a transparent square, the same size as a MapLibre control."""
+        screen = self.screen() or QApplication.primaryScreen()
+        dpr = screen.devicePixelRatio() if screen is not None else 1.0
+        canvas_px = max(box, int(round(box * dpr)))
+        image = QImage(canvas_px, canvas_px, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(0)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.scale(canvas_px / 29.0, canvas_px / 29.0)
+        color = QColor(51, 51, 51)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(color))
+        if kind == "layers":
+            self._paint_layers_figure(painter)
+        elif kind == "measure":
+            self._paint_measure_figure(painter, color)
+        else:
+            self._paint_camera_figure(painter)
+        painter.end()
+        pixmap = QPixmap.fromImage(image)
+        pixmap.setDevicePixelRatio(dpr)
+        return QIcon(pixmap)
+
+    def _paint_layers_figure(self, painter):
+        """Three stacked sheets, drawn in the same 29px box as the Home icon."""
+        path = QPainterPath()
+        path.moveTo(14.5, 5.2)
+        path.lineTo(23.2, 9.6)
+        path.lineTo(14.5, 14.0)
+        path.lineTo(5.8, 9.6)
+        path.closeSubpath()
+        path.moveTo(6.0, 13.2)
+        path.lineTo(14.5, 17.6)
+        path.lineTo(23.0, 13.2)
+        path.lineTo(23.0, 15.5)
+        path.lineTo(14.5, 19.9)
+        path.lineTo(6.0, 15.5)
+        path.closeSubpath()
+        path.moveTo(6.0, 17.4)
+        path.lineTo(14.5, 21.8)
+        path.lineTo(23.0, 17.4)
+        path.lineTo(23.0, 19.7)
+        path.lineTo(14.5, 24.1)
+        path.lineTo(6.0, 19.7)
+        path.closeSubpath()
+        painter.drawPath(path)
+
+    def _paint_measure_figure(self, painter, color):
+        """Distance line with end points and an arrow, in the 29px control box."""
+        pen = QPen(color)
+        pen.setWidthF(2.1)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(7.6, 21.2), QPointF(18.6, 10.2))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPointF(7.6, 21.2), 2.5, 2.5)
+        painter.drawEllipse(QPointF(21.2, 7.8), 2.5, 2.5)
+        arrow = QPainterPath()
+        arrow.moveTo(15.0, 6.6)
+        arrow.lineTo(21.4, 8.6)
+        arrow.lineTo(17.6, 13.6)
+        arrow.closeSubpath()
+        painter.drawPath(arrow)
+
+    def _paint_camera_figure(self, painter):
+        """Camera silhouette with a clear lens and flash, in the 29px control box."""
+        body = QPainterPath()
+        body.addRoundedRect(QRectF(5.2, 10.4, 18.6, 12.6), 2.2, 2.2)
+        bump = QPainterPath()
+        bump.addRoundedRect(QRectF(10.2, 7.0, 6.4, 4.0), 1.1, 1.1)
+        painter.drawPath(body)
+        painter.drawPath(bump)
+        painter.drawEllipse(QPointF(14.5, 16.7), 4.0, 4.0)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        painter.drawEllipse(QPointF(14.5, 16.7), 2.15, 2.15)
+        painter.drawEllipse(QPointF(20.4, 14.0), 1.15, 1.15)
+
+    def _set_map_tool_button_active(self, button, active):
+        """Shade a map tool button while leaving its black figure in place."""
+        if button is None:
             return
-        icon = self._map_options_icon_on if self._map_options_icon_active else self._map_options_icon_off
-        self.map_options_btn.setIcon(icon)
+        button.setProperty("active", bool(active))
+        style = button.style()
+        style.unpolish(button)
+        style.polish(button)
+        button.update()
+
+    def _set_map_options_icon_active(self, active):
+        """Mark the Map Options button when its dialog is open."""
+        self._map_options_icon_active = bool(active)
+        self._set_map_tool_button_active(getattr(self, "map_options_btn", None), active)
 
     def _position_map_overlay_buttons(self):
         """Keep map overlay icons anchored to the lower-left of the map frame."""
@@ -977,6 +1102,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 self.show_map_legend_checkbox,
                 self.show_point_labels_checkbox,
                 self.show_line_labels_checkbox,
+                self.show_overview_activity_time_checkbox,
                 self.dyn_vert_exag_btn,
                 self.dynamic_resolution_btn,
             )
@@ -1390,6 +1516,14 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.show_line_labels_checkbox.setChecked(self.show_line_labels_var)
         self.show_line_labels_checkbox.setToolTip("Show or hide a name drawn along each survey line")
         self.show_line_labels_checkbox.stateChanged.connect(self._on_line_labels_checkbox_changed)
+        self.show_overview_activity_time_checkbox = QCheckBox("Activity Time")
+        self.show_overview_activity_time_checkbox.setChecked(self.show_overview_activity_time_var)
+        self.show_overview_activity_time_checkbox.setToolTip(
+            "Show how long each survey, point, and transit takes, in the middle of that activity"
+        )
+        self.show_overview_activity_time_checkbox.stateChanged.connect(
+            self._on_overview_activity_time_checkbox_changed
+        )
         self.shaded_relief_cmap_combo.setMinimumWidth(0)
         self.shaded_relief_cmap_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         if hasattr(self, "_update_shaded_relief_cmap_button"):

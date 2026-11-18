@@ -21,6 +21,7 @@ _load_show_imagery_basemap, _save_show_imagery_basemap,
 _load_show_map_legend, _save_show_map_legend,
 _load_show_point_labels, _save_show_point_labels,
 _load_show_line_labels, _save_show_line_labels,
+_load_show_overview_activity_time, _save_show_overview_activity_time,
 _load_high_res_display, _save_high_res_display,
 _shaded_relief_cmap_label, _load_slope_overlay_bands, _save_slope_overlay_bands,
 _load_depth_overlay_bands, _save_depth_overlay_bands,
@@ -797,6 +798,35 @@ class ConfigMixin:
                 with open(self.CONFIG_FILENAME, "r") as f:
                     config = json.load(f)
             config["show_line_labels"] = bool(getattr(self, "show_line_labels_var", False))
+            with open(self.CONFIG_FILENAME, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+
+    def _load_show_overview_activity_time(self):
+        """Time labels on overview activities. Missing config means off."""
+        self.show_overview_activity_time_var = False
+        try:
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+                if "show_overview_activity_time" in config:
+                    self.show_overview_activity_time_var = bool(config.get("show_overview_activity_time"))
+        except Exception:
+            self.show_overview_activity_time_var = False
+        checkbox = getattr(self, "show_overview_activity_time_checkbox", None)
+        if checkbox is not None:
+            checkbox.blockSignals(True)
+            checkbox.setChecked(self.show_overview_activity_time_var)
+            checkbox.blockSignals(False)
+
+    def _save_show_overview_activity_time(self):
+        try:
+            config = {}
+            if os.path.exists(self.CONFIG_FILENAME):
+                with open(self.CONFIG_FILENAME, "r") as f:
+                    config = json.load(f)
+            config["show_overview_activity_time"] = bool(getattr(self, "show_overview_activity_time_var", False))
             with open(self.CONFIG_FILENAME, "w") as f:
                 json.dump(config, f, indent=2)
         except Exception:

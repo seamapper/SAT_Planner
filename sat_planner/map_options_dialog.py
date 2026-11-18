@@ -44,6 +44,7 @@ class MapOptionsDialog(QDialog):
         show_map_legend_checkbox,
         show_point_labels_checkbox,
         show_line_labels_checkbox,
+        show_overview_activity_time_checkbox,
         dyn_vert_exag_btn,
         dynamic_resolution_btn,
     ):
@@ -81,10 +82,12 @@ class MapOptionsDialog(QDialog):
         label_row.addWidget(show_map_legend_checkbox)
         label_row.addWidget(show_point_labels_checkbox)
         label_row.addWidget(show_line_labels_checkbox)
+        label_row.addWidget(show_overview_activity_time_checkbox)
         label_row.addStretch()
         layers_layout.addLayout(label_row)
         self._point_labels_checkbox = show_point_labels_checkbox
         self._line_labels_checkbox = show_line_labels_checkbox
+        self._activity_time_checkbox = show_overview_activity_time_checkbox
         layout.addWidget(layers_group)
 
         self.geotiff_group = QGroupBox("GeoTIFF Overlay Options")
@@ -186,6 +189,7 @@ class MapOptionsDialog(QDialog):
         changed = overview != getattr(self, "_overview_mode", None)
         self._point_labels_checkbox.setVisible(not overview)
         self._line_labels_checkbox.setVisible(not overview)
+        self._activity_time_checkbox.setVisible(overview)
         self.geotiff_group.setVisible(True)
         self._overview_mode = overview
         hint = self.sizeHint()

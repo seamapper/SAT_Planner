@@ -258,10 +258,10 @@ class MapInteractionMixin:
         if btn is None:
             return
         active = bool(getattr(self, "measurement_tool_mode", False))
-        icon_off = getattr(self, "_measurement_icon_off", None)
-        icon_on = getattr(self, "_measurement_icon_on", None)
-        if icon_off is not None and icon_on is not None:
-            btn.setIcon(icon_on if active else icon_off)
+        icon = getattr(self, "_measurement_icon_off", None)
+        if icon is not None and not icon.isNull():
+            btn.setIcon(icon)
+            self._set_map_tool_button_active(btn, active)
         elif active:
             btn.setText("Click to Stop")
             btn.setStyleSheet("QPushButton { color: rgb(255, 165, 0); font-weight: bold; }")
@@ -289,6 +289,56 @@ class MapInteractionMixin:
             except Exception:
                 pass
         self.measurement_line_artist = None
+        self._publish_measurement_line()
+
+    def _publish_measurement_line(self):
+        """Draw the measurement line on the overview map. Survey maps copy it with the plan."""
+        view = getattr(self, "map_view", None)
+        if view is None or not hasattr(view, "set_measurement"):
+            return
+        show = bool(getattr(self, "_overview_map_active", False) and getattr(self, "measurement_tool_mode", False))
+        segment = self._measurement_line_lonlat() if show else None
+        if segment is None:
+            if getattr(self, "_measurement_overlay_shown", False):
+                view.set_measurement(None, None, None, None, False)
+                self._measurement_overlay_shown = False
+            return
+        start_lon, start_lat, end_lon, end_lat, dashed = segment
+        view.set_measurement(start_lon, start_lat, end_lon, end_lat, dashed)
+        self._measurement_overlay_shown = True
+
+    def _measurement_line_lonlat(self):
+        """(start lon, start lat, end lon, end lat, dashed) for the current measurement."""
+        line = getattr(self, "measurement_line_artist", None)
+        if line is not None:
+            try:
+                xs = np.asarray(line.get_xdata(), dtype=float).ravel()
+                ys = np.asarray(line.get_ydata(), dtype=float).ravel()
+            except (TypeError, ValueError, AttributeError):
+                xs = ys = np.array([])
+            if xs.size >= 2 and ys.size >= 2 and np.isfinite([xs[0], ys[0], xs[-1], ys[-1]]).all():
+                return (
+                    float(xs[0]),
+                    float(ys[0]),
+                    float(xs[-1]),
+                    float(ys[-1]),
+                    self._line_style_dashed(line.get_linestyle()),
+                )
+        start = getattr(self, "measurement_start_point", None)
+        if not start:
+            return None
+        end = getattr(self, "measurement_end_point", None)
+        if end is None:
+            end_lat = getattr(self, "_hover_mouse_lat", None)
+            end_lon = getattr(self, "_hover_mouse_lon", None)
+            if end_lat is None or end_lon is None:
+                end = start
+            else:
+                end = (end_lat, end_lon)
+            dashed = True
+        else:
+            dashed = False
+        return float(start[1]), float(start[0]), float(end[1]), float(end[0]), dashed
 
     def _draw_measurement_line_overlay(self, start_lat, start_lon, end_lat, end_lon, locked=False):
         """Create/update the on-map measurement line."""
@@ -300,17 +350,23 @@ class MapInteractionMixin:
             "alpha": 0.9,
             "linestyle": "-" if locked else "--",
         }
-        if line is not None and line in self.ax.lines:
+        ax = getattr(self, "ax", None)
+        if ax is None:
+            self._publish_measurement_line()
+            return
+        if line is not None and line in ax.lines:
             line.set_data([start_lon, end_lon], [start_lat, end_lat])
             line.set_linestyle(line_kwargs["linestyle"])
             line.set_color(line_kwargs["color"])
             line.set_linewidth(line_kwargs["linewidth"])
             line.set_alpha(line_kwargs["alpha"])
             line.set_zorder(line_kwargs["zorder"])
+            self._publish_measurement_line()
             return
-        self.measurement_line_artist, = self.ax.plot(
+        self.measurement_line_artist, = ax.plot(
             [start_lon, end_lon], [start_lat, end_lat], **line_kwargs
         )
+        self._publish_measurement_line()
 
     def _measurement_cursor(self):
         """Return a thick orange cross cursor centered on its hotspot."""
@@ -349,6 +405,12 @@ class MapInteractionMixin:
             self._clear_measurement_line_overlay()
             self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
         self._update_measurement_button_state()
+        if getattr(self, "_overview_map_active", False):
+            lat = getattr(self, "_hover_mouse_lat", None)
+            lon = getattr(self, "_hover_mouse_lon", None)
+            if lat is not None and lon is not None:
+                self._update_default_hover_info(lat, lon)
+                self._push_maplibre_hover()
         self._draw_visible_map_canvas()
 
     def _toggle_pick_center_mode(self):
@@ -1847,10 +1909,28 @@ class MapInteractionMixin:
         if hasattr(self, "_sync_maplibre_web_layers"):
             self._sync_maplibre_web_layers()
 
-    def _on_maplibre_click(self, lon, lat, button):
+    def _overview_map_pick_active(self):
+        """True while an overview point or survey-end click is waiting."""
+        return bool(getattr(self, "_overview_point_pick", None) or getattr(self, "_overview_end_pick", None))
+
+    def _on_maplibre_click(self, lon, lat, button, activity=""):
         if getattr(self, "_overview_map_active", False):
-            if int(button) == 1 and hasattr(self, "_overview_apply_map_click"):
+            if (
+                int(button) == 1
+                and getattr(self, "measurement_tool_mode", False)
+                and not self._overview_map_pick_active()
+            ):
+                try:
+                    self._on_plot_click(_MapLibreEvent(getattr(self, "ax", None), lon, lat, button))
+                    self._push_maplibre_hover()
+                except Exception:
+                    traceback.print_exc()
+                return
+            if int(button) == 1 and self._overview_map_pick_active() and hasattr(self, "_overview_apply_map_click"):
                 self._overview_apply_map_click(float(lon), float(lat))
+                return
+            if int(button) == 1 and activity and hasattr(self, "_overview_select_activity"):
+                self._overview_select_activity(activity)
             return
         try:
             self._on_plot_click(_MapLibreEvent(getattr(self, "ax", None), lon, lat, button))
@@ -1982,16 +2062,23 @@ class MapInteractionMixin:
             return
         if getattr(self, "ax", None) is None:
             return
+        measuring = bool(getattr(self, "measurement_tool_mode", False)) and not self._overview_map_pick_active()
         has_geotiff = getattr(self, "geotiff_data_array", None) is not None
-        if not has_geotiff and not getattr(self, "show_eez_var", False):
+        if not measuring and not has_geotiff and not getattr(self, "show_eez_var", False):
             if getattr(self, "mouse_hover_info_text", None) is not None:
                 self.mouse_hover_info_text.set_visible(False)
                 self.mouse_hover_info_text = None
             self._push_maplibre_hover()
             return
+        if measuring:
+            start_point = getattr(self, "measurement_start_point", None)
+            end_point = getattr(self, "measurement_end_point", None)
+            if start_point is not None and end_point is None:
+                start_lat, start_lon = start_point
+                self._draw_measurement_line_overlay(start_lat, start_lon, lat, lon, locked=False)
         self._hover_mouse_lat = lat
         self._hover_mouse_lon = lon
-        self._update_default_hover_info(lat, lon, include_measurement=False)
+        self._update_default_hover_info(lat, lon, include_measurement=measuring)
         self._schedule_eez_hover_lookup(lat, lon)
         self._push_maplibre_hover()
 

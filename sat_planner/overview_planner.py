@@ -605,6 +605,73 @@ def legend_items(stops):
     return items
 
 
+def activity_time_features(stops, speed_kts, transit_speeds=None, transit_durations=None):
+    """A centered time label for each survey, point, and transit.
+
+    A stop's time is its plan time plus extra time, including a clock adjustment.
+    A transit uses its duration, or the duration stored for that leg.
+    """
+    durations = transit_durations or {}
+    features = []
+    for index, stop in enumerate(stops):
+        center = _stop_label_center(stop)
+        if center is not None:
+            lon, lat, place = center
+            features.append(_time_label_feature(lon, lat, stop.occupied_minutes(), place))
+        if index + 1 >= len(stops):
+            continue
+        nxt = stops[index + 1]
+        _arrive, depart = stop.endpoints()
+        arrive, _depart = nxt.endpoints()
+        if depart is None or arrive is None:
+            continue
+        leg = transit_leg(stop, nxt, speed_kts, transit_speeds)
+        minutes = leg["minutes"]
+        if leg["key"] in durations:
+            minutes = max(0.0, float(durations[leg["key"]]))
+        lon = (float(depart[1]) + float(arrive[1])) / 2.0
+        lat = (float(depart[0]) + float(arrive[0])) / 2.0
+        features.append(_time_label_feature(lon, lat, minutes, "center"))
+    return features
+
+
+def _stop_label_center(stop):
+    """(lon, lat, place) at the middle of a stop, or None when it has no position."""
+    if stop.kind == "point":
+        if stop.lat is None or stop.lon is None:
+            return None
+        return float(stop.lon), float(stop.lat), "below"
+    coords = []
+    for line in stop.lines or []:
+        for coord in line:
+            if len(coord) >= 2:
+                try:
+                    lon = float(coord[0])
+                    lat = float(coord[1])
+                except (TypeError, ValueError):
+                    continue
+                coords.append((lon, lat))
+    if coords:
+        lons = [item[0] for item in coords]
+        lats = [item[1] for item in coords]
+        return (min(lons) + max(lons)) / 2.0, (min(lats) + max(lats)) / 2.0, "center"
+    arrive, _depart = stop.endpoints()
+    if arrive is None:
+        return None
+    return float(arrive[1]), float(arrive[0]), "below"
+
+
+def _time_label_feature(lon, lat, minutes, place):
+    return {
+        "type": "Feature",
+        "geometry": {"type": "Point", "coordinates": [lon, lat]},
+        "properties": {
+            "label": _format_minutes(minutes),
+            "labelPlace": place,
+        },
+    }
+
+
 def map_features(stops, selected_index=None):
     """GeoJSON for the imagery map: plan lines, stop numbers, and dashed transits."""
     features = []
@@ -615,20 +682,20 @@ def map_features(stops, selected_index=None):
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "LineString", "coordinates": line},
-                "properties": {"color": color, "width": width, "dash": False},
+                "properties": {"color": color, "width": width, "dash": False, "activity": f"stop:{index}"},
             })
         arrive, depart = stop.endpoints()
         if arrive is not None:
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": [arrive[1], arrive[0]]},
-                "properties": {"color": color, "marker": True, "label": str(index + 1)},
+                "properties": {"color": color, "marker": True, "label": str(index + 1), "activity": f"stop:{index}"},
             })
         if index == selected_index and stop.kind == "plan" and depart is not None:
             features.append({
                 "type": "Feature",
                 "geometry": {"type": "Point", "coordinates": [depart[1], depart[0]]},
-                "properties": {"color": color, "marker": True, "pick": True, "label": "End"},
+                "properties": {"color": color, "marker": True, "pick": True, "label": "End", "activity": f"stop:{index}"},
             })
         if index + 1 >= len(stops):
             continue
@@ -644,7 +711,7 @@ def map_features(stops, selected_index=None):
                     [next_arrive[1], next_arrive[0]],
                 ],
             },
-            "properties": {"color": "#4a4a4a", "width": 2, "dash": True},
+            "properties": {"color": "#4a4a4a", "width": 2, "dash": True, "activity": f"transit:{index}"},
         })
     return {"type": "FeatureCollection", "features": features}
 
