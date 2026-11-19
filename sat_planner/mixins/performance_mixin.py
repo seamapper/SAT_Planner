@@ -1360,6 +1360,8 @@ class PerformanceMixin:
                     self.performance_test_lines_data = swath
                     self.performance_bist_segments_data = bist if bist else []
                     self.performance_profile_line = swath[0]
+                    if hasattr(self, "_apply_layer_visibility_from_document"):
+                        self._apply_layer_visibility_from_document(geojson_data.get("properties") or {}, overview=False)
                     nan_cutoff = (geojson_data.get("properties") or {}).get("geotiff_nan_value")
                     if nan_cutoff is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
                         self._set_geotiff_nan_cutoff(nan_cutoff, update_entry=True)

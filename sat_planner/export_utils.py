@@ -5,6 +5,7 @@ Shared survey export writers. All CSV/TXT formats use the same row conventions:
 - DDD/DMM/DMS TXT rows: (point_label, lat, lon) in decimal degrees.
 - SIS asciiplan: lines = list of (line_name, points) with points = list of (lat, lon).
 - Hypack LNW: lines = list of (line_name, points) with points = list of (lat, lon); written in UTM.
+- KML: lines = list of (line_name, points) with points = list of (lat, lon).
 """
 import csv
 import datetime
@@ -243,6 +244,49 @@ def write_gpx(path, lines, *, creator="SAT Planner", encoding='utf-8'):
                 f.write("    </trkseg>\n")
                 f.write("  </trk>\n")
             f.write("</gpx>\n")
+    except OSError:
+        return False
+    return True
+
+
+def write_kml(path, lines, *, document_name=None, encoding="utf-8"):
+    """Write a KML document with one line placemark per survey line.
+
+    lines: list of (line_name, points) where points is list of (lat, lon).
+    Returns True if a placemark was written, False otherwise.
+    """
+    remove_export_file(path)
+    placemarks = []
+    for line_name, pts in lines or []:
+        coords = []
+        for lat, lon in pts or []:
+            try:
+                coords.append(f"{float(lon):.8f},{float(lat):.8f},0")
+            except (TypeError, ValueError):
+                continue
+        if len(coords) < 2:
+            continue
+        placemarks.append(
+            "    <Placemark>\n"
+            f"      <name>{escape(str(line_name))}</name>\n"
+            "      <LineString>\n"
+            "        <tessellate>1</tessellate>\n"
+            f"        <coordinates>{' '.join(coords)}</coordinates>\n"
+            "      </LineString>\n"
+            "    </Placemark>\n"
+        )
+    if not placemarks:
+        return False
+    title = escape(str(document_name or os.path.splitext(os.path.basename(path))[0]))
+    try:
+        with open(path, "w", encoding=encoding) as handle:
+            handle.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+            handle.write('<kml xmlns="http://www.opengis.net/kml/2.2">\n')
+            handle.write("  <Document>\n")
+            handle.write(f"    <name>{title}</name>\n")
+            handle.write("".join(placemarks))
+            handle.write("  </Document>\n")
+            handle.write("</kml>\n")
     except OSError:
         return False
     return True

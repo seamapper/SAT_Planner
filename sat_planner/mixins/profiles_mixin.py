@@ -1109,5 +1109,7 @@ class ProfilesMixin:
                 self._draw_adcp_profile()
             else:
                 self._show_profile_planning_placeholder()
+        elif current_tab == getattr(self, "survey_tab_index", None) and hasattr(self, "_draw_survey_selected_profile"):
+            self._draw_survey_selected_profile()
         else:
             self._show_profile_planning_placeholder()

@@ -141,17 +141,13 @@ class OverviewMixin:
         file_row = QHBoxLayout()
         load_btn = QPushButton("Load Test Plans")
         load_btn.clicked.connect(self._overview_load_plans)
+        load_btn.setMinimumWidth(0)
         add_btn = QPushButton("Add Point")
         add_btn.setToolTip("Type a coordinate, or click the map while the point dialog is open.")
         add_btn.clicked.connect(self._overview_add_point)
-        open_btn = QPushButton("Open Overview")
-        open_btn.clicked.connect(self._overview_open)
-        save_btn = QPushButton("Save Overview")
-        save_btn.setToolTip("Choose a folder and a name, then pick which files to write.")
-        save_btn.clicked.connect(self._overview_save)
-        for button in (load_btn, add_btn, open_btn, save_btn):
-            button.setMinimumWidth(0)
-            file_row.addWidget(button)
+        add_btn.setMinimumWidth(0)
+        file_row.addWidget(load_btn, 1)
+        file_row.addWidget(add_btn, 1)
         layout.addLayout(file_row)
 
         speed_row = QHBoxLayout()
@@ -552,82 +548,206 @@ class OverviewMixin:
         cleaned = "".join(ch if ch not in '<>:"/\\|?*' and ord(ch) >= 32 else "_" for ch in (text or "").strip())
         return cleaned.strip(" .")
 
+    def _import_overview(self):
+        self._overview_open()
+
+    def _export_overview(self):
+        self._overview_save()
+
+    def _overview_export_name(self):
+        entry = getattr(self, "overview_export_name_entry", None)
+        if entry is None:
+            return ""
+        return self._overview_clean_name(entry.text())
+
     def _overview_save(self):
-        directory = QFileDialog.getExistingDirectory(
-            self,
-            "Select Overview Folder",
-            self._overview_directory(),
-        )
-        if not directory:
+        """Export with the same folder picker and Export Types as the other tabs."""
+        if not getattr(self, "overview_stops", None):
+            self._overview_message("Add a test plan or point before exporting.")
             return
-        chosen = self._overview_save_dialog()
-        if chosen is None:
+        export_dir = self._select_export_directory(getattr(self, "last_used_dir", None) or self._overview_directory())
+        if not export_dir:
             return
-        name, options = chosen
-        self.overview_export_options = dict(options)
-        if hasattr(self, "_save_overview_export_options"):
-            self._save_overview_export_options()
-        written, errors = self._overview_write_export(directory, name, options)
-        self.last_overview_dir = directory
-        self._overview_update_config({
-            "last_overview_dir": directory,
-            "last_overview_name": name,
-            "overview_export_options": options,
-        })
-        lines = [f"Saved the overview in {directory}:"]
-        lines.extend(f"- {os.path.basename(path)}" for path in written)
-        if errors:
-            lines.append("")
-            lines.append("Some files could not be written:")
-            lines.extend(f"- {os.path.basename(path)}: {message}" for path, message in errors)
-        self._overview_message("\n".join(lines))
+        self.last_used_dir = export_dir
+        if hasattr(self, "_save_last_used_dir"):
+            self._save_last_used_dir()
+        name = self._overview_export_name()
+        if not name:
+            name = f"Overview_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            entry = getattr(self, "overview_export_name_entry", None)
+            if entry is not None:
+                entry.setText(name)
+        enabled = self._export_type_enabled if hasattr(self, "_export_type_enabled") else (lambda _key: True)
+        try:
+            from sat_planner import export_utils
 
-    def _overview_save_dialog(self):
-        """Name and export choices. Returns (name, options) or None."""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Save Overview")
-        dialog.setMinimumWidth(420)
-        layout = QVBoxLayout(dialog)
-        form = QFormLayout()
-        name_edit = QLineEdit(str(self._overview_read_config().get("last_overview_name") or ""))
-        name_edit.setPlaceholderText("Overview name")
-        form.addRow("Name", name_edit)
-        layout.addLayout(form)
-        saved = self._overview_export_options()
-        boxes = {}
-        for key, label in _OVERVIEW_EXPORT_CHOICES:
-            box = QCheckBox(label)
-            box.setChecked(bool(saved.get(key)))
-            layout.addWidget(box)
-            boxes[key] = box
-        note = QLabel(
-            "The overview is always saved as a .json file using this name. "
-            "Table is the activity table. Info is the schedule at the bottom of this tab."
-        )
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
+            written = []
+            errors = []
+            exported_geotiff_path = (
+                self._maybe_export_survey_geotiff(export_dir, name)
+                if hasattr(self, "_maybe_export_survey_geotiff")
+                else None
+            )
+            self._overview_write_json(export_dir, name, written, errors)
+            if enabled("text_csv"):
+                self._overview_write_table_csv(export_dir, name, written, errors)
+                rows = self._overview_coordinate_rows()
+                if rows:
+                    export_utils.write_ddd_csv(os.path.join(export_dir, f"{name}_DDD.csv"), rows)
+                    export_utils.write_dmm_csv(os.path.join(export_dir, f"{name}_DMM.csv"), rows)
+                    export_utils.write_dms_csv(os.path.join(export_dir, f"{name}_DMS.csv"), rows)
+                    for suffix in ("_DDD.csv", "_DMM.csv", "_DMS.csv"):
+                        path = os.path.join(export_dir, f"{name}{suffix}")
+                        if os.path.isfile(path):
+                            written.append(path)
+            if enabled("text_txt"):
+                rows = self._overview_coordinate_rows()
+                if rows:
+                    export_utils.write_ddd_txt(os.path.join(export_dir, f"{name}_DDD.txt"), rows)
+                    export_utils.write_dmm_txt(os.path.join(export_dir, f"{name}_DMM.txt"), rows)
+                    export_utils.write_dms_txt(os.path.join(export_dir, f"{name}_DMS.txt"), rows)
+                    for suffix in ("_DDD.txt", "_DMM.txt", "_DMS.txt"):
+                        path = os.path.join(export_dir, f"{name}{suffix}")
+                        if os.path.isfile(path):
+                            written.append(path)
+            named_lines = self._overview_named_lines()
+            vector_options = {
+                "esri_shapefile": enabled("esri_shapefile"),
+                "gpkg": enabled("gpkg"),
+            }
+            if vector_options["esri_shapefile"] or vector_options["gpkg"]:
+                self._overview_write_vectors(export_dir, name, vector_options, written, errors)
+            if enabled("sis_asciiplan") and named_lines:
+                ascii_path = os.path.join(export_dir, f"{name}.asciiplan")
+                export_utils.write_asciiplan(ascii_path, named_lines)
+                written.append(ascii_path)
+            if enabled("gpx") and named_lines:
+                gpx_path = os.path.join(export_dir, f"{name}.gpx")
+                if export_utils.write_gpx(gpx_path, named_lines, creator="SAT Planner Overview"):
+                    written.append(gpx_path)
+            if enabled("kml"):
+                self._overview_write_kml(export_dir, name, written, errors)
+            if enabled("hypack_lnw") and named_lines:
+                points = [point for _label, line in named_lines for point in line]
+                zone, hemisphere = export_utils.compute_utm_zone_from_points(points)
+                suffix = f"_UTM{zone}{'N' if hemisphere == 'North' else 'S'}"
+                lnw_path = os.path.join(export_dir, f"{name}{suffix}.lnw")
+                if export_utils.write_lnw(lnw_path, named_lines):
+                    written.append(lnw_path)
+            if self._export_map_png_enabled() if hasattr(self, "_export_map_png_enabled") else True:
+                map_path = os.path.join(export_dir, f"{name}_map.png")
+                self._overview_save_map_png(map_path)
+                if hasattr(self, "_map_png_export_basenames"):
+                    for basename in self._map_png_export_basenames(map_path):
+                        written.append(os.path.join(export_dir, basename))
+                elif os.path.isfile(map_path):
+                    written.append(map_path)
+            self._overview_write_info_txt(export_dir, name, written, errors)
+            if exported_geotiff_path and os.path.isfile(exported_geotiff_path):
+                written.append(exported_geotiff_path)
+            self.last_overview_dir = export_dir
+            self._overview_update_config({
+                "last_overview_dir": export_dir,
+                "last_overview_name": name,
+            })
+            lines = [f"Overview exported to {export_dir}:"]
+            lines.extend(f"- {os.path.basename(path)}" for path in written)
+            if errors:
+                lines.append("")
+                lines.append("Some files could not be written:")
+                lines.extend(f"- {os.path.basename(path)}: {message}" for path, message in errors)
+            if hasattr(self, "_show_message"):
+                self._show_message("info", "Export Overview", "\n".join(lines))
+            else:
+                self._overview_message("\n".join(lines))
+        except Exception as exc:
+            if hasattr(self, "_show_message"):
+                self._show_message("error", "Export Error", f"Failed to export the overview.\n{exc}")
+            else:
+                self._overview_message(f"Failed to export the overview.\n{exc}")
 
-        def accept_named():
-            if not self._overview_clean_name(name_edit.text()):
-                self._overview_message("Enter a name for the overview.")
-                return
-            dialog.accept()
+    def _overview_named_lines(self):
+        return [(label, points) for _kind, label, points in overview_export_lines(self.overview_stops)]
 
-        buttons.accepted.connect(accept_named)
-        buttons.rejected.connect(dialog.reject)
-        layout.addWidget(buttons)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return None
-        name = self._overview_clean_name(name_edit.text())
-        options = {key: box.isChecked() for key, box in boxes.items()}
-        return name, options
+    def _overview_coordinate_rows(self):
+        rows = []
+        for line_number, (_kind, label, points) in enumerate(overview_export_lines(self.overview_stops), start=1):
+            for point_number, (lat, lon) in enumerate(points, start=1):
+                rows.append((line_number, label, f"P{point_number}", lat, lon))
+        return rows
 
-    def _overview_write_export(self, directory, name, options):
-        written = []
-        errors = []
+    def _overview_plot_export_artists(self):
+        """Draw the overview on the planning axes so the map PNG matches the other exports."""
+        ax = getattr(self, "ax", None)
+        if ax is None:
+            return []
+        artists = []
+        for feature in (map_features(self.overview_stops).get("features") or []):
+            geometry = feature.get("geometry") or {}
+            props = feature.get("properties") or {}
+            color = props.get("color") or "#1f4e79"
+            kind = geometry.get("type")
+            coords = geometry.get("coordinates") or []
+            if kind == "LineString" and len(coords) >= 2:
+                artists.extend(ax.plot(
+                    [coord[0] for coord in coords],
+                    [coord[1] for coord in coords],
+                    color=color,
+                    linewidth=props.get("width") or 2,
+                    linestyle=(0, (4, 2)) if props.get("dash") else "solid",
+                    zorder=40,
+                ))
+            elif kind == "Point" and props.get("marker") and len(coords) >= 2:
+                artists.extend(ax.plot(
+                    [coords[0]],
+                    [coords[1]],
+                    marker="o",
+                    linestyle="None",
+                    color=color,
+                    markersize=8,
+                    zorder=41,
+                ))
+                label = props.get("label")
+                if label:
+                    artists.append(ax.annotate(
+                        str(label),
+                        (coords[0], coords[1]),
+                        color=color,
+                        fontsize=8,
+                        zorder=42,
+                    ))
+        return artists
+
+    def _overview_save_map_png(self, path):
+        ax = getattr(self, "ax", None)
+        artists = []
+        previous = None
+        if ax is not None:
+            previous = (ax.get_xlim(), ax.get_ylim())
+            bounds = feature_bounds(map_features(self.overview_stops))
+            self._setting_limits_programmatically = True
+            if bounds is not None:
+                ax.set_xlim(bounds[0], bounds[2])
+                ax.set_ylim(bounds[1], bounds[3])
+            artists = self._overview_plot_export_artists()
+        try:
+            if hasattr(self, "_hide_map_hover_tooltip_for_export"):
+                self._hide_map_hover_tooltip_for_export()
+            if hasattr(self, "_save_export_map_png"):
+                self._save_export_map_png(path, dpi=300, bbox_inches="tight", facecolor="white")
+        finally:
+            for artist in artists:
+                try:
+                    artist.remove()
+                except Exception:
+                    pass
+            if ax is not None and previous is not None:
+                self._setting_limits_programmatically = True
+                ax.set_xlim(previous[0])
+                ax.set_ylim(previous[1])
+                self._setting_limits_programmatically = False
+
+    def _overview_write_json(self, directory, name, written, errors):
         json_path = os.path.join(directory, f"{name}.json")
         payload = stops_to_document(
             self.overview_stops,
@@ -643,24 +763,14 @@ class OverviewMixin:
         payload["topography_geotiff_path"] = self._overview_grid_path_for_json(
             getattr(self, "topography_geotiff_path", None), directory
         )
+        if hasattr(self, "_stamp_layer_visibility"):
+            self._stamp_layer_visibility(payload, overview=True)
         try:
             with open(json_path, "w", encoding="utf-8") as handle:
                 json.dump(payload, handle, indent=2)
             written.append(json_path)
         except OSError as exc:
             errors.append((json_path, str(exc)))
-            return written, errors
-        if options.get("table_csv"):
-            self._overview_write_table_csv(directory, name, written, errors)
-        if options.get("info_txt"):
-            self._overview_write_info_txt(directory, name, written, errors)
-        if options.get("esri_shapefile") or options.get("gpkg"):
-            self._overview_write_vectors(directory, name, options, written, errors)
-        if options.get("kml"):
-            self._overview_write_kml(directory, name, written, errors)
-        if options.get("map_png_high") or options.get("map_png_low"):
-            self._overview_write_map_png(directory, name, options, written, errors)
-        return written, errors
 
     def _overview_write_table_csv(self, directory, name, written, errors):
         path = os.path.join(directory, f"{name}.csv")
@@ -841,7 +951,14 @@ class OverviewMixin:
             ))
         self.overview_start_check.blockSignals(False)
         self.overview_start_edit.blockSignals(False)
+        if hasattr(self, "_apply_layer_visibility_from_document"):
+            self._apply_layer_visibility_from_document(payload, overview=True)
         warnings.extend(self._overview_restore_grids(payload, os.path.dirname(path)))
+        entry = getattr(self, "overview_export_name_entry", None)
+        if entry is not None:
+            stem = self._overview_clean_name(os.path.splitext(os.path.basename(path))[0])
+            if stem:
+                entry.setText(stem)
         self._fill_overview_list(select=0 if stops else -1)
         self._refresh_overview(fit=True)
         if warnings:
@@ -1297,6 +1414,8 @@ class OverviewMixin:
                 self.overview_list.setCurrentCell(table_row, chosen)
         finally:
             self._overview_filling = False
+        if hasattr(self, "_update_shared_survey_io_ui"):
+            self._update_shared_survey_io_ui()
 
     def _fill_overview_schedule(self):
         start = self._overview_start() if hasattr(self, "overview_start_check") else None
@@ -1367,6 +1486,8 @@ class OverviewMixin:
             self._overview_map_active = True
             return
         self._overview_map_active = True
+        if hasattr(self, "_dismiss_map_startup_for_content"):
+            self._dismiss_map_startup_for_content()
         selected = self._overview_selected_stop_index() if hasattr(self, "overview_list") else -1
         if selected < 0:
             kind, index = self._overview_current_ref()

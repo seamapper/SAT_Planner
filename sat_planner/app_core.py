@@ -5,10 +5,10 @@ UNH/CCOM-JHC Shipboard Acceptance Testing (SAT) and Quality Assurance Testing (Q
 Copyright (c) 2025, UNH/CCOM-JHC. BSD 3-Clause License (see LICENSE in repo root).
 """
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                             QGridLayout, QLabel, QLineEdit, QPushButton, QCheckBox, QTextEdit,
+                             QGridLayout, QLabel, QLineEdit, QPushButton, QCheckBox,
                              QScrollArea, QTabWidget, QFileDialog, QMessageBox, QDialog,
                              QDialogButtonBox, QSlider, QComboBox, QFrame, QSizePolicy, QProgressBar, QGroupBox,
-                             QDoubleSpinBox)
+                             QDoubleSpinBox, QTabBar)
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QEvent, QSize, QPoint, QPointF, QRectF
 from PyQt6.QtGui import (
     QTextCursor, QColor, QTextCharFormat, QPixmap, QIcon, QImage, QPainter,
@@ -66,12 +66,13 @@ from .mixins.export_import_mixin import ExportImportMixin
 from .mixins.config_mixin import ConfigMixin
 from .mixins.deferred_params_mixin import DeferredParamsMixin
 from .mixins.overview_mixin import OverviewMixin
+from .mixins.survey_mapping_mixin import SurveyMappingMixin
 from .bathymetry_download import DownloadBathymetryDialog
 from .map_options_dialog import MapOptionsDialog
 from .maplibre import MapLibreView
 
 
-class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, PerformanceMixin, AdcpMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, DeferredParamsMixin, OverviewMixin, QMainWindow):
+class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, SurveyParsersMixin, GMRTDownloadMixin, CalibrationMixin, LinePlanningMixin, PerformanceMixin, AdcpMixin, ProfilesMixin, MapInteractionMixin, ExportImportMixin, ConfigMixin, DeferredParamsMixin, OverviewMixin, SurveyMappingMixin, QMainWindow):
     CONFIG_FILENAME = CONFIG_FILENAME  # from package
 
     def __init__(self):
@@ -147,9 +148,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # On-screen colorbar. Off until the user turns it on; the choice is saved.
         self.show_map_colorbar_var = False
-        # Planning bathymetry is drawn until the user hides it. The choice is saved.
+        # Survey tabs start with bathymetry, topography, and imagery on.
+        # Overview starts with imagery on and the two grids off.
+        # A loaded survey or overview file can replace the set for that tab.
+        self._survey_layer_visibility = {"bathymetry": True, "topography": True, "imagery": True}
+        self._overview_layer_visibility = {"bathymetry": False, "topography": False, "imagery": True}
         self.show_bathymetry_var = True
-        # Loaded topography is drawn until the user hides it. The choice is saved.
         self.show_topography_var = True
         # On-screen legend. Off until the user turns it on; the choice is saved.
         self.show_map_legend_var = False
@@ -288,6 +292,25 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.dragging_line_planning_handle = None
         self.line_planning_edit_line = None
 
+        # Mapping survey: a line the user can reshape, then optional offset lines.
+        self.survey_draw_mode = False
+        self.survey_edit_mode = False
+        self.survey_center_points = []
+        self.survey_offset_m = 100.0
+        self.survey_offset_count = 1
+        self.survey_offset_side = "both"
+        self.survey_offsets_applied = False
+        self.survey_start_edge = None
+        self.survey_start_vertex = None
+        self.survey_pick_start_mode = False
+        self.survey_mask_points = []
+        self.survey_mask_draft = []
+        self.survey_mask_draw_mode = False
+        self.survey_temp_line = None
+        self.survey_vertex_handles = []
+        self.survey_dragging_vertex = None
+        self.survey_tab_index = None
+
         # ADCP calibration circles
         self.adcp_circle1_center = None
         self.adcp_circle1_start = None
@@ -299,8 +322,8 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # Track previous tab for clearing on tab switch
         self.previous_tab_index = 0
+        self._map_startup_tab_index = 0
         self.tab_switch_initialized = False  # Flag to prevent clearing on first tab change
-        self.activity_log_collapsed = True
 
         # Pitch/center/hover motion (line planning in LinePlanningMixin)
         def _on_pitch_line_motion(self, event):
@@ -418,7 +441,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # Imagery Basemap checkbox
         if not hasattr(self, 'imagery_basemap_checkbox'):
-            self.show_imagery_basemap_var = False
+            self.show_imagery_basemap_var = True
             self.imagery_basemap_checkbox = QCheckBox("Imagery Basemap")
             self.imagery_basemap_checkbox.setChecked(self.show_imagery_basemap_var)
             self.imagery_basemap_checkbox.stateChanged.connect(self._toggle_imagery_basemap)
@@ -608,9 +631,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._load_vert_exag_table()
         self._load_shaded_relief_cmap()
         self._load_show_map_colorbar()
-        self._load_show_bathymetry()
-        self._load_show_topography()
-        self._load_show_imagery_basemap()
+        self._apply_startup_layer_visibility()
         self._load_show_map_legend()
         self._load_show_point_labels()
         self._load_show_line_labels()
@@ -749,6 +770,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             ("text_csv", "Text (.csv)"),
             ("text_txt", "Text (.txt)"),
             ("hypack_lnw", "Hypack (.lnw)"),
+            ("kml", "KML (.kml)"),
             ("map_png_high", "Map PNG — high resolution"),
             ("map_png_low", "Map PNG — low resolution (email)"),
             ("profiles_png_high", "Profiles PNG — high resolution"),
@@ -802,21 +824,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 {key: checkboxes[key].isChecked() for key, _ in checkbox_specs}
             )
             self._save_export_type_options()
-
-    def _set_activity_log_collapsed(self, collapsed):
-        """Collapse/expand the activity log side panel."""
-        self.activity_log_collapsed = bool(collapsed)
-        if hasattr(self, 'activity_log_groupbox'):
-            self.activity_log_groupbox.setVisible(not self.activity_log_collapsed)
-        if hasattr(self, 'activity_log_toggle_btn'):
-            self.activity_log_toggle_btn.setText("▶" if self.activity_log_collapsed else "◀")
-            self.activity_log_toggle_btn.setChecked(not self.activity_log_collapsed)
-        if hasattr(self, 'activity_log_panel_widget'):
-            self.activity_log_panel_widget.setFixedWidth(22 if self.activity_log_collapsed else 350)
-
-    def _toggle_activity_log_panel(self):
-        """Toggle activity log panel visibility."""
-        self._set_activity_log_collapsed(not getattr(self, 'activity_log_collapsed', False))
 
     def _media_path(self, filename):
         """Return absolute path to a file in the project media directory."""
@@ -1159,47 +1166,40 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
                 print(f"ERROR: Missing widget - plot_frame: {hasattr(self, 'plot_frame')}")
                 return
 
-            # Bottom strip: Activity Log (left, fixed width) | profile + options (right, stretches)
+            # Bottom strip: profile chart and its options.
             if hasattr(self, 'profile_widget') and hasattr(self, 'slope_profile_checkbox'):
                 profile_layout = QVBoxLayout()
                 profile_layout.setContentsMargins(0, 0, 0, 0)
                 profile_layout.addWidget(self.profile_widget)
-                self.profile_select_row = QWidget()
-                select_layout = QHBoxLayout(self.profile_select_row)
-                select_layout.setContentsMargins(0, 2, 0, 0)
-                select_layout.setSpacing(6)
-                self.profile_select_label = QLabel("Select Profile:")
-                select_layout.addWidget(self.profile_select_label)
-                if hasattr(self, "cal_profile_select_combo"):
-                    select_layout.addWidget(self.cal_profile_select_combo)
-                if hasattr(self, "ref_profile_select_combo"):
-                    select_layout.addWidget(self.ref_profile_select_combo)
-                select_layout.addStretch(1)
-                profile_layout.addWidget(self.profile_select_row)
-                self._sync_profile_select_row()
-                # Horizontal layout for checkbox and About button
                 checkbox_button_layout = QHBoxLayout()
-                checkbox_button_layout.setContentsMargins(0, 0, 0, 0)
+                checkbox_button_layout.setContentsMargins(0, 2, 0, 0)
+                checkbox_button_layout.setSpacing(6)
+                self.profile_select_label = QLabel("Select Profile:")
+                checkbox_button_layout.addWidget(self.profile_select_label)
+                if hasattr(self, "cal_profile_select_combo"):
+                    checkbox_button_layout.addWidget(self.cal_profile_select_combo)
+                if hasattr(self, "ref_profile_select_combo"):
+                    checkbox_button_layout.addWidget(self.ref_profile_select_combo)
+                if hasattr(self, "survey_profile_select_combo"):
+                    checkbox_button_layout.addWidget(self.survey_profile_select_combo)
+                checkbox_button_layout.addWidget(self.slope_profile_checkbox)
                 self.bottom_strip_prompt_label = QLabel("")
                 self.bottom_strip_prompt_label.setWordWrap(False)
                 self.bottom_strip_prompt_label.setStyleSheet(
                     "QLabel { color: rgb(255, 165, 0); font-weight: bold; padding-left: 6px; }"
                 )
                 checkbox_button_layout.addWidget(self.bottom_strip_prompt_label, 1)
-                checkbox_button_layout.addWidget(self.slope_profile_checkbox)
                 if hasattr(self, 'about_btn'):
                     checkbox_button_layout.addWidget(self.about_btn)
                 profile_layout.addLayout(checkbox_button_layout)
+                self._sync_profile_select_row()
                 profile_widget = QWidget()
                 profile_widget.setLayout(profile_layout)
                 profile_widget.setMaximumHeight(250)  # Limit profile height
 
                 bottom_strip_layout = QHBoxLayout()
                 bottom_strip_layout.setContentsMargins(0, 0, 0, 0)
-                if hasattr(self, 'activity_log_groupbox'):
-                    if hasattr(self, 'activity_log_panel_widget'):
-                        bottom_strip_layout.addWidget(self.activity_log_panel_widget)  # Left: collapsible Activity Log panel
-                bottom_strip_layout.addWidget(profile_widget, 1)  # Right: profile + options, stretch with window
+                bottom_strip_layout.addWidget(profile_widget, 1)
                 bottom_strip_widget = QWidget()
                 bottom_strip_widget.setLayout(bottom_strip_layout)
                 bottom_strip_widget.setMaximumHeight(250)
@@ -1319,20 +1319,23 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self._on_bathymetry_dialog_geotiff_downloaded(path)
 
     def _sync_profile_select_row(self):
-        """Show the profile selector for the open survey tab, under the profile."""
-        row = getattr(self, "profile_select_row", None)
-        if row is None:
-            return
+        """Show the profile selector for the open survey tab, on the left of the profile options line."""
+        label = getattr(self, "profile_select_label", None)
         tab = self.param_notebook.currentIndex() if hasattr(self, "param_notebook") else -1
         cal = getattr(self, "cal_profile_select_combo", None)
         ref = getattr(self, "ref_profile_select_combo", None)
+        survey = getattr(self, "survey_profile_select_combo", None)
         show_cal = tab == 0
         show_ref = tab == 1
+        show_survey = tab == getattr(self, "survey_tab_index", None)
         if cal is not None:
             cal.setVisible(show_cal)
         if ref is not None:
             ref.setVisible(show_ref)
-        row.setVisible(show_cal or show_ref)
+        if survey is not None:
+            survey.setVisible(show_survey)
+        if label is not None:
+            label.setVisible(show_cal or show_ref or show_survey)
 
     def _on_tab_changed(self, event=None):
         """Handle tab change event - update profile plot for active tab."""
@@ -1341,7 +1344,26 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         try:
             current_tab = self.param_notebook.currentIndex()
+            if hasattr(self, "_apply_layer_visibility_for_tab"):
+                self._apply_layer_visibility_for_tab(current_tab)
+            if current_tab != getattr(self, "_map_startup_tab_index", 0) and hasattr(self, "_dismiss_map_startup"):
+                self._dismiss_map_startup()
 
+            if current_tab != getattr(self, "survey_tab_index", -1):
+                if getattr(self, "survey_draw_mode", False) and hasattr(self, "_stop_survey_draw"):
+                    self._stop_survey_draw(keep_line=len(getattr(self, "survey_center_points", []) or []) >= 2)
+                if getattr(self, "survey_mask_draw_mode", False) and hasattr(self, "_stop_survey_mask_draw"):
+                    self._stop_survey_mask_draw(keep=len(getattr(self, "survey_mask_draft", []) or []) >= 3)
+                if getattr(self, "survey_edit_mode", False) and hasattr(self, "_stop_survey_edit"):
+                    self._stop_survey_edit(replot=True)
+                if getattr(self, "survey_pick_start_mode", False) and hasattr(self, "canvas_widget"):
+                    self.canvas_widget.setCursor(Qt.CursorShape.ArrowCursor)
+            elif (
+                getattr(self, "survey_mask_draw_mode", False)
+                or getattr(self, "survey_pick_start_mode", False)
+            ) and hasattr(self, "canvas_widget"):
+                if not getattr(self, "survey_edit_mode", False) and not getattr(self, "survey_draw_mode", False):
+                    self.canvas_widget.setCursor(Qt.CursorShape.CrossCursor)
             if hasattr(self, "adcp_pick_mode") and self.adcp_pick_mode and current_tab != 5:
                 if hasattr(self, "_adcp_set_pick_mode"):
                     self._adcp_set_pick_mode(None)
@@ -1367,6 +1389,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             changed = dialog.set_overview_mode(overview)
             if dialog.isVisible() and changed:
                 self._place_map_options_dialog()
+
+        try:
+            if hasattr(self, "_ensure_survey_map_geotiff"):
+                self._ensure_survey_map_geotiff()
+        except Exception as e:
+            print(f"Error showing the survey GeoTIFF: {e}")
 
         # Always update profile plot to show the profile for the active tab
         try:
@@ -1639,38 +1667,16 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.param_notebook.addTab(self.backscatter_frame, "Backscatter")
         self.param_notebook.addTab(self.performance_frame, "Performance")
         self.param_notebook.addTab(self.adcp_frame, "ADCP")
+        self.survey_frame = QWidget()
+        self.survey_tab_index = self.param_notebook.addTab(self.survey_frame, "Survey")
+        self._build_survey_tab()
         self.overview_frame = QWidget()
         self.overview_tab_index = self.param_notebook.addTab(self.overview_frame, "Overview")
         self._build_overview_tab()
 
         self._test_planning_layout.addWidget(self.param_notebook)
+        self._install_two_row_tabs()
         param_layout.addWidget(test_planning_groupbox)
-
-        # --- Activity Log GroupBox (reparented to right-side bottom strip in _setup_layout) ---
-        self.activity_log_panel_widget = QWidget()
-        activity_panel_layout = QHBoxLayout(self.activity_log_panel_widget)
-        activity_panel_layout.setContentsMargins(0, 0, 0, 0)
-        activity_panel_layout.setSpacing(2)
-
-        self.activity_log_toggle_btn = QPushButton("Activity\nLog\n▶")
-        self.activity_log_toggle_btn.setCheckable(True)
-        self.activity_log_toggle_btn.setChecked(False)
-        self.activity_log_toggle_btn.setFixedWidth(24)
-        self.activity_log_toggle_btn.setToolTip("Show/hide Activity Log")
-        self.activity_log_toggle_btn.clicked.connect(self._toggle_activity_log_panel)
-        activity_panel_layout.addWidget(self.activity_log_toggle_btn)
-
-        self.activity_log_groupbox = QGroupBox("Activity Log")
-        activity_log_layout = QVBoxLayout(self.activity_log_groupbox)
-
-        self.activity_log_text = QTextEdit()
-        self.activity_log_text.setReadOnly(True)
-        # Dark-theme log area (matches app theme)
-        self.activity_log_text.setStyleSheet("background-color: #2d2d2d; color: #e0e0e0;")
-        # Let it expand to fill the groupbox - no height constraint
-        activity_log_layout.addWidget(self.activity_log_text, 1)  # Stretch factor 1 to fill available space
-        activity_panel_layout.addWidget(self.activity_log_groupbox, 1)
-        self._set_activity_log_collapsed(getattr(self, 'activity_log_collapsed', True))
 
         self.param_scroll.setWidget(param_widget)
 
@@ -2806,3 +2812,64 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             def _on_parameter_change(event=None):
                 pass
             self._on_parameter_change = _on_parameter_change
+
+    def _install_two_row_tabs(self):
+        """Show the test tabs on two rows so every name stays visible."""
+        notebook = self.param_notebook
+        bar = notebook.tabBar()
+        bar.hide()
+        bar.setMaximumHeight(0)
+        rows = (
+            (0, 1, 2, 5),
+            (3, 4, self.survey_tab_index, self.overview_tab_index),
+        )
+        header = QWidget()
+        header_layout = QVBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(0)
+        header.setStyleSheet(
+            "QTabBar::tab { padding: 5px 8px; }"
+            "QTabBar::tab:selected { font-weight: bold; }"
+            "QTabBar[rowActive=\"false\"]::tab:selected { font-weight: normal; }"
+        )
+        self._param_tab_bars = []
+        self._param_tab_bar_indexes = []
+        for row_indexes in rows:
+            tab_bar = QTabBar(header)
+            tab_bar.setExpanding(True)
+            tab_bar.setUsesScrollButtons(False)
+            tab_bar.setDrawBase(True)
+            mapping = []
+            for index in row_indexes:
+                if index is None or index < 0:
+                    continue
+                mapping.append(index)
+                tab_bar.addTab(notebook.tabText(index))
+            tab_bar.tabBarClicked.connect(
+                lambda clicked, mapping=mapping: self._on_two_row_tab_clicked(mapping, clicked)
+            )
+            header_layout.addWidget(tab_bar)
+            self._param_tab_bars.append(tab_bar)
+            self._param_tab_bar_indexes.append(mapping)
+        self._test_planning_layout.insertWidget(0, header)
+        notebook.currentChanged.connect(self._sync_two_row_tabs)
+        self._sync_two_row_tabs(notebook.currentIndex())
+
+    def _on_two_row_tab_clicked(self, mapping, clicked):
+        if clicked < 0 or clicked >= len(mapping):
+            return
+        self.param_notebook.setCurrentIndex(mapping[clicked])
+
+    def _sync_two_row_tabs(self, current):
+        bars = getattr(self, "_param_tab_bars", None) or []
+        mappings = getattr(self, "_param_tab_bar_indexes", None) or []
+        for tab_bar, mapping in zip(bars, mappings):
+            active = current in mapping
+            tab_bar.blockSignals(True)
+            tab_bar.setCurrentIndex(mapping.index(current) if active else -1)
+            tab_bar.blockSignals(False)
+            tab_bar.setProperty("rowActive", active)
+            style = tab_bar.style()
+            style.unpolish(tab_bar)
+            style.polish(tab_bar)
+            tab_bar.update()

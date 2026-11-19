@@ -1024,6 +1024,8 @@ class ReferenceMixin:
                     imported_geojson_geotiff_path = collection_props.get('geotiff_path')
                     imported_geojson_nan_cutoff = collection_props.get('geotiff_nan_value')
                     imported_geojson_topography_path = collection_props.get('topography_geotiff_path')
+                    if hasattr(self, "_apply_layer_visibility_from_document"):
+                        self._apply_layer_visibility_from_document(collection_props, overview=False)
                 elif geojson_data.get('type') == 'Feature':
                     features = [geojson_data]
                 else:

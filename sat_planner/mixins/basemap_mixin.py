@@ -55,8 +55,8 @@ class BasemapMixin:
             current_ylim = self.ax.get_ylim()
             
             self.show_imagery_basemap_var = self.imagery_basemap_checkbox.isChecked()
-            if hasattr(self, "_save_show_imagery_basemap"):
-                self._save_show_imagery_basemap()
+            if hasattr(self, "_remember_active_layer_visibility"):
+                self._remember_active_layer_visibility()
             if not hasattr(self, '_last_basemap_zoom_level'):
                 self._last_basemap_zoom_level = None
             if not hasattr(self, '_last_basemap_extent'):
@@ -360,9 +360,52 @@ class BasemapMixin:
         """World imagery and NOAA charts are MapLibre tile layers when the map view is up."""
         return getattr(self, "map_view", None) is not None
 
-    def _load_and_plot_basemap(self, force_reload=False):
+    def _draw_export_web_layers(self):
+        """Put the on-screen imagery and NOAA charts onto the high-resolution map figure."""
+        if not self._maplibre_owns_web_basemap():
+            return
+        ax = getattr(self, "ax", None)
+        if ax is None:
+            return
+        self._remove_export_web_layers()
+        xlim, ylim = ax.get_xlim(), ax.get_ylim()
+        try:
+            if getattr(self, "show_imagery_basemap_var", False):
+                self._load_and_plot_basemap(force_reload=True, for_export=True)
+            if getattr(self, "show_noaa_charts_var", False):
+                self._load_and_plot_noaa_charts(force_reload=True, for_export=True)
+        finally:
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
+        artists = list(getattr(self, "basemap_image_plots", None) or [])
+        noaa = getattr(self, "noaa_charts_image_plot", None)
+        if noaa is not None:
+            artists.append(noaa)
+        self._export_web_layer_artists = artists
+
+    def _remove_export_web_layers(self):
+        """Take export-only imagery and charts back off the planning figure."""
+        removed = []
+        for artist in list(getattr(self, "_export_web_layer_artists", None) or []):
+            removed.append(id(artist))
+            try:
+                artist.remove()
+            except Exception:
+                pass
+        plots = [
+            artist for artist in (getattr(self, "basemap_image_plots", None) or [])
+            if id(artist) not in removed
+        ]
+        self.basemap_image_plots = plots
+        self.basemap_image_plot = plots[0] if plots else None
+        noaa = getattr(self, "noaa_charts_image_plot", None)
+        if noaa is not None and id(noaa) in removed:
+            self.noaa_charts_image_plot = None
+        self._export_web_layer_artists = []
+
+    def _load_and_plot_basemap(self, force_reload=False, for_export=False):
         """Load and display ArcGIS World Imagery basemap tiles."""
-        if self._maplibre_owns_web_basemap():
+        if self._maplibre_owns_web_basemap() and not for_export:
             if hasattr(self, "_sync_maplibre_web_layers"):
                 self._sync_maplibre_web_layers()
             return
@@ -431,20 +474,34 @@ class BasemapMixin:
             extent_width_m = abs(x_max_merc - x_min_merc)
             extent_height_m = abs(y_max_merc - y_min_merc)
             min_extent = min(extent_width_m, extent_height_m)
-            target_resolution = min_extent / 512
+            target_pixels = 2200 if for_export else 512
+            target_resolution = min_extent / float(target_pixels)
             zoom_level = int(np.round(np.clip(np.log2(156543.03392 / target_resolution), 0, 19)))
             origin_x, origin_y = -20037508.34, 20037508.34
             tile_size = 256
-            res = 156543.03392 / (2 ** zoom_level)
-            tile_x_min = int(np.floor((x_min_merc - origin_x) / (tile_size * res)))
-            tile_x_max = int(np.ceil((x_max_merc - origin_x) / (tile_size * res)))
-            tile_y_min = int(np.floor((origin_y - y_max_merc) / (tile_size * res)))
-            tile_y_max = int(np.ceil((origin_y - y_min_merc) / (tile_size * res)))
-            max_tile = 2 ** zoom_level
-            tile_x_min = max(0, min(tile_x_min, max_tile - 1))
-            tile_x_max = max(0, min(tile_x_max, max_tile - 1))
-            tile_y_min = max(0, min(tile_y_min, max_tile - 1))
-            tile_y_max = max(0, min(tile_y_max, max_tile - 1))
+
+            def tile_window(zoom):
+                resolution = 156543.03392 / (2 ** zoom)
+                span = tile_size * resolution
+                x0 = int(np.floor((x_min_merc - origin_x) / span))
+                x1 = int(np.ceil((x_max_merc - origin_x) / span))
+                y0 = int(np.floor((origin_y - y_max_merc) / span))
+                y1 = int(np.ceil((origin_y - y_min_merc) / span))
+                limit = 2 ** zoom
+                x0 = max(0, min(x0, limit - 1))
+                x1 = max(0, min(x1, limit - 1))
+                y0 = max(0, min(y0, limit - 1))
+                y1 = max(0, min(y1, limit - 1))
+                return x0, x1, y0, y1, resolution
+
+            tile_x_min, tile_x_max, tile_y_min, tile_y_max, res = tile_window(zoom_level)
+            while (
+                for_export
+                and zoom_level > 0
+                and (tile_x_max - tile_x_min + 1) * (tile_y_max - tile_y_min + 1) > 64
+            ):
+                zoom_level -= 1
+                tile_x_min, tile_x_max, tile_y_min, tile_y_max, res = tile_window(zoom_level)
             base_url = "https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
             tiles = []
             for ty in range(tile_y_min, tile_y_max + 1):
@@ -545,9 +602,9 @@ class BasemapMixin:
             print(f"Error loading basemap: {e}")
             traceback.print_exc()
 
-    def _load_and_plot_noaa_charts(self, force_reload=False):
+    def _load_and_plot_noaa_charts(self, force_reload=False, for_export=False):
         """Load and display NOAA ENC Charts using ESRI REST MapServer export endpoint."""
-        if self._maplibre_owns_web_basemap():
+        if self._maplibre_owns_web_basemap() and not for_export:
             if hasattr(self, "_sync_maplibre_web_layers"):
                 self._sync_maplibre_web_layers()
             return
@@ -585,7 +642,7 @@ class BasemapMixin:
             x_max_merc, y_max_merc = wgs84_to_mercator.transform(padded_xlim[1], padded_ylim[1])
             bbox_width_merc = x_max_merc - x_min_merc
             bbox_height_merc = y_max_merc - y_min_merc
-            max_dimension_pixels = 2048
+            max_dimension_pixels = 3072 if for_export else 2048
             if bbox_width_merc >= bbox_height_merc:
                 cell_size = bbox_width_merc / max_dimension_pixels
                 image_width = max_dimension_pixels
@@ -656,10 +713,11 @@ class BasemapMixin:
             current_xlim_before = self.ax.get_xlim()
             current_ylim_before = self.ax.get_ylim()
             alpha = self.noaa_charts_opacity / 100.0 if hasattr(self, 'noaa_charts_opacity') else 0.5
+            chart_z = 1 if for_export else 10
             self.noaa_charts_image_plot = self.ax.imshow(
                 img_array,
                 extent=[padded_xlim[0], padded_xlim[1], padded_ylim[0], padded_ylim[1]],
-                origin='upper', zorder=10, alpha=alpha, interpolation='bilinear')
+                origin='upper', zorder=chart_z, alpha=alpha, interpolation='bilinear')
             current_xlim_after = self.ax.get_xlim()
             current_ylim_after = self.ax.get_ylim()
             current_aspect_after = self.ax.get_aspect()

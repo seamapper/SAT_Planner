@@ -28,6 +28,10 @@
       pointer-events: none;
       z-index: 2;
       overflow: hidden;
+      box-sizing: border-box;
+      padding: 22px 28px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.82);
     }
     #startup-title {
       font-size: 18px;
@@ -432,10 +436,10 @@
         }
         planLabels.push(marker.addTo(map));
       });
-      var startup = document.getElementById("startup");
-      if (startup) {
-        var hasBathymetry = !!map.getSource("bathy");
-        startup.style.display = (features.length || hasBathymetry) ? "none" : "";
+      if (features.length || map.getSource("bathy")) {
+        hideStartup();
+      } else {
+        showStartup();
       }
       if (bounds && bounds.length === 4) {
         scheduleFit(bounds[0], bounds[1], bounds[2], bounds[3]);
@@ -519,12 +523,30 @@
       return undefined;
     }
 
+    window._startupDismissed = false;
+
     function hideStartup() {
       var startup = document.getElementById("startup");
       if (startup) {
         startup.style.display = "none";
       }
     }
+
+    function showStartup() {
+      if (window._startupDismissed) {
+        hideStartup();
+        return;
+      }
+      var startup = document.getElementById("startup");
+      if (startup) {
+        startup.style.display = "";
+      }
+    }
+
+    window.dismissStartup = function () {
+      window._startupDismissed = true;
+      hideStartup();
+    };
 
     function ensureWebLayers(imageryTiles) {
       if (!map.getSource("imagery") && imageryTiles && imageryTiles.length) {
@@ -585,9 +607,6 @@
           map.setLayoutProperty("noaa", "visibility", noaaOn ? "visible" : "none");
           map.setPaintProperty("noaa", "raster-opacity", isFinite(noaaOpacity) ? noaaOpacity : 0.5);
         }
-        if (imageryOn || noaaOn) {
-          hideStartup();
-        }
         window._webLayers = { imagery: !!imageryOn, noaa: !!noaaOn, opacity: noaaOpacity };
       }
       if (!map.isStyleLoaded()) {
@@ -609,10 +628,7 @@
           var plan = window._lastPlan;
           var planFeatures = plan && plan.features ? plan.features.length : 0;
           if (!planFeatures) {
-            var startup = document.getElementById("startup");
-            if (startup) {
-              startup.style.display = "";
-            }
+            showStartup();
           }
           return;
         }

@@ -50,6 +50,7 @@ class ConfigMixin:
             "text_csv": True,
             "text_txt": True,
             "hypack_lnw": True,
+            "kml": True,
             "map_png_high": True,
             "map_png_low": True,
             "profiles_png_high": True,
@@ -629,92 +630,117 @@ class ConfigMixin:
         except Exception:
             pass
 
-    def _load_show_bathymetry(self):
-        """Planning bathymetry layer. Missing config means on."""
-        self.show_bathymetry_var = True
-        try:
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, "r") as f:
-                    config = json.load(f)
-                if "show_bathymetry" in config:
-                    self.show_bathymetry_var = bool(config.get("show_bathymetry"))
-        except Exception:
-            self.show_bathymetry_var = True
-        checkbox = getattr(self, "show_bathymetry_checkbox", None)
-        if checkbox is not None:
+    def _startup_layer_visibility(self, overview=False):
+        if overview:
+            return {"bathymetry": False, "topography": False, "imagery": True}
+        return {"bathymetry": True, "topography": True, "imagery": True}
+
+    def _apply_startup_layer_visibility(self):
+        """Open on the survey-tab defaults. Session config does not override these."""
+        self._survey_layer_visibility = self._startup_layer_visibility(False)
+        self._overview_layer_visibility = self._startup_layer_visibility(True)
+        self._apply_layer_visibility(self._survey_layer_visibility, replot=False)
+        if hasattr(self, "_sync_maplibre_web_layers"):
+            self._sync_maplibre_web_layers()
+
+    def _layer_visibility_is_overview(self, tab_index=None):
+        if tab_index is None and hasattr(self, "_overview_tab_is_current"):
+            return bool(self._overview_tab_is_current())
+        overview_index = getattr(self, "overview_tab_index", None)
+        return overview_index is not None and tab_index == overview_index
+
+    def _active_layer_visibility(self):
+        return {
+            "bathymetry": bool(getattr(self, "show_bathymetry_var", True)),
+            "topography": bool(getattr(self, "show_topography_var", True)),
+            "imagery": bool(getattr(self, "show_imagery_basemap_var", True)),
+        }
+
+    def _remember_active_layer_visibility(self):
+        state = self._active_layer_visibility()
+        if self._layer_visibility_is_overview():
+            self._overview_layer_visibility = state
+        else:
+            self._survey_layer_visibility = state
+
+    def _apply_layer_visibility(self, state, replot=False):
+        state = dict(state or self._startup_layer_visibility(False))
+        self.show_bathymetry_var = bool(state.get("bathymetry", True))
+        self.show_topography_var = bool(state.get("topography", True))
+        self.show_imagery_basemap_var = bool(state.get("imagery", True))
+        for name, value in (
+            ("show_bathymetry_checkbox", self.show_bathymetry_var),
+            ("show_topography_checkbox", self.show_topography_var),
+            ("imagery_basemap_checkbox", self.show_imagery_basemap_var),
+        ):
+            checkbox = getattr(self, name, None)
+            if checkbox is None:
+                continue
             checkbox.blockSignals(True)
-            checkbox.setChecked(self.show_bathymetry_var)
+            checkbox.setChecked(value)
             checkbox.blockSignals(False)
+        if replot and hasattr(self, "_plot_survey_plan"):
+            self._plot_survey_plan(preserve_view_limits=True)
+        return True
 
-    def _save_show_bathymetry(self):
-        try:
-            config = {}
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, "r") as f:
-                    config = json.load(f)
-            config["show_bathymetry"] = bool(getattr(self, "show_bathymetry_var", True))
-            with open(self.CONFIG_FILENAME, "w") as f:
-                json.dump(config, f, indent=2)
-        except Exception:
-            pass
+    def _apply_layer_visibility_for_tab(self, tab_index):
+        overview = self._layer_visibility_is_overview(tab_index)
+        current = self._active_layer_visibility()
+        state = dict(
+            getattr(self, "_overview_layer_visibility", None)
+            if overview
+            else getattr(self, "_survey_layer_visibility", None)
+            or self._startup_layer_visibility(overview)
+        )
+        if current == state:
+            return False
+        self._apply_layer_visibility(state, replot=True)
+        return True
 
-    def _load_show_topography(self):
-        """Topography overlay. Missing config means on."""
-        self.show_topography_var = True
-        try:
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, "r") as f:
-                    config = json.load(f)
-                if "show_topography" in config:
-                    self.show_topography_var = bool(config.get("show_topography"))
-        except Exception:
-            self.show_topography_var = True
-        checkbox = getattr(self, "show_topography_checkbox", None)
-        if checkbox is not None:
-            checkbox.blockSignals(True)
-            checkbox.setChecked(self.show_topography_var)
-            checkbox.blockSignals(False)
+    def _layer_visibility_payload(self, overview=False):
+        if overview == self._layer_visibility_is_overview():
+            state = self._active_layer_visibility()
+        elif overview:
+            state = getattr(self, "_overview_layer_visibility", None) or self._startup_layer_visibility(True)
+        else:
+            state = getattr(self, "_survey_layer_visibility", None) or self._startup_layer_visibility(False)
+        return {
+            "show_bathymetry": bool(state.get("bathymetry", not overview)),
+            "show_topography": bool(state.get("topography", not overview)),
+            "show_imagery_basemap": bool(state.get("imagery", True)),
+        }
 
-    def _save_show_topography(self):
-        try:
-            config = {}
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, "r") as f:
-                    config = json.load(f)
-            config["show_topography"] = bool(getattr(self, "show_topography_var", True))
-            with open(self.CONFIG_FILENAME, "w") as f:
-                json.dump(config, f, indent=2)
-        except Exception:
-            pass
+    def _stamp_layer_visibility(self, properties, overview=False):
+        if isinstance(properties, dict):
+            properties.update(self._layer_visibility_payload(overview=overview))
+        return properties
 
-    def _load_show_imagery_basemap(self):
-        """Imagery basemap. Missing config means off."""
-        self.show_imagery_basemap_var = False
-        try:
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, "r") as f:
-                    config = json.load(f)
-                if "show_imagery_basemap" in config:
-                    self.show_imagery_basemap_var = bool(config.get("show_imagery_basemap"))
-        except Exception:
-            self.show_imagery_basemap_var = False
-        checkbox = getattr(self, "imagery_basemap_checkbox", None)
-        if checkbox is not None:
-            checkbox.blockSignals(True)
-            checkbox.setChecked(self.show_imagery_basemap_var)
-            checkbox.blockSignals(False)
-
-    def _save_show_imagery_basemap(self):
-        try:
-            config = {}
-            if os.path.exists(self.CONFIG_FILENAME):
-                with open(self.CONFIG_FILENAME, "r") as f:
-                    config = json.load(f)
-            config["show_imagery_basemap"] = bool(getattr(self, "show_imagery_basemap_var", False))
-            with open(self.CONFIG_FILENAME, "w") as f:
-                json.dump(config, f, indent=2)
-        except Exception:
-            pass
+    def _apply_layer_visibility_from_document(self, document, overview=False):
+        """Use bathymetry, topography, and imagery flags saved with a plan."""
+        if not isinstance(document, dict):
+            return False
+        keys = ("show_bathymetry", "show_topography", "show_imagery_basemap")
+        if not any(key in document for key in keys):
+            return False
+        state = dict(
+            getattr(self, "_overview_layer_visibility", None)
+            if overview
+            else getattr(self, "_survey_layer_visibility", None)
+            or self._startup_layer_visibility(overview)
+        )
+        if "show_bathymetry" in document:
+            state["bathymetry"] = bool(document.get("show_bathymetry"))
+        if "show_topography" in document:
+            state["topography"] = bool(document.get("show_topography"))
+        if "show_imagery_basemap" in document:
+            state["imagery"] = bool(document.get("show_imagery_basemap"))
+        if overview:
+            self._overview_layer_visibility = state
+        else:
+            self._survey_layer_visibility = state
+        if overview == self._layer_visibility_is_overview():
+            self._apply_layer_visibility(state, replot=False)
+        return True
 
     def _load_show_map_legend(self):
         """On-screen legend preference. Missing config means off."""
@@ -1179,9 +1205,13 @@ class ConfigMixin:
         self._add_shaded_relief_cmap_to_params(params)
         self._add_slope_overlay_bands_to_params(params)
         self._add_depth_overlay_bands_to_params(params)
+        if hasattr(self, "_stamp_layer_visibility"):
+            self._stamp_layer_visibility(params, overview=False)
         return params
 
     def _apply_geotiff_viz_params_from_params(self, params):
+        if hasattr(self, "_apply_layer_visibility_from_document"):
+            self._apply_layer_visibility_from_document(params, overview=False)
         applied_ve = self._apply_vert_exag_table_from_params(params)
         applied_cmap = self._apply_shaded_relief_cmap_from_params(params)
         applied_slope = self._apply_slope_overlay_bands_from_params(params)

@@ -566,6 +566,8 @@ class MapInteractionMixin:
             return
         if getattr(self, '_handle_adcp_plot_click', lambda e: False)(event):
             return
+        if getattr(self, '_handle_survey_plot_click', lambda e: False)(event):
+            return
         if getattr(self, '_handle_line_planning_plot_click', lambda e: False)(event):
             return
         if self.pick_pitch_line_mode:
@@ -1378,8 +1380,9 @@ class MapInteractionMixin:
         so it can be called unconditionally after a GMRT load without
         flashing "No lines to zoom to" dialogs.
 
-        Tab order (see ``app_core._setup_layout``):
-            0: Calibration, 1: Accuracy, 2: Line, 3: Backscatter, 4: Performance, 5: ADCP
+        Tab order (see ``app_core._create_widgets``):
+            0: Calibration, 1: Accuracy, 2: Line, 3: Backscatter,
+            4: Performance, 5: ADCP, then Survey, then Overview.
         """
         if not hasattr(self, "param_notebook"):
             return
@@ -1426,6 +1429,10 @@ class MapInteractionMixin:
             if self._adcp_plan_has_any_geometry() if hasattr(self, "_adcp_plan_has_any_geometry") else False:
                 if hasattr(self, "_zoom_to_adcp_cal"):
                     self._zoom_to_adcp_cal()
+        elif tab_index == getattr(self, "survey_tab_index", None):
+            points = getattr(self, "survey_center_points", None) or []
+            if len(points) >= 2 and hasattr(self, "_zoom_to_survey_plan"):
+                self._zoom_to_survey_plan()
 
     def _zoom_to_any_lines(self):
         # Collect all points from pitch line and heading lines
@@ -1604,6 +1611,9 @@ class MapInteractionMixin:
         if hasattr(self, 'line_planning_mode') and self.line_planning_mode and len(self.line_planning_points) >= 1:
             self._cancel_eez_hover_lookup()
             self._on_line_planning_motion(event)
+            return
+        if getattr(self, "_on_survey_draw_motion", None) and self._on_survey_draw_motion(event):
+            self._cancel_eez_hover_lookup()
             return
 
         if hasattr(self, 'pick_pitch_line_mode') and self.pick_pitch_line_mode:
@@ -1945,6 +1955,8 @@ class MapInteractionMixin:
         artists = []
         if getattr(self, "edit_line_planning_mode", False):
             artists.extend(getattr(self, "line_planning_handles", None) or [])
+        if getattr(self, "survey_edit_mode", False):
+            artists.extend(getattr(self, "survey_vertex_handles", None) or [])
         if getattr(self, "edit_pitch_line_mode", False):
             artists.append(getattr(self, "pitch_line_start_handle", None))
             artists.append(getattr(self, "pitch_line_end_handle", None))
@@ -1993,6 +2005,7 @@ class MapInteractionMixin:
         pick = _MapPickEvent(artist, _MapLibreEvent(getattr(self, "ax", None), lon, lat, 1))
         for name in (
             "_on_line_planning_handle_pick",
+            "_on_survey_vertex_pick",
             "_on_pitch_line_handle_pick",
             "_on_roll_line_handle_pick",
             "_on_backscatter_move_handle_pick",
@@ -2003,6 +2016,12 @@ class MapInteractionMixin:
 
     def _dispatch_handle_drag(self, event, release):
         """Move or drop the handle that a press selected."""
+        if getattr(self, "survey_edit_mode", False) and getattr(self, "survey_dragging_vertex", None) is not None:
+            if release:
+                self._on_survey_vertex_release(event)
+            else:
+                self._on_survey_vertex_motion(event)
+            return True
         if getattr(self, "edit_line_planning_mode", False) and getattr(self, "dragging_line_planning_handle", None) is not None:
             if release:
                 self._on_line_planning_handle_release(event)
@@ -2088,6 +2107,8 @@ class MapInteractionMixin:
             "backscatter_box_draw_mode",
             "backscatter_box_edit_width_mode",
             "line_planning_mode",
+            "survey_draw_mode",
+            "survey_mask_draw_mode",
             "pick_pitch_line_mode",
             "pick_roll_line_mode",
             "pick_center_mode",

@@ -551,6 +551,8 @@ class GeoTIFFMixin:
                 feats = gj.get("features", []) if gj.get("type") == "FeatureCollection" else []
                 if gj.get("type") == "FeatureCollection":
                     imported_topo_path = (gj.get("properties") or {}).get("topography_geotiff_path")
+                    if hasattr(self, "_apply_layer_visibility_from_document"):
+                        self._apply_layer_visibility_from_document(gj.get("properties") or {}, overview=False)
                 for feat in feats:
                     geom = feat.get("geometry", {})
                     if geom.get("type") == "LineString":
@@ -846,6 +848,7 @@ class GeoTIFFMixin:
         lnw_file_path = None
         sis_file_path = None
         gpx_file_path = None
+        kml_file_path = None
         shapefile_path = None
         area_shapefile_path = None
         map_png_path = None
@@ -885,6 +888,7 @@ class GeoTIFFMixin:
             export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
             export_text_txt = self._export_type_enabled("text_txt") if hasattr(self, "_export_type_enabled") else True
             export_hypack = self._export_type_enabled("hypack_lnw") if hasattr(self, "_export_type_enabled") else True
+            export_kml = self._export_type_enabled("kml") if hasattr(self, "_export_type_enabled") else True
             export_map_png = self._export_map_png_enabled() if hasattr(self, "_export_map_png_enabled") else True
             export_profiles_png = self._export_profiles_png_enabled() if hasattr(self, "_export_profiles_png_enabled") else True
 
@@ -984,6 +988,18 @@ class GeoTIFFMixin:
                         export_errors[gpx_file_path] = "GPX writer returned False"
                 except Exception as e:
                     export_errors[gpx_file_path] = str(e)
+
+            kml_file_path = os.path.join(export_dir, f"{export_name}.kml")
+            if export_kml:
+                try:
+                    if not export_utils.write_kml(
+                        kml_file_path,
+                        [("BackscatterLine", line_points)],
+                        document_name=export_name,
+                    ):
+                        export_errors[kml_file_path] = "KML writer returned False"
+                except Exception as e:
+                    export_errors[kml_file_path] = str(e)
 
             shapefile_path = os.path.join(export_dir, f"{export_name}.shp")
             if (export_shapefile or export_gpkg) and LineString is not None:
@@ -1155,6 +1171,8 @@ class GeoTIFFMixin:
                     _add_result(sis_file_path)
                 if export_gpx:
                     _add_result(gpx_file_path)
+                if export_kml:
+                    _add_result(kml_file_path)
                 if export_shapefile:
                     _add_result(shapefile_path)
                     _add_result(area_shapefile_path)
@@ -1916,6 +1934,8 @@ class GeoTIFFMixin:
         """Add topography_geotiff_path to a GeoJSON properties dict when a land file is loaded."""
         if not isinstance(properties, dict):
             return properties
+        if hasattr(self, "_stamp_layer_visibility"):
+            self._stamp_layer_visibility(properties, overview=False)
         path = self._topography_path_for_export(export_dir)
         if path:
             properties["topography_geotiff_path"] = path

@@ -1213,6 +1213,7 @@ class CalibrationMixin:
         export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
         export_text_txt = self._export_type_enabled("text_txt") if hasattr(self, "_export_type_enabled") else True
         export_hypack = self._export_type_enabled("hypack_lnw") if hasattr(self, "_export_type_enabled") else True
+        export_kml = self._export_type_enabled("kml") if hasattr(self, "_export_type_enabled") else True
         export_map_png = self._export_map_png_enabled() if hasattr(self, "_export_map_png_enabled") else True
         export_profiles_png = self._export_profiles_png_enabled() if hasattr(self, "_export_profiles_png_enabled") else True
         fiona = None
@@ -1368,6 +1369,12 @@ class CalibrationMixin:
                 gpx_per_test_names = export_utils.write_gpx_per_test_files(
                     export_dir, export_name, cal_gpx_tests, creator="SAT Planner Calibration"
                 )
+            kml_file_path = os.path.join(export_dir, f"{export_name}.kml")
+            kml_written = False
+            if export_kml:
+                kml_written = export_utils.write_kml(
+                    kml_file_path, cal_ascii_lines, document_name=export_name
+                )
             txt_file_path = os.path.join(export_dir, f"{export_name}_DDD.txt")
             if export_text_txt:
                 export_utils.write_ddd_txt(txt_file_path, cal_rows)
@@ -1491,6 +1498,8 @@ class CalibrationMixin:
                 success_msg += f"- {os.path.basename(sis_file_path)}\n"
             if gpx_written:
                 success_msg += f"- {os.path.basename(gpx_file_path)}\n"
+            if kml_written:
+                success_msg += f"- {os.path.basename(kml_file_path)}\n"
             for bn in gpx_per_test_names:
                 success_msg += f"- {bn}\n"
             success_msg += f"- {os.path.basename(stats_file_path)}\n"
@@ -1536,6 +1545,8 @@ class CalibrationMixin:
                 _add_status(sis_file_path)
             if gpx_written:
                 _add_status(gpx_file_path)
+            if kml_written:
+                _add_status(kml_file_path)
             _add_status(stats_file_path)
             _add_status(json_metadata_path)
             if export_map_png:
@@ -1849,6 +1860,8 @@ class CalibrationMixin:
                     imported_geojson_geotiff_path = fc_props.get('geotiff_path')
                     imported_geojson_nan_cutoff = fc_props.get('geotiff_nan_value')
                     imported_geojson_topography_path = fc_props.get('topography_geotiff_path')
+                    if hasattr(self, "_apply_layer_visibility_from_document"):
+                        self._apply_layer_visibility_from_document(fc_props, overview=False)
                 elif geojson_data.get('type') == 'Feature':
                     features = [geojson_data]
                 else:

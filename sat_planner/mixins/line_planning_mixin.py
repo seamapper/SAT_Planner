@@ -447,6 +447,7 @@ class LinePlanningMixin:
             export_text_csv = self._export_type_enabled("text_csv") if hasattr(self, "_export_type_enabled") else True
             export_text_txt = self._export_type_enabled("text_txt") if hasattr(self, "_export_type_enabled") else True
             export_hypack = self._export_type_enabled("hypack_lnw") if hasattr(self, "_export_type_enabled") else True
+            export_kml = self._export_type_enabled("kml") if hasattr(self, "_export_type_enabled") else True
             export_map_png = self._export_map_png_enabled() if hasattr(self, "_export_map_png_enabled") else True
             export_profiles_png = self._export_profiles_png_enabled() if hasattr(self, "_export_profiles_png_enabled") else True
 
@@ -521,6 +522,14 @@ class LinePlanningMixin:
                     gpx_lineplan_path,
                     [("LinePlan", list(self.line_planning_points))],
                     creator="SAT Planner Line",
+                )
+            kml_file_path = os.path.join(export_dir, f"{export_name}.kml")
+            kml_written = False
+            if export_kml:
+                kml_written = export_utils.write_kml(
+                    kml_file_path,
+                    [(export_name, list(self.line_planning_points))],
+                    document_name=export_name,
                 )
             map_png_path = os.path.join(export_dir, f"{export_name}_map.png")
             if export_map_png:
@@ -629,6 +638,8 @@ class LinePlanningMixin:
                 success_msg += f"- {os.path.basename(sis_file_path)}\n"
             if gpx_written:
                 success_msg += f"- {os.path.basename(gpx_file_path)}\n"
+            if kml_written:
+                success_msg += f"- {os.path.basename(kml_file_path)}\n"
             if gpx_lineplan_written:
                 success_msg += f"- {os.path.basename(gpx_lineplan_path)}\n"
             if export_map_png:
@@ -668,6 +679,8 @@ class LinePlanningMixin:
                 _add_status(sis_file_path)
             if gpx_written:
                 _add_status(gpx_file_path)
+            if kml_written:
+                _add_status(kml_file_path)
             if gpx_lineplan_written:
                 _add_status(gpx_lineplan_path)
             if export_map_png:
@@ -846,6 +859,8 @@ class LinePlanningMixin:
                     imported_geotiff_path = collection_props.get('geotiff_path')
                     imported_nan_cutoff = collection_props.get('geotiff_nan_value')
                     imported_topo_path = collection_props.get('topography_geotiff_path')
+                    if hasattr(self, "_apply_layer_visibility_from_document"):
+                        self._apply_layer_visibility_from_document(collection_props, overview=False)
                 imported_survey_speed = None
                 for feature in features:
                     if feature.get('type') != 'Feature':
@@ -1181,12 +1196,16 @@ class LinePlanningMixin:
 
     _LINE_PLAN_PROFILE_SEG_SAMPLES = 50
 
-    def _line_plan_profile_arrays(self):
+    def _line_plan_profile_arrays(self, points=None):
         """Return (dists, elevations, slopes, waypoint_distances) along sampled polyline, or None.
 
         Sampling matches ``_draw_line_planning_profile`` (geodesic distance, GeoTIFF / fallback).
+        ``points`` defaults to the line-plan polyline.
         """
-        if not (hasattr(self, "line_planning_points") and len(self.line_planning_points) >= 2):
+        if points is None:
+            points = getattr(self, "line_planning_points", None)
+        points = list(points or [])
+        if len(points) < 2:
             return None
         if pyproj is None:
             return None
@@ -1195,9 +1214,9 @@ class LinePlanningMixin:
         lats, lons, dists = [], [], [0.0]
         total_dist = 0.0
         waypoint_distances = [0.0]
-        for i in range(1, len(self.line_planning_points)):
-            lat1, lon1 = self.line_planning_points[i - 1]
-            lat2, lon2 = self.line_planning_points[i]
+        for i in range(1, len(points)):
+            lat1, lon1 = points[i - 1]
+            lat2, lon2 = points[i]
             seg_lats = np.linspace(lat1, lat2, nseg)
             seg_lons = np.linspace(lon1, lon2, nseg)
             if i == 1:

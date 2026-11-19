@@ -728,6 +728,7 @@ class AdcpMixin:
         export_text_csv = self._export_type_enabled("text_csv")
         export_text_txt = self._export_type_enabled("text_txt")
         export_hypack = self._export_type_enabled("hypack_lnw")
+        export_kml = self._export_type_enabled("kml")
         export_map_png = self._export_map_png_enabled()
         export_profiles_png = self._export_profiles_png_enabled()
         if (export_shapefile or export_gpkg) and mapping is None:
@@ -930,6 +931,12 @@ class AdcpMixin:
                 gpx_per_test_names = export_utils.write_gpx_per_test_files(
                     export_dir, export_name, gpx_per_test_tests, creator="SAT Planner ADCP"
                 )
+            kml_file_path = os.path.join(export_dir, f"{export_name}.kml")
+            kml_written = False
+            if export_kml:
+                kml_written = export_utils.write_kml(
+                    kml_file_path, gpx_lines, document_name=export_name
+                )
 
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
             info_text = self._build_adcp_cal_info_text(speed_kts, turn_min)
@@ -1007,6 +1014,8 @@ class AdcpMixin:
                 _add_status(sis_file_path)
             if gpx_written:
                 _add_status(gpx_file_path)
+            if kml_written:
+                _add_status(kml_file_path)
             _add_status(stats_file_path)
             if export_map_png:
                 _add_status(map_png_path)
@@ -1298,6 +1307,8 @@ class AdcpMixin:
                 if parsed is not None:
                     c1, c2, meta = parsed
                     self._adcp_apply_imported_segments(c1, c2, meta)
+                    if hasattr(self, "_apply_layer_visibility_from_document"):
+                        self._apply_layer_visibility_from_document(geojson_data.get("properties") or {}, overview=False)
                     nan_cutoff = (geojson_data.get("properties") or {}).get("geotiff_nan_value")
                     if nan_cutoff is not None and hasattr(self, "_set_geotiff_nan_cutoff"):
                         self._set_geotiff_nan_cutoff(nan_cutoff, update_entry=True)

@@ -105,6 +105,24 @@ class ExportImportMixin:
             "export_name_attr": "adcp_export_name_entry",
             "gmrt_prefix": "adcp",
         },
+        {
+            "tab_label": "Survey",
+            "import_label": "Import Survey",
+            "export_label": "Export Survey",
+            "import_handler": "_import_mapping_survey",
+            "export_handler": "_export_mapping_survey",
+            "export_name_attr": "survey_export_name_entry",
+            "gmrt_prefix": "survey",
+        },
+        {
+            "tab_label": "Overview",
+            "import_label": "Import Overview",
+            "export_label": "Export Overview",
+            "import_handler": "_import_overview",
+            "export_handler": "_export_overview",
+            "export_name_attr": "overview_export_name_entry",
+            "gmrt_prefix": "overview",
+        },
     )
 
     def _survey_io_spec(self, tab_index=None):
@@ -510,6 +528,16 @@ class ExportImportMixin:
             self.shared_export_name_stack, adcp_default
         )
 
+        survey_default = f"Survey_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.survey_export_name_entry = self._create_export_name_page(
+            self.shared_export_name_stack, survey_default
+        )
+
+        overview_default = f"Overview_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.overview_export_name_entry = self._create_export_name_page(
+            self.shared_export_name_stack, overview_default
+        )
+
     def _install_shared_survey_io(self, parent_layout):
         """Insert shared Import/Export controls above the tab widget."""
         if not hasattr(self, "shared_import_btn"):
@@ -581,6 +609,10 @@ class ExportImportMixin:
             return len(getattr(self, "performance_test_lines_data", None) or []) == 4
         if tab_index == 5 and hasattr(self, "_adcp_plan_complete"):
             return bool(self._adcp_plan_complete())
+        if tab_index == getattr(self, "survey_tab_index", None):
+            return len(getattr(self, "survey_center_points", None) or []) >= 2
+        if tab_index == getattr(self, "overview_tab_index", None):
+            return bool(getattr(self, "overview_stops", None))
         return False
 
     def _shared_survey_io_export_enabled(self, tab_index):
@@ -642,6 +674,8 @@ class ExportImportMixin:
             return True
         if hasattr(self, "_adcp_plan_has_any_geometry") and self._adcp_plan_has_any_geometry():
             return True
+        if len(getattr(self, "survey_center_points", None) or []) >= 2:
+            return True
         return False
 
     def _sync_startup_import_button(self):
@@ -663,11 +697,6 @@ class ExportImportMixin:
             return
         tab_index = self.param_notebook.currentIndex()
         group = getattr(self, "shared_survey_io_groupbox", None)
-        overview_index = getattr(self, "overview_tab_index", None)
-        if overview_index is not None and tab_index == overview_index:
-            if group is not None:
-                group.hide()
-            return
         if group is not None and group.isHidden():
             group.show()
         if tab_index < 0 or tab_index >= len(self._SURVEY_IO_TAB_SPECS):
@@ -681,8 +710,9 @@ class ExportImportMixin:
         self._sync_startup_import_button()
         plan_ready = self._survey_plan_ready_for_export(tab_index)
         self._set_button_text_emphasis(self.shared_export_btn, plan_ready)
-        info_attr = self._SHOW_TEST_INFO_BUTTONS[tab_index]
-        self._set_button_text_emphasis(getattr(self, info_attr, None), plan_ready)
+        if 0 <= tab_index < len(self._SHOW_TEST_INFO_BUTTONS):
+            info_attr = self._SHOW_TEST_INFO_BUTTONS[tab_index]
+            self._set_button_text_emphasis(getattr(self, info_attr, None), plan_ready)
 
     def _import_has_planning_geotiff(self, geotiff_path=None):
         """True when the imported survey references an existing planning GeoTIFF.
@@ -914,27 +944,8 @@ class ExportImportMixin:
                 )
             save_high = self._export_type_enabled("map_png_high")
             save_low = self._export_type_enabled("map_png_low")
-            # The email-size file is the map on screen, including imagery and charts.
-            # The high-resolution file stays a matplotlib render so it keeps the color bar.
-            view = getattr(self, "map_view", None)
-            captured = None
-            if save_low and view is not None and hasattr(view, "capture_png"):
-                captured = view.capture_png()
-            low_from_view = bool(captured)
-            colorbar_png = None
-            horizontal_colorbar_png = None
-            legend_png = None
-            if low_from_view:
-                if hasattr(self, "_render_colorbar_png"):
-                    colorbar_png = self._render_colorbar_png("vertical", half_thickness=True)
-                    horizontal_colorbar_png = self._render_colorbar_png("horizontal", half_thickness=True)
-                else:
-                    colorbar_png = getattr(self, "_map_colorbar_png_bytes", None)
-                if hasattr(self, "_render_legend_png"):
-                    legend_png = self._render_legend_png()
-                else:
-                    legend_png = getattr(self, "_map_legend_png_bytes", None)
-            if save_high or (save_low and not low_from_view):
+            # Both files are the same map page. The low-resolution file is that page at a lower dpi.
+            if save_high or save_low:
                 # A small inset so the latitude labels and colorbar stay on the page.
                 params = self.figure.subplotpars
                 previous_subplot = (params.left, params.bottom, params.right, params.top)
@@ -947,29 +958,22 @@ class ExportImportMixin:
                 previous_aspect = self._apply_export_map_aspect()
                 if hasattr(self, "_keep_export_colorbar_clear_of_xlabels"):
                     self._keep_export_colorbar_clear_of_xlabels()
-            result = export_utils.save_export_png(
+                if hasattr(self, "_draw_export_web_layers"):
+                    self._draw_export_web_layers()
+            return export_utils.save_export_png(
                 self.figure,
                 path,
                 save_high=save_high,
-                save_low=save_low and not low_from_view,
+                save_low=save_low,
                 dpi=export_utils.MAP_EXPORT_HIGH_DPI,
                 bbox_inches=None,
                 facecolor=kwargs.get("facecolor", "white"),
                 low_dpi=export_utils.MAP_EXPORT_LOW_DPI,
                 low_match_figure=True,
             )
-            if low_from_view:
-                captured = export_utils.composite_legend_png(captured, legend_png)
-                page_w, page_h = export_utils.map_export_page_px(export_utils.MAP_EXPORT_LOW_DPI)
-                captured = export_utils.composite_colorbar_png(
-                    captured,
-                    colorbar_png,
-                    horizontal_colorbar_png,
-                    max_dimension=max(page_w, page_h),
-                )
-                export_utils.write_png_fitted_to_page(path, captured)
-            return result
         finally:
+            if hasattr(self, "_remove_export_web_layers"):
+                self._remove_export_web_layers()
             self._restore_export_map_aspect(previous_aspect)
             if previous_size is not None and getattr(self, "figure", None) is not None:
                 self.figure.set_size_inches(previous_size[0], previous_size[1], forward=False)
@@ -1495,6 +1499,7 @@ class ExportImportMixin:
             export_text_csv = self._export_type_enabled("text_csv")
             export_text_txt = self._export_type_enabled("text_txt")
             export_hypack = self._export_type_enabled("hypack_lnw")
+            export_kml = self._export_type_enabled("kml")
             export_map_png = self._export_map_png_enabled()
             export_profiles_png = self._export_profiles_png_enabled()
             if (export_shapefile or export_gpkg) and mapping is None:
@@ -1664,6 +1669,12 @@ class ExportImportMixin:
                     acc_gpx_tests.append((suf, f"ReferenceLine{i + 1}", [start, end]))
                 gpx_per_test_names = export_utils.write_gpx_per_test_files(
                     export_dir, export_name, acc_gpx_tests, creator="SAT Planner Accuracy"
+                )
+            kml_file_path = os.path.join(export_dir, f"{export_name}.kml")
+            kml_written = False
+            if export_kml:
+                kml_written = export_utils.write_kml(
+                    kml_file_path, ref_gpx_lines, document_name=export_name
                 )
 
             # --- Export Accuracy Survey Information (same content as Accuracy Survey Info dialog) ---
@@ -1880,6 +1891,8 @@ class ExportImportMixin:
                 success_files.append(f"- {os.path.basename(lnw_file_path)}")
             if gpx_written:
                 success_files.append(f"- {os.path.basename(gpx_file_path)}")
+            if kml_written:
+                success_files.append(f"- {os.path.basename(kml_file_path)}")
             for bn in gpx_per_test_names:
                 success_files.append(f"- {bn}")
             if export_sis:
@@ -1929,6 +1942,8 @@ class ExportImportMixin:
                 _add_status(sis_file_path)
             if gpx_written:
                 _add_status(gpx_file_path)
+            if kml_written:
+                _add_status(kml_file_path)
             _add_status(stats_file_path)
             if export_map_png:
                 _add_status(map_png_path)
@@ -1965,6 +1980,7 @@ class ExportImportMixin:
         export_text_csv = self._export_type_enabled("text_csv")
         export_text_txt = self._export_type_enabled("text_txt")
         export_hypack = self._export_type_enabled("hypack_lnw")
+        export_kml = self._export_type_enabled("kml")
         export_map_png = self._export_map_png_enabled()
         export_profiles_png = self._export_profiles_png_enabled()
         if (export_shapefile or export_gpkg) and mapping is None:
@@ -2169,6 +2185,12 @@ class ExportImportMixin:
                 gpx_per_test_names = export_utils.write_gpx_per_test_files(
                     export_dir, export_name, perf_gpx_tests, creator="SAT Planner Performance"
                 )
+            kml_file_path = os.path.join(export_dir, f"{export_name}.kml")
+            kml_written = False
+            if export_kml:
+                kml_written = export_utils.write_kml(
+                    kml_file_path, perf_gpx_lines, document_name=export_name
+                )
 
             stats_file_path = os.path.join(export_dir, f"{export_name}_info.txt")
             try:
@@ -2284,6 +2306,8 @@ class ExportImportMixin:
                 msg_lines.append(f"- {os.path.basename(shapefile_path)} (and sidecars)")
             if gpx_written:
                 msg_lines.append(f"- {os.path.basename(gpx_file_path)}")
+            if kml_written:
+                msg_lines.append(f"- {os.path.basename(kml_file_path)}")
             for bn in gpx_per_test_names:
                 msg_lines.append(f"- {bn}")
             if lnw_file_path:
@@ -2323,6 +2347,8 @@ class ExportImportMixin:
                 _add_status(sis_file_path)
             if gpx_written:
                 _add_status(gpx_file_path)
+            if kml_written:
+                _add_status(kml_file_path)
             _add_status(stats_file_path)
             if export_map_png:
                 _add_status(map_png_path)

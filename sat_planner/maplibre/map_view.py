@@ -263,6 +263,7 @@ class MapLibreView(QWebEngineView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._startup_applied = False
+        self._startup_dismissed = False
         self._pending_plan = None
         self._pending_bathymetry = None
         self._pending_cursor = None
@@ -300,6 +301,8 @@ class MapLibreView(QWebEngineView):
                 info=json.dumps(_startup_overlay_info()),
             )
         )
+        if self._startup_dismissed:
+            self.dismiss_startup()
         if self._pending_web_layers is not None:
             self.set_web_layers(*self._pending_web_layers)
         if self._pending_bathymetry is not None:
@@ -323,6 +326,11 @@ class MapLibreView(QWebEngineView):
             self.set_measurement(*self._pending_measurement)
         elif getattr(self, "_measurement_cleared", False):
             self.set_measurement(None, None, None, None, False)
+
+    def dismiss_startup(self):
+        """Hide the logo and about text, and keep it hidden."""
+        self._startup_dismissed = True
+        self._run("if (window.dismissStartup) window.dismissStartup();")
 
     def show_plan(self, collection, bounds=None):
         """Draw a GeoJSON feature collection and optionally fit the view to bounds."""

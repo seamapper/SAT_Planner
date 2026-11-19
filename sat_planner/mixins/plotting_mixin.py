@@ -52,6 +52,12 @@ class PlottingMixin:
             return True
         if getattr(self, "line_planning_points", None) and len(self.line_planning_points) >= 2:
             return True
+        if getattr(self, "survey_center_points", None) and len(self.survey_center_points) >= 2:
+            return True
+        if len(getattr(self, "survey_mask_points", None) or []) >= 3:
+            return True
+        if getattr(self, "survey_mask_draw_mode", False) and len(getattr(self, "survey_mask_draft", None) or []) >= 1:
+            return True
         if getattr(self, "backscatter_box_vertices", None) is not None:
             return True
         if getattr(self, "performance_test_lines_data", None) and len(self.performance_test_lines_data) == 4:
@@ -61,6 +67,38 @@ class PlottingMixin:
         if getattr(self, "adcp_circle2_center", None) is not None:
             return True
         return False
+
+    def _dismiss_map_startup(self):
+        """Hide the logo and about text for the rest of this session."""
+        view = getattr(self, "map_view", None)
+        if view is None or not hasattr(view, "dismiss_startup"):
+            return
+        if getattr(view, "_startup_dismissed", False):
+            return
+        view.dismiss_startup()
+
+    def _dismiss_map_startup_for_content(self):
+        """Hide the startup splash once a grid or a survey plan is loaded."""
+        view = getattr(self, "map_view", None)
+        if view is not None and getattr(view, "_startup_dismissed", False):
+            return
+        if getattr(self, "geotiff_data_array", None) is not None:
+            self._dismiss_map_startup()
+            return
+        if getattr(self, "topography_data_array", None) is not None:
+            self._dismiss_map_startup()
+            return
+        if hasattr(self, "_workspace_has_survey_plan") and self._workspace_has_survey_plan():
+            self._dismiss_map_startup()
+            return
+        if len(getattr(self, "survey_center_points", None) or []) >= 2:
+            self._dismiss_map_startup()
+            return
+        if len(getattr(self, "survey_mask_points", None) or []) >= 3:
+            self._dismiss_map_startup()
+            return
+        if getattr(self, "overview_stops", None):
+            self._dismiss_map_startup()
 
     def _show_map_planning_placeholder(self):
         """Show About info + startup guidance on the main map when nothing is loaded yet."""
@@ -398,6 +436,8 @@ class PlottingMixin:
         view = getattr(self, "map_view", None)
         if view is None or not hasattr(view, "show_plan"):
             return
+        if hasattr(self, "_dismiss_map_startup_for_content"):
+            self._dismiss_map_startup_for_content()
         if getattr(self, "_overview_map_active", False):
             if hasattr(self, "_show_overview_on_map"):
                 self._show_overview_on_map(fit=False)
@@ -431,7 +471,7 @@ class PlottingMixin:
             return
         opacity = float(getattr(self, "noaa_charts_opacity", 50) or 0) / 100.0
         view.set_web_layers(
-            bool(getattr(self, "show_imagery_basemap_var", False)),
+            bool(getattr(self, "show_imagery_basemap_var", True)),
             bool(getattr(self, "show_noaa_charts_var", False)),
             opacity,
         )
@@ -471,16 +511,16 @@ class PlottingMixin:
         """Show or hide the planning bathymetry. The colorbar follows this layer."""
         checkbox = getattr(self, "show_bathymetry_checkbox", None)
         self.show_bathymetry_var = bool(checkbox.isChecked()) if checkbox is not None else True
-        if hasattr(self, "_save_show_bathymetry"):
-            self._save_show_bathymetry()
+        if hasattr(self, "_remember_active_layer_visibility"):
+            self._remember_active_layer_visibility()
         self._plot_survey_plan(preserve_view_limits=True)
 
     def _on_show_topography_checkbox_changed(self, _state=None):
         """Show or hide a loaded topography grid."""
         checkbox = getattr(self, "show_topography_checkbox", None)
         self.show_topography_var = bool(checkbox.isChecked()) if checkbox is not None else True
-        if hasattr(self, "_save_show_topography"):
-            self._save_show_topography()
+        if hasattr(self, "_remember_active_layer_visibility"):
+            self._remember_active_layer_visibility()
         if getattr(self, "topography_data_array", None) is None:
             return
         self._plot_survey_plan(preserve_view_limits=True)
@@ -2227,6 +2267,7 @@ class PlottingMixin:
         for name in (
             "pick_center_crosshair",
             "line_planning_temp_line",
+            "survey_temp_line",
             "pitch_line_temp_line",
             "roll_line_temp_line",
             "_temp_line",
@@ -3339,6 +3380,9 @@ class PlottingMixin:
                                     fontsize=8, color='orange', weight='bold',
                                     bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7))
 
+            if hasattr(self, "_plot_survey_mapping_lines"):
+                self._plot_survey_mapping_lines()
+
             # Standard plot elements
             self.ax.set_xlabel("Longitude")
             self.ax.set_ylabel("Latitude")
@@ -3549,6 +3593,22 @@ class PlottingMixin:
             if getattr(self, "map_view", None) is None:
                 self.canvas.draw_idle()
             self._sync_maplibre_plan(fit=not preserve_view_limits, terrain=True)
+            if (
+                hasattr(self, "_draw_current_profile")
+                and hasattr(self, "_survey_tab_is_current")
+                and self._survey_tab_is_current()
+                and not getattr(self, "_drawing_survey_profile", False)
+            ):
+                self._drawing_survey_profile = True
+                try:
+                    self._draw_current_profile()
+                    profile_canvas = getattr(self, "profile_canvas", None)
+                    if profile_canvas is not None:
+                        profile_canvas.draw()
+                except Exception:
+                    traceback.print_exc()
+                finally:
+                    self._drawing_survey_profile = False
 
         except Exception as e:
             print(f"Error in _plot_survey_plan: {str(e)}")
