@@ -538,8 +538,49 @@ class ExportImportMixin:
             self.shared_export_name_stack, overview_default
         )
 
-    def _install_shared_survey_io(self, parent_layout):
-        """Insert shared Import/Export controls above the tab widget."""
+    def _begin_tab_grid(self, frame):
+        """Put a grid page inside a vertical layout so Import/Export can sit on top."""
+        outer = QVBoxLayout(frame)
+        outer.setContentsMargins(9, 9, 9, 9)
+        outer.setSpacing(3)
+        content = QWidget(frame)
+        grid = QGridLayout(content)
+        grid.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(content, 1)
+        frame._sat_tab_outer = outer
+        return grid
+
+    def _tab_outer_layout(self, tab_index):
+        notebook = getattr(self, "param_notebook", None)
+        if notebook is None or tab_index is None or tab_index < 0:
+            return None
+        frame = notebook.widget(tab_index)
+        if frame is None:
+            return None
+        outer = getattr(frame, "_sat_tab_outer", None)
+        if isinstance(outer, QVBoxLayout):
+            return outer
+        layout = frame.layout()
+        if isinstance(layout, QVBoxLayout):
+            frame._sat_tab_outer = layout
+            return layout
+        return None
+
+    def _place_shared_survey_io(self, tab_index):
+        """Move the one Import/Export box to the top of the open tab."""
+        group = getattr(self, "shared_survey_io_groupbox", None)
+        outer = self._tab_outer_layout(tab_index)
+        if group is None or outer is None:
+            return
+        if outer.indexOf(group) == 0:
+            return
+        group.setParent(None)
+        outer.insertWidget(0, group)
+        group.show()
+
+    def _install_shared_survey_io(self, parent_layout=None):
+        """Create Import/Export controls and place them on the current tab."""
+        del parent_layout
         if not hasattr(self, "shared_import_btn"):
             self._create_shared_survey_io_widgets()
         if not hasattr(self, "shared_survey_io_groupbox"):
@@ -552,10 +593,8 @@ class ExportImportMixin:
             io_layout.setSpacing(3)
             io_layout.addLayout(self._shared_io_button_row)
             io_layout.addWidget(self.shared_export_name_stack)
-        parent_layout.insertWidget(0, self.shared_survey_io_groupbox)
-        parent_layout.setStretch(0, 0)
-        if parent_layout.count() > 1:
-            parent_layout.setStretch(1, 1)
+        tab_index = self.param_notebook.currentIndex() if hasattr(self, "param_notebook") else 0
+        self._place_shared_survey_io(tab_index)
         self._update_shared_survey_io_ui()
 
     def _setup_shared_survey_io(self, parent_layout):
@@ -696,6 +735,7 @@ class ExportImportMixin:
         if not hasattr(self, "param_notebook") or not hasattr(self, "shared_import_btn"):
             return
         tab_index = self.param_notebook.currentIndex()
+        self._place_shared_survey_io(tab_index)
         group = getattr(self, "shared_survey_io_groupbox", None)
         if group is not None and group.isHidden():
             group.show()

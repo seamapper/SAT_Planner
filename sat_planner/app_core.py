@@ -1640,9 +1640,12 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         param_layout.addWidget(geotiff_groupbox)
 
-        # --- Test Planning GroupBox (contains tabs) ---
-        test_planning_groupbox = QGroupBox("Test Planning")
-        self._test_planning_layout = QVBoxLayout(test_planning_groupbox)
+        # Tab rows and the open page sit directly in the left column.
+        test_planning = QWidget()
+        test_planning.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self._test_planning_layout = QVBoxLayout(test_planning)
+        self._test_planning_layout.setContentsMargins(0, 0, 0, 0)
+        self._test_planning_layout.setSpacing(3)
 
         self.param_notebook = QTabWidget()
 
@@ -1671,7 +1674,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         self._test_planning_layout.addWidget(self.param_notebook)
         self._install_two_row_tabs()
-        param_layout.addWidget(test_planning_groupbox)
+        param_layout.addWidget(test_planning)
 
         self.param_scroll.setWidget(param_widget)
 
@@ -1680,7 +1683,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
 
         # --- Reference Planning Tab (was input_frame) ---
         self.input_frame = self.reference_frame  # For compatibility with rest of code
-        ref_layout = QGridLayout(self.input_frame)
+        ref_layout = self._begin_tab_grid(self.input_frame)
         ref_layout.setColumnStretch(0, 1)  # Labels
         ref_layout.setColumnStretch(1, 2)  # Entries
         ref_layout.setSpacing(3)  # Reduce spacing between groupboxes
@@ -1852,7 +1855,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_layout.setRowStretch(row, 1)
 
         # --- Calibration Planning Tab ---
-        cal_layout = QGridLayout(self.calibration_frame)
+        cal_layout = self._begin_tab_grid(self.calibration_frame)
         cal_layout.setColumnStretch(0, 1)
         cal_layout.setColumnStretch(1, 2)
         cal_layout.setSpacing(3)  # Reduce spacing between groupboxes
@@ -2073,7 +2076,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         cal_layout.setRowStretch(cal_row, 1)
 
         # --- Line Planning Tab ---
-        line_layout = QGridLayout(self.line_planning_frame)
+        line_layout = self._begin_tab_grid(self.line_planning_frame)
         line_layout.setColumnStretch(0, 1)
         line_layout.setColumnStretch(1, 2)
 
@@ -2515,7 +2518,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         backscatter_layout.addStretch(1)
 
         # --- Performance Tab ---
-        performance_layout = QGridLayout(self.performance_frame)
+        performance_layout = self._begin_tab_grid(self.performance_frame)
         performance_layout.setColumnStretch(0, 1)
         performance_layout.setColumnStretch(1, 2)
         performance_row = 0
@@ -2680,7 +2683,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         performance_layout.setRowStretch(performance_row, 1)
 
         # --- ADCP Tab ---
-        adcp_layout = QGridLayout(self.adcp_frame)
+        adcp_layout = self._begin_tab_grid(self.adcp_frame)
         adcp_layout.setColumnStretch(0, 1)
         adcp_layout.setColumnStretch(1, 2)
         adcp_row = 0
@@ -2871,6 +2874,9 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             self._param_tab_bars.append(tab_bar)
             self._param_tab_bar_indexes.append(mapping)
         self._test_planning_layout.insertWidget(0, header)
+        notebook_index = self._test_planning_layout.indexOf(notebook)
+        if notebook_index >= 0:
+            self._test_planning_layout.setStretch(notebook_index, 1)
         notebook.currentChanged.connect(self._sync_two_row_tabs)
         self._sync_two_row_tabs(notebook.currentIndex())
 
