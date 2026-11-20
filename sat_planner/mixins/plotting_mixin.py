@@ -2948,9 +2948,35 @@ class PlottingMixin:
                 longitudes = [p[1] for p in line]
                 label = "Accuracy Line" if i == 0 else "_nolegend_"
                 self._tag_line_label(
-                    self.ax.plot(longitudes, latitudes, color='blue', linewidth=1.5, linestyle='--', label=label),
+                    self.ax.plot(longitudes, latitudes, color='blue', linewidth=1.5, linestyle='-', label=label),
                     "L{0}".format(i + 1),
                 )
+                run_points = (
+                    self._accuracy_main_run_points(i, line)
+                    if hasattr(self, "_accuracy_main_run_points")
+                    else None
+                )
+                if run_points and len(run_points) >= 3:
+                    lead = run_points[0]
+                    start_point = run_points[1]
+                    self.ax.plot(
+                        [lead[1], start_point[1]],
+                        [lead[0], start_point[0]],
+                        color='blue',
+                        linewidth=1.5,
+                        linestyle='--',
+                        label='_nolegend_',
+                    )
+                    self.ax.annotate(
+                        f'L{i+1}LI',
+                        (lead[1], lead[0]),
+                        xytext=(5, 5),
+                        textcoords='offset points',
+                        fontsize=8,
+                        color='blue',
+                        weight='bold',
+                        bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.7),
+                    )
 
                 # For alternating lines, flip the start/end points to show survey order
                 # Even lines (0, 2, 4...) use normal order, odd lines (1, 3, 5...) use flipped order

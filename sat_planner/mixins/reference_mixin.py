@@ -640,6 +640,8 @@ class ReferenceMixin:
                     self.num_lines_entry.setText(str(params['num_lines']))
                 if params.get('bisect_lead') is not None:
                     self.bisect_lead_entry.setText(str(params['bisect_lead']))
+                if params.get('main_line_lead_in_m') is not None and hasattr(self, 'main_line_lead_in_entry'):
+                    self.main_line_lead_in_entry.setText(str(params['main_line_lead_in_m']))
                 if params.get('survey_speed') is not None:
                     self.survey_speed_entry.setText(str(params['survey_speed']))
                 if params.get('crossline_passes') is not None:
@@ -1145,6 +1147,9 @@ class ReferenceMixin:
                     if params.get('bisect_lead') is not None:
                         self.bisect_lead_entry.setText(str(params['bisect_lead']))
 
+                    if params.get('main_line_lead_in_m') is not None and hasattr(self, 'main_line_lead_in_entry'):
+                        self.main_line_lead_in_entry.setText(str(params['main_line_lead_in_m']))
+
                     if params.get('survey_speed') is not None:
                         self.survey_speed_entry.setText(str(params['survey_speed']))
 
@@ -1427,6 +1432,8 @@ class ReferenceMixin:
             self.num_lines_entry.setText("5")
         if hasattr(self, 'bisect_lead_entry'):
             self.bisect_lead_entry.setText("100")
+        if hasattr(self, 'main_line_lead_in_entry'):
+            self.main_line_lead_in_entry.setText("0")
         if hasattr(self, 'survey_speed_entry'):
             self.survey_speed_entry.setText("8")
         if hasattr(self, 'crossline_passes_entry'):
@@ -1467,6 +1474,35 @@ class ReferenceMixin:
         # Redraw plot (without clearing GeoTIFF)
         self._plot_survey_plan(preserve_view_limits=True)
 
+    def _get_accuracy_main_lead_in_m(self):
+        """Lead-in before each accuracy main line. Zero leaves the line unchanged."""
+        entry = getattr(self, "main_line_lead_in_entry", None)
+        try:
+            value = float(entry.text()) if entry is not None and entry.text().strip() else 0.0
+        except (TypeError, ValueError):
+            value = 0.0
+        return max(0.0, value)
+
+    def _accuracy_main_run_points(self, index, line, geod=None):
+        """Main-line points in run order, with the lead-in point first when it is set."""
+        if index % 2 == 0:
+            start, end = line[0], line[1]
+        else:
+            start, end = line[1], line[0]
+        lead_m = self._get_accuracy_main_lead_in_m()
+        if lead_m <= 0 or len(line) < 2:
+            return [start, end]
+        if geod is None:
+            if pyproj is None:
+                return [start, end]
+            geod = pyproj.Geod(ellps="WGS84")
+        try:
+            azimuth, _back, _distance = geod.inv(start[1], start[0], end[1], end[0])
+            lon, lat, _back = geod.fwd(start[1], start[0], (azimuth + 180.0) % 360.0, lead_m)
+        except Exception:
+            return [start, end]
+        return [(lat, lon), start, end]
+
     def _calculate_total_survey_time(self):
         """Calculate total survey time including travel between lines and crossline."""
         try:
@@ -1489,10 +1525,13 @@ class ReferenceMixin:
 
             # Calculate main lines survey time and distance (all main lines)
             main_lines_survey_time_minutes = 0
-            for line in self.survey_lines_data:
-                lat1, lon1 = line[0]
-                lat2, lon2 = line[1]
-                _, _, line_length = geod.inv(lon1, lat1, lon2, lat2)
+            lead_in_m = self._get_accuracy_main_lead_in_m()
+            for index, line in enumerate(self.survey_lines_data):
+                run_points = self._accuracy_main_run_points(index, line, geod)
+                line_length = 0.0
+                for start, end in zip(run_points, run_points[1:]):
+                    _, _, segment = geod.inv(start[1], start[0], end[1], end[0])
+                    line_length += segment
                 main_lines_total_distance += line_length
                 line_time_hours = line_length / speed_m_per_h if speed_m_per_h > 0 else 0
                 main_lines_survey_time_minutes += line_time_hours * 60
@@ -1503,15 +1542,10 @@ class ReferenceMixin:
             travel_to_crossline_leg = None
             if len(self.survey_lines_data) > 1:
                 for i in range(1, len(self.survey_lines_data)):
-                    if (i - 1) % 2 == 0:
-                        end_lat, end_lon = self.survey_lines_data[i - 1][1]
-                    else:
-                        end_lat, end_lon = self.survey_lines_data[i - 1][0]
-
-                    if i % 2 == 0:
-                        start_lat, start_lon = self.survey_lines_data[i][0]
-                    else:
-                        start_lat, start_lon = self.survey_lines_data[i][1]
+                    previous = self._accuracy_main_run_points(i - 1, self.survey_lines_data[i - 1], geod)
+                    current = self._accuracy_main_run_points(i, self.survey_lines_data[i], geod)
+                    end_lat, end_lon = previous[-1]
+                    start_lat, start_lon = current[0]
 
                     _, _, travel_distance = geod.inv(end_lon, end_lat, start_lon, start_lat)
                     travel_between_lines_total_distance += travel_distance
@@ -1531,10 +1565,10 @@ class ReferenceMixin:
             travel_to_crossline_minutes = 0
             if include_crossline and self.survey_lines_data:
                 last_line_index = len(self.survey_lines_data) - 1
-                if last_line_index % 2 == 0:
-                    last_end_lat, last_end_lon = self.survey_lines_data[last_line_index][1]
-                else:
-                    last_end_lat, last_end_lon = self.survey_lines_data[last_line_index][0]
+                last_run = self._accuracy_main_run_points(
+                    last_line_index, self.survey_lines_data[last_line_index], geod
+                )
+                last_end_lat, last_end_lon = last_run[-1]
 
                 crossline_start_lat, crossline_start_lon = self.cross_line_data[0]
                 crossline_end_lat, crossline_end_lon = self.cross_line_data[1]
@@ -1630,6 +1664,7 @@ class ReferenceMixin:
                 'crossline_total_distance_km': (crossline_single_pass_distance * num_passes) / 1000.0,
                 'crossline_total_distance_nm': (crossline_single_pass_distance * num_passes) / 1852.0,
                 'num_crossline_passes': num_passes,
+                'main_line_lead_in_m': lead_in_m,
                 'travel_between_main_legs': travel_between_main_legs,
                 'travel_to_crossline_leg': travel_to_crossline_leg,
             }
@@ -1726,6 +1761,8 @@ class ReferenceMixin:
         stats_text += "MAIN SURVEY LINES\n"
         stats_text += "-" * 20 + "\n"
         stats_text += f"Number of Main Lines: {stats['num_main_lines']}\n"
+        lead_in_m = float(stats.get('main_line_lead_in_m') or 0.0)
+        stats_text += f"Main Line Lead-In: {lead_in_m:.1f} m\n"
 
         # Add heading information for the first main line
         if self.survey_lines_data and len(self.survey_lines_data) > 0:
@@ -1751,7 +1788,8 @@ class ReferenceMixin:
             single_line_length_m = stats['main_lines_distance_m'] / stats['num_main_lines']
             single_line_length_km = single_line_length_m / 1000
             single_line_length_nm = single_line_length_m / 1852
-            stats_text += f"Length of Main Line: {single_line_length_m:.1f} m ({single_line_length_km:.3f} km, {single_line_length_nm:.3f} nm)\n"
+            length_label = "Length of Main Line (incl. lead-in)" if lead_in_m > 0 else "Length of Main Line"
+            stats_text += f"{length_label}: {single_line_length_m:.1f} m ({single_line_length_km:.3f} km, {single_line_length_nm:.3f} nm)\n"
         stats_text += f"Total Distance: {stats['main_lines_distance_m']:.1f} m ({stats['main_lines_distance_km']:.3f} km, {stats['main_lines_distance_nm']:.3f} nm)\n"
         stats_text += f"Survey Time: {_fmt_minutes_and_hours(stats['main_lines_minutes'])}\n\n"
 
@@ -1927,10 +1965,13 @@ class ReferenceMixin:
         stats_text += "-" * len(dmm_heading) + "\n"
         if self.survey_lines_data:
             for i, line in enumerate(self.survey_lines_data):
-                if i % 2 == 0:
-                    start, end = line[0], line[1]
-                else:
-                    start, end = line[1], line[0]
+                run_points = self._accuracy_main_run_points(i, line)
+                if len(run_points) >= 3:
+                    lead = run_points[0]
+                    lead_lat_ddm = decimal_degrees_to_ddm(lead[0], is_latitude=True)
+                    lead_lon_ddm = decimal_degrees_to_ddm(lead[1], is_latitude=False)
+                    stats_text += f"L{i+1}LI: {lead_lat_ddm}, {lead_lon_ddm}\n"
+                start, end = run_points[-2], run_points[-1]
                 start_label = f'L{i+1}S'
                 end_label = f'L{i+1}E'
                 start_lat_ddm = decimal_degrees_to_ddm(start[0], is_latitude=True)
@@ -1953,10 +1994,11 @@ class ReferenceMixin:
         stats_text += "-" * len(ddd_heading) + "\n"
         if self.survey_lines_data:
             for i, line in enumerate(self.survey_lines_data):
-                if i % 2 == 0:
-                    start, end = line[0], line[1]
-                else:
-                    start, end = line[1], line[0]
+                run_points = self._accuracy_main_run_points(i, line)
+                if len(run_points) >= 3:
+                    lead = run_points[0]
+                    stats_text += f"L{i+1}LI: {lead[0]:.6f}, {lead[1]:.6f}\n"
+                start, end = run_points[-2], run_points[-1]
                 start_label = f'L{i+1}S'
                 end_label = f'L{i+1}E'
                 stats_text += f"{start_label}: {start[0]:.6f}, {start[1]:.6f}\n"

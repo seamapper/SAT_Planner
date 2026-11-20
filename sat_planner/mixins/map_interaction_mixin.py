@@ -1127,9 +1127,14 @@ class MapInteractionMixin:
         all_lats = []
         all_lons = []
 
-        # Add survey line points
-        for line in self.survey_lines_data:
-            for p in line:
+        # Add survey line points, including each main-line lead-in
+        for i, line in enumerate(self.survey_lines_data):
+            points = (
+                self._accuracy_main_run_points(i, line)
+                if hasattr(self, "_accuracy_main_run_points")
+                else line
+            )
+            for p in points:
                 all_lats.append(p[0])
                 all_lons.append(p[1])
 

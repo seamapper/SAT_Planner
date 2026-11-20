@@ -50,6 +50,7 @@ class SurveyMappingMixin:
         self.survey_edit_mode = False
         self.survey_center_points = []
         self.survey_offset_m = 100.0
+        self.survey_lead_in_m = 0.0
         self.survey_offset_count = 1
         self.survey_offset_side = "both"
         self.survey_offsets_applied = False
@@ -99,6 +100,21 @@ class SurveyMappingMixin:
         self.survey_offset_spin.valueChanged.connect(self._on_survey_offset_changed)
         distance_row.addWidget(self.survey_offset_spin, 1)
         group_layout.addLayout(distance_row)
+
+        lead_row = QHBoxLayout()
+        lead_row.addWidget(QLabel("Lead-In"))
+        self.survey_lead_in_spin = QDoubleSpinBox()
+        self.survey_lead_in_spin.setRange(0.0, 100000.0)
+        self.survey_lead_in_spin.setDecimals(1)
+        self.survey_lead_in_spin.setSingleStep(10.0)
+        self.survey_lead_in_spin.setValue(0.0)
+        self.survey_lead_in_spin.setSuffix(" m")
+        self.survey_lead_in_spin.setToolTip(
+            "Extra distance before the start of each survey line, in the direction that line is run. 0 leaves the line unchanged."
+        )
+        self.survey_lead_in_spin.valueChanged.connect(self._on_survey_lead_in_changed)
+        lead_row.addWidget(self.survey_lead_in_spin, 1)
+        group_layout.addLayout(lead_row)
 
         count_row = QHBoxLayout()
         count_row.addWidget(QLabel("Lines"))
@@ -337,6 +353,11 @@ class SurveyMappingMixin:
     def _on_survey_offset_changed(self, value):
         self.survey_offset_m = float(value)
         self._survey_replot_if_offsets()
+
+    def _on_survey_lead_in_changed(self, value):
+        self.survey_lead_in_m = max(0.0, float(value))
+        if len(getattr(self, "survey_center_points", None) or []) >= 2 and hasattr(self, "_plot_survey_plan"):
+            self._plot_survey_plan(preserve_view_limits=True)
 
     def _on_survey_count_changed(self, value):
         self.survey_offset_count = int(value)
@@ -1059,6 +1080,85 @@ class SurveyMappingMixin:
             shifted.append((lat2, lon2))
         return shifted
 
+    def _survey_lead_in_m(self):
+        spin = getattr(self, "survey_lead_in_spin", None)
+        if spin is not None:
+            try:
+                return max(0.0, float(spin.value()))
+            except (TypeError, ValueError):
+                return 0.0
+        try:
+            return max(0.0, float(getattr(self, "survey_lead_in_m", 0) or 0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _survey_lead_in_prefix(self, line):
+        """Points before the run start. Empty when the lead-in is 0 or outside the mask."""
+        lead_m = self._survey_lead_in_m()
+        if lead_m <= 0 or not line or len(line) < 2:
+            return []
+        geod = self._survey_geod()
+        if geod is None:
+            return []
+        start, nxt = line[0], line[1]
+        try:
+            azimuth, _back, distance = geod.inv(start[1], start[0], nxt[1], nxt[0])
+            if distance < 0.05:
+                return []
+            lon, lat, _back = geod.fwd(start[1], start[0], (azimuth + 180.0) % 360.0, lead_m)
+        except Exception:
+            return []
+        lead = (float(lat), float(lon))
+        pieces = self._survey_mask_pieces([lead, start])
+        if not pieces:
+            return []
+        chosen = None
+        for piece in pieces:
+            end = piece[-1]
+            if abs(end[0] - start[0]) <= 1e-6 and abs(end[1] - start[1]) <= 1e-6:
+                chosen = piece
+                break
+        if chosen is None:
+            return []
+        return list(chosen[:-1])
+
+    def _survey_plan_lines(self, lines=None):
+        """Run lines with the lead-in point first, for the map export geometry."""
+        source = lines if lines is not None else self._survey_named_lines()
+        planned = []
+        for name, line in source:
+            planned.append((name, self._survey_lead_in_prefix(line) + list(line)))
+        return planned
+
+    def _survey_plot_lead_in(self, ax, line, color, name):
+        prefix = self._survey_lead_in_prefix(line)
+        if not prefix or not line:
+            return
+        segment = prefix + [line[0]]
+        plotted = ax.plot(
+            [point[1] for point in segment],
+            [point[0] for point in segment],
+            color=color,
+            linewidth=2.0,
+            linestyle="--",
+            marker="None",
+            label="_nolegend_",
+        )
+        self.survey_line_artists.extend(plotted)
+        if not name:
+            return
+        label = f"{name}LI" if len(prefix) == 1 else f"{name}LI1"
+        ax.annotate(
+            label,
+            (prefix[0][1], prefix[0][0]),
+            xytext=(5, 5),
+            textcoords="offset points",
+            fontsize=8,
+            color=color,
+            weight="bold",
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.7),
+        )
+
     def _plot_survey_mapping_lines(self):
         """Draw the survey line, and offset lines after they have been added."""
         self.survey_line_artists = []
@@ -1093,19 +1193,28 @@ class SurveyMappingMixin:
             if source_name and hasattr(self, "_tag_line_label"):
                 self._tag_line_label(plotted, source_name)
             source_name = ""
-        if names.get(("source", 0), ("",))[0]:
-            self._survey_annotate_points(names[("source", 0)][0], source_ordered, "#1f4e79")
+        source_label = names.get(("source", 0), ("",))[0]
+        if source_label:
+            self._survey_annotate_points(source_label, source_ordered, "#1f4e79")
+        if ("source", 0) in names:
+            self._survey_plot_lead_in(ax, source_ordered, "#1f4e79", source_label)
+        legend_sides = set()
         for side, index, line in self._survey_offset_records():
             color = self._survey_color_for_key((side, index))
             name, ordered = names.get((side, index), ("", list(line)))
             for piece in self._survey_mask_pieces(line):
+                if side not in legend_sides:
+                    legend_label = "Port" if side == "port" else "Starboard"
+                    legend_sides.add(side)
+                else:
+                    legend_label = "_nolegend_"
                 plotted = ax.plot(
                     [point[1] for point in piece],
                     [point[0] for point in piece],
                     color=color,
                     linewidth=2.0,
-                    linestyle="--",
-                    label=name or "_nolegend_",
+                    linestyle="-",
+                    label=legend_label,
                 )
                 self.survey_line_artists.extend(plotted)
                 if name and hasattr(self, "_tag_line_label"):
@@ -1113,6 +1222,8 @@ class SurveyMappingMixin:
                 name = ""
             if ordered and names.get((side, index), ("",))[0]:
                 self._survey_annotate_points(names[(side, index)][0], ordered, color)
+            if (side, index) in names:
+                self._survey_plot_lead_in(ax, ordered, color, names[(side, index)][0])
         if getattr(self, "survey_pick_start_mode", False):
             for _edge, _vertex, (lat, lon) in self._survey_start_candidates():
                 ax.plot(
@@ -1371,6 +1482,8 @@ class SurveyMappingMixin:
         points = list(getattr(self, "survey_center_points", None) or [])
         for _side, _index, line in self._survey_offset_records():
             points.extend(line)
+        for _name, line, _key in self._survey_run_lines():
+            points.extend(self._survey_lead_in_prefix(line))
         if len(points) < 2 or not hasattr(self, "_apply_map_zoom_limits_and_reload_geotiff"):
             return
         lats = [point[0] for point in points]
@@ -1399,6 +1512,10 @@ class SurveyMappingMixin:
     def _survey_export_rows(self, lines):
         rows = []
         for line_number, (name, line) in enumerate(lines, start=1):
+            prefix = self._survey_lead_in_prefix(line)
+            for index, (lat, lon) in enumerate(prefix, start=1):
+                label = f"{name}LI" if len(prefix) == 1 else f"{name}LI{index}"
+                rows.append((line_number, name, label, lat, lon))
             for point_number, (lat, lon) in enumerate(line, start=1):
                 rows.append((line_number, name, self._survey_point_label(name, point_number), lat, lon))
         return rows
@@ -1471,9 +1588,10 @@ class SurveyMappingMixin:
                 note(dms_txt_path)
 
             collection_props = self._survey_export_properties(params_geotiff_path, export_dir)
+            plan_lines = self._survey_plan_lines(lines)
             features = []
             shapely_features = []
-            for name, line in lines:
+            for name, line in plan_lines:
                 props = {
                     "name": name,
                     "role": "survey",
@@ -1524,9 +1642,9 @@ class SurveyMappingMixin:
                     note(gpkg_path)
             self._survey_export_mask(export_dir, export_name, export_shapefile, export_gpkg, note)
 
-            named_lines = [(name, list(line)) for name, line in lines]
+            named_lines = [(name, list(line)) for name, line in plan_lines]
             if export_hypack:
-                zone, hem = export_utils.compute_utm_zone_from_points(lines[0][1])
+                zone, hem = export_utils.compute_utm_zone_from_points(plan_lines[0][1])
                 suffix = f"_UTM{zone}{'N' if hem == 'North' else 'S'}"
                 lnw_path = os.path.join(export_dir, f"{export_name}{suffix}.lnw")
                 if export_utils.write_lnw(lnw_path, named_lines):
@@ -1709,27 +1827,42 @@ class SurveyMappingMixin:
             "SURVEY INFO\n" + "=" * 30 + "\n",
             f"Number of Lines: {len(named)}\n",
             f"Survey Speed: {speed_knots:.1f} knots\n",
+            f"Lead-In: {self._survey_lead_in_m():.1f} m\n",
         ]
         line_rows = []
         line_distance = 0.0
         for name, points in named:
+            prefix = self._survey_lead_in_prefix(points)
+            run = list(prefix) + list(points)
             segments = []
             distance = 0.0
-            for start, end in zip(points, points[1:]):
+            for start, end in zip(run, run[1:]):
                 length, heading = self._survey_pair_metrics(start, end)
                 segments.append((length, heading))
                 distance += length
             line_distance += distance
-            line_rows.append((name, points, segments, distance, self._survey_minutes(distance, speed_knots)))
+            line_rows.append((
+                name,
+                points,
+                run,
+                len(prefix),
+                segments,
+                distance,
+                self._survey_minutes(distance, speed_knots),
+            ))
         line_minutes = self._survey_minutes(line_distance, speed_knots)
         parts.append("\nLINE RUNNING\n" + "-" * 30 + "\n")
-        for name, _points, _segments, distance, minutes in line_rows:
+        for name, _points, _run, _prefix_count, _segments, distance, minutes in line_rows:
             parts.append(f"{name}: {self._survey_format_distance(distance)} — {self._survey_format_time(minutes)}\n")
         parts.append(f"Line running time: {self._survey_format_time(line_minutes)}\n")
         transits = []
         transit_distance = 0.0
-        for (name, points, _segments, _distance, _minutes), (next_name, next_points, *_rest) in zip(line_rows, line_rows[1:]):
-            length, heading = self._survey_pair_metrics(points[-1], next_points[0])
+        for (
+            name, _points, run, _prefix_count, _segments, _distance, _minutes
+        ), (
+            next_name, _next_points, next_run, *_rest
+        ) in zip(line_rows, line_rows[1:]):
+            length, heading = self._survey_pair_metrics(run[-1], next_run[0])
             minutes = self._survey_minutes(length, speed_knots)
             transits.append((name, next_name, length, heading, minutes))
             transit_distance += length
@@ -1754,27 +1887,37 @@ class SurveyMappingMixin:
         if depth:
             parts.append("\nDEPTH AND SLOPE (ALL LINES)\n" + "-" * 30 + "\n")
             parts.append(depth if depth.endswith("\n") else depth + "\n")
-        for name, _points, segments, _distance, _minutes in line_rows:
+        for name, _points, _run, prefix_count, segments, _distance, _minutes in line_rows:
             if not segments:
                 continue
             parts.append(f"\n{name} SEGMENTS\n" + "-" * 30 + "\n")
             for index, (distance, heading) in enumerate(segments, start=1):
+                if index <= prefix_count:
+                    title = "Lead-in" if prefix_count == 1 else f"Lead-in {index}"
+                else:
+                    title = f"Segment {index - prefix_count}"
                 parts.append(
-                    f"Segment {index}: {self._survey_format_distance(distance)} — Heading: {heading:.1f}°\n"
+                    f"{title}: {self._survey_format_distance(distance)} — Heading: {heading:.1f}°\n"
                 )
         dmm_heading = "Points in Survey Order (DMM)"
         parts.append(f"\n{dmm_heading}\n" + "-" * len(dmm_heading) + "\n")
-        for name, points, _segments, _distance, _minutes in line_rows:
-            for index, (lat, lon) in enumerate(points, start=1):
-                label = self._survey_point_label(name, index)
+        for name, _points, run, prefix_count, _segments, _distance, _minutes in line_rows:
+            for index, (lat, lon) in enumerate(run, start=1):
+                if index <= prefix_count:
+                    label = f"{name}LI" if prefix_count == 1 else f"{name}LI{index}"
+                else:
+                    label = self._survey_point_label(name, index - prefix_count)
                 parts.append(
                     f"{label}: {decimal_degrees_to_ddm(lat, True)}, {decimal_degrees_to_ddm(lon, False)}\n"
                 )
         ddd_heading = "Points in Survey Order (DDD)"
         parts.append(f"\n{ddd_heading}\n" + "-" * len(ddd_heading) + "\n")
-        for name, points, _segments, _distance, _minutes in line_rows:
-            for index, (lat, lon) in enumerate(points, start=1):
-                label = self._survey_point_label(name, index)
+        for name, _points, run, prefix_count, _segments, _distance, _minutes in line_rows:
+            for index, (lat, lon) in enumerate(run, start=1):
+                if index <= prefix_count:
+                    label = f"{name}LI" if prefix_count == 1 else f"{name}LI{index}"
+                else:
+                    label = self._survey_point_label(name, index - prefix_count)
                 parts.append(f"{label}: {lat:.6f}, {lon:.6f}\n")
         return "".join(parts)
 
@@ -1888,6 +2031,7 @@ class SurveyMappingMixin:
             "offset_count": int(getattr(self, "survey_offset_count", 1) or 1),
             "offset_side": getattr(self, "survey_offset_side", "both") or "both",
             "offsets_applied": bool(getattr(self, "survey_offsets_applied", False)),
+            "lead_in_m": self._survey_lead_in_m(),
             "start_edge": getattr(self, "survey_start_edge", None),
             "start_vertex": getattr(self, "survey_start_vertex", None),
             "centerline_latlon": [
@@ -2152,6 +2296,15 @@ class SurveyMappingMixin:
                     combo.blockSignals(False)
         if "offsets_applied" in settings:
             self.survey_offsets_applied = bool(settings.get("offsets_applied"))
+        try:
+            self.survey_lead_in_m = max(0.0, float(settings.get("lead_in_m") or 0))
+        except (TypeError, ValueError):
+            self.survey_lead_in_m = 0.0
+        spin = getattr(self, "survey_lead_in_spin", None)
+        if spin is not None:
+            spin.blockSignals(True)
+            spin.setValue(self.survey_lead_in_m)
+            spin.blockSignals(False)
         edge = settings.get("start_edge")
         vertex = settings.get("start_vertex")
         if edge in ("port", "starboard"):

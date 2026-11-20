@@ -297,6 +297,7 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         self.survey_edit_mode = False
         self.survey_center_points = []
         self.survey_offset_m = 100.0
+        self.survey_lead_in_m = 0.0
         self.survey_offset_count = 1
         self.survey_offset_side = "both"
         self.survey_offsets_applied = False
@@ -1752,6 +1753,14 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         ref_line_params_layout.addWidget(self.dist_between_lines_entry, ref_line_row, 1)
         ref_line_row += 1
 
+        ref_line_params_layout.addWidget(QLabel("Main Line Lead-In (m):"), ref_line_row, 0)
+        self.main_line_lead_in_entry = QLineEdit("0")
+        self.main_line_lead_in_entry.setToolTip(
+            "Extra distance before the start of each main line, in the direction that line is run. 0 leaves the line unchanged."
+        )
+        ref_line_params_layout.addWidget(self.main_line_lead_in_entry, ref_line_row, 1)
+        ref_line_row += 1
+
         ref_line_params_layout.addWidget(QLabel("Crossline Lead-in/out (m):"), ref_line_row, 0)
         self.bisect_lead_entry = QLineEdit("100")
         ref_line_params_layout.addWidget(self.bisect_lead_entry, ref_line_row, 1)
@@ -2828,9 +2837,25 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(0)
         header.setStyleSheet(
-            "QTabBar::tab { padding: 5px 8px; }"
-            "QTabBar::tab:selected { font-weight: bold; }"
-            "QTabBar[rowActive=\"false\"]::tab:selected { font-weight: normal; }"
+            "QTabBar::tab {"
+            " padding: 6px 10px;"
+            " color: rgb(240, 240, 240);"
+            " background: rgb(53, 53, 53);"
+            " border: none;"
+            " border-bottom: 3px solid transparent;"
+            "}"
+            "QTabBar::tab:selected {"
+            " font-weight: bold;"
+            " color: rgb(255, 165, 0);"
+            " background: rgb(70, 70, 70);"
+            " border-bottom: 3px solid rgb(255, 165, 0);"
+            "}"
+            "QTabBar[rowActive=\"false\"]::tab:selected {"
+            " font-weight: normal;"
+            " color: rgb(240, 240, 240);"
+            " background: rgb(53, 53, 53);"
+            " border-bottom: 3px solid transparent;"
+            "}"
         )
         self._param_tab_bars = []
         self._param_tab_bar_indexes = []

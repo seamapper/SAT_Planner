@@ -52,8 +52,8 @@ class ExportImportMixin:
     _SURVEY_IO_TAB_SPECS = (
         {
             "tab_label": "Calibration Survey",
-            "import_label": "Import Calibration Survey",
-            "export_label": "Export Calibration Survey",
+            "import_label": "Import Calibration Plan",
+            "export_label": "Export Calibration Plan",
             "import_handler": "_import_cal_survey_files",
             "export_handler": "_export_cal_survey_files",
             "export_name_attr": "cal_export_name_entry",
@@ -61,8 +61,8 @@ class ExportImportMixin:
         },
         {
             "tab_label": "Accuracy Survey",
-            "import_label": "Import Accuracy Survey",
-            "export_label": "Export Accuracy Survey",
+            "import_label": "Import Accuracy Plan",
+            "export_label": "Export Accuracy Plan",
             "import_handler": "_import_survey_files",
             "export_handler": "_export_survey_files",
             "export_name_attr": "export_name_entry",
@@ -89,8 +89,8 @@ class ExportImportMixin:
         },
         {
             "tab_label": "Performance Survey",
-            "import_label": "Import Performance Survey",
-            "export_label": "Export Performance Survey",
+            "import_label": "Import Performance Plan",
+            "export_label": "Export Performance Plan",
             "import_handler": "_import_performance_survey",
             "export_handler": "_export_performance_survey_files",
             "export_name_attr": "performance_export_name_entry",
@@ -1508,11 +1508,12 @@ class ExportImportMixin:
             # --- Build common rows (line_num, line_name, point_label, lat, lon) for reference survey ---
             ref_rows = []
             for i, line in enumerate(self.survey_lines_data):
-                if i % 2 == 0:
-                    start, end = line[0], line[1]
-                else:
-                    start, end = line[1], line[0]
+                run_points = self._accuracy_main_run_points(i, line)
                 line_name = f'ReferenceLine{i + 1}'
+                if len(run_points) >= 3:
+                    lead = run_points[0]
+                    ref_rows.append((i + 1, line_name, f'L{i+1}LI', lead[0], lead[1]))
+                start, end = run_points[-2], run_points[-1]
                 ref_rows.append((i + 1, line_name, f'L{i+1}S', start[0], start[1]))
                 ref_rows.append((i + 1, line_name, f'L{i+1}E', end[0], end[1]))
             if self.cross_line_data:
@@ -1545,7 +1546,8 @@ class ExportImportMixin:
                 features = []
                 # Add main survey lines (names match CSV / GPX: ReferenceLine1, …)
                 for i, line_coords in enumerate(self.survey_lines_data):
-                    shapely_line = LineString([(p[1], p[0]) for p in line_coords])
+                    run_points = self._accuracy_main_run_points(i, line_coords)
+                    shapely_line = LineString([(p[1], p[0]) for p in run_points])
                     features.append({
                         'geometry': mapping(shapely_line),
                         'properties': {'line_num': i + 1, 'line_name': f'ReferenceLine{i + 1}'},
@@ -1572,18 +1574,19 @@ class ExportImportMixin:
             geojson_features = []
             # Main survey lines
             for i, line in enumerate(self.survey_lines_data):
+                run_points = self._accuracy_main_run_points(i, line)
                 geojson_features.append({
                     "type": "Feature",
                     "geometry": {
                         "type": "LineString",
-                        "coordinates": [[line[0][1], line[0][0]], [line[1][1], line[1][0]]]
+                        "coordinates": [[point[1], point[0]] for point in run_points]
                     },
                     "properties": {
                         "line_num": i + 1,
                         "survey_speed": ref_export_speed,
                         "points": [
-                            {"point_num": 1, "lat": line[0][0], "lon": line[0][1]},
-                            {"point_num": 2, "lat": line[1][0], "lon": line[1][1]}
+                            {"point_num": point_number, "lat": point[0], "lon": point[1]}
+                            for point_number, point in enumerate(run_points, start=1)
                         ]
                     }
                 })
@@ -1621,7 +1624,10 @@ class ExportImportMixin:
             # --- Export to Hypack LNW format (LIN/PTS/UTM), filename includes UTM zone ---
             lnw_file_path = None
             if export_hypack:
-                lnw_lines = [(f"LINE{i+1:03d}", [line[0], line[1]]) for i, line in enumerate(self.survey_lines_data)]
+                lnw_lines = [
+                    (f"LINE{i+1:03d}", self._accuracy_main_run_points(i, line))
+                    for i, line in enumerate(self.survey_lines_data)
+                ]
                 if self.cross_line_data:
                     lnw_lines.append(("CROSS", [self.cross_line_data[0], self.cross_line_data[1]]))
                 if lnw_lines:
@@ -1638,7 +1644,7 @@ class ExportImportMixin:
             if self.cross_line_data:
                 ref_ascii_lines.append(('Crossline', [self.cross_line_data[0], self.cross_line_data[1]]))
             for i, line in enumerate(self.survey_lines_data):
-                ref_ascii_lines.append((f'Reference{i + 1}', [line[0], line[1]]))
+                ref_ascii_lines.append((f'Reference{i + 1}', self._accuracy_main_run_points(i, line)))
             if export_sis:
                 export_utils.write_asciiplan(sis_file_path, ref_ascii_lines)
             gpx_file_path = os.path.join(export_dir, f"{export_name}.gpx")
@@ -1646,11 +1652,7 @@ class ExportImportMixin:
             if self.cross_line_data:
                 ref_gpx_lines.append(("Crossline", [self.cross_line_data[0], self.cross_line_data[1]]))
             for i, line in enumerate(self.survey_lines_data):
-                if i % 2 == 0:
-                    start, end = line[0], line[1]
-                else:
-                    start, end = line[1], line[0]
-                ref_gpx_lines.append((f"ReferenceLine{i + 1}", [start, end]))
+                ref_gpx_lines.append((f"ReferenceLine{i + 1}", self._accuracy_main_run_points(i, line)))
             gpx_written = False
             gpx_per_test_names = []
             if export_gpx:
@@ -1661,12 +1663,8 @@ class ExportImportMixin:
                         ("Crossline", "Crossline", [self.cross_line_data[0], self.cross_line_data[1]])
                     )
                 for i, line in enumerate(self.survey_lines_data):
-                    if i % 2 == 0:
-                        start, end = line[0], line[1]
-                    else:
-                        start, end = line[1], line[0]
                     suf = f"Line{i + 1:02d}"
-                    acc_gpx_tests.append((suf, f"ReferenceLine{i + 1}", [start, end]))
+                    acc_gpx_tests.append((suf, f"ReferenceLine{i + 1}", self._accuracy_main_run_points(i, line)))
                 gpx_per_test_names = export_utils.write_gpx_per_test_files(
                     export_dir, export_name, acc_gpx_tests, creator="SAT Planner Accuracy"
                 )
@@ -1809,6 +1807,11 @@ class ExportImportMixin:
                     params['bisect_lead'] = float(self.bisect_lead_entry.text())
                 except:
                     params['bisect_lead'] = None
+
+                try:
+                    params['main_line_lead_in_m'] = float(self.main_line_lead_in_entry.text())
+                except:
+                    params['main_line_lead_in_m'] = 0.0
                 
                 try:
                     params['survey_speed'] = float(self.survey_speed_entry.text())

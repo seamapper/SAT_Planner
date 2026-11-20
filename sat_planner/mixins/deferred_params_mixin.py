@@ -110,6 +110,7 @@ class DeferredParamsMixin:
                 "heading_entry",
                 "dist_between_lines_entry",
                 "num_lines_entry",
+                "main_line_lead_in_entry",
                 "bisect_lead_entry",
                 "survey_speed_entry",
                 "crossline_passes_entry",
