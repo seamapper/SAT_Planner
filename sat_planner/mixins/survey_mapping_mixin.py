@@ -234,51 +234,6 @@ class SurveyMappingMixin:
         index = getattr(self, "survey_tab_index", None)
         return notebook is not None and index is not None and notebook.currentIndex() == index
 
-    def _survey_view_intersects_geotiff(self):
-        """True when the current map window is a local view of the loaded grid."""
-        extent = getattr(self, "geotiff_extent", None)
-        ax = getattr(self, "ax", None)
-        if extent is None or ax is None:
-            return False
-        try:
-            west, east = sorted((float(extent[0]), float(extent[1])))
-            south, north = sorted((float(extent[2]), float(extent[3])))
-            xlim = ax.get_xlim()
-            ylim = ax.get_ylim()
-            view_west, view_east = sorted((float(xlim[0]), float(xlim[1])))
-            view_south, view_north = sorted((float(ylim[0]), float(ylim[1])))
-        except (TypeError, ValueError):
-            return False
-        if east <= west or north <= south:
-            return False
-        local = (view_east - view_west) < 300 and (view_north - view_south) < 150
-        hits = view_west <= east and view_east >= west and view_south <= north and view_north >= south
-        return local and hits
-
-    def _ensure_survey_map_geotiff(self):
-        """Draw the loaded planning grid on the map while Survey is open."""
-        if not self._survey_tab_is_current():
-            return
-        self._overview_map_active = False
-        if not getattr(self, "show_bathymetry_var", True):
-            return
-        if getattr(self, "geotiff_data_array", None) is None or getattr(self, "geotiff_extent", None) is None:
-            return
-        if not self._survey_view_intersects_geotiff():
-            if hasattr(self, "_zoom_to_geotiff"):
-                self._zoom_to_geotiff()
-            return
-        has_image = any(
-            getattr(self, name, None) is not None
-            for name in ("geotiff_hillshade_plot", "geotiff_image_plot", "depth_mode_image_plot")
-        )
-        if not has_image and hasattr(self, "_plot_survey_plan"):
-            self._plot_survey_plan(preserve_view_limits=True)
-        elif hasattr(self, "_sync_maplibre_bathymetry"):
-            self._sync_maplibre_bathymetry()
-        if hasattr(self, "_fit_maplibre_to_axes"):
-            self._fit_maplibre_to_axes()
-
     def _toggle_survey_draw(self):
         if getattr(self, "survey_draw_mode", False):
             self._stop_survey_draw(keep_line=True)

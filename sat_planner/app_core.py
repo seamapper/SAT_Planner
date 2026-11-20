@@ -1391,12 +1391,6 @@ class SurveyPlanApp(BasemapMixin, GeoTIFFMixin, PlottingMixin, ReferenceMixin, S
             if dialog.isVisible() and changed:
                 self._place_map_options_dialog()
 
-        try:
-            if hasattr(self, "_ensure_survey_map_geotiff"):
-                self._ensure_survey_map_geotiff()
-        except Exception as e:
-            print(f"Error showing the survey GeoTIFF: {e}")
-
         # Always update profile plot to show the profile for the active tab
         try:
             self._draw_current_profile()
